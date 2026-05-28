@@ -173,8 +173,8 @@ def render_cover(deck_id: str, title: str, subtitle: str, audience: str, version
     # Decorative gold rule below subtitle (NOT under title — under sub instead)
     d.rectangle((84, 620, 84 + 80, 624), fill=GOLD_SIGNATURE)
 
-    # Editorial body — a single curtain-raiser sentence
-    d.text((84, 660), "An executive briefing on the visitor management system\nbuilt for the Office of the Head of the Civil Service, Ghana.",
+    # Editorial body — a single curtain-raiser sentence (deck-agnostic)
+    d.text((84, 660), "An executive briefing prepared for the\nOffice of the Head of the Civil Service, Ghana.",
            font=ft(F_SERIF_REGULAR, 22), fill=INK_WARM, spacing=8)
 
     # Bottom info row
@@ -576,15 +576,19 @@ def render_wow(hero_number: str, label: str, page: int, total: int) -> Image.Ima
         size -= 8
     font = ft(F_SERIF_BOLD, size)
     color = NEUTRAL_LINE if is_placeholder else GOLD_SIGNATURE
-    nw, nh = measure(display, font)
+    # Use font metrics for safe vertical extent (Pillow's getbbox under-reports
+    # descent for some serif glyphs at large sizes, causing the caption to overlap)
+    ascent, descent = font.getmetrics()
+    full_height = ascent + descent
+    nw = measure(display, font)[0]
     nx = (W - nw) // 2
-    ny = (H - nh) // 2 - 40
+    ny = (H - full_height) // 2 - 60
     d.text((nx, ny), display, font=font, fill=color)
 
-    # Caption
+    # Caption — placed comfortably below the number's true descent
     cap_font = ft(F_SERIF_ITALIC, 28)
     cap_lines = wrap_text(label, cap_font, 1400)
-    cap_y = ny + nh + 60
+    cap_y = ny + full_height + int(font.size * 0.20)  # generous buffer
     for i, line in enumerate(cap_lines):
         lw = measure(line, cap_font)[0]
         d.text(((W - lw) // 2, cap_y + i * int(cap_font.size * 1.4)), line, font=cap_font, fill=CREAM_PAGE)
