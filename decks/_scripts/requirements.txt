@@ -2,3 +2,8 @@ python-pptx>=1.0.2
 Pillow>=12.0.0
 markdown-it-py>=3.0.0
 reportlab>=4.2.5
+
+# Optional — only needed if you run capture_screenshots.py
+# Install separately so the deck build doesn't require the heavy Playwright deps:
+#   python -m pip install playwright python-dotenv
+#   python -m playwright install chromium

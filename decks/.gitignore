@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Credentials for screenshot capture — never commit
+_scripts/.env
