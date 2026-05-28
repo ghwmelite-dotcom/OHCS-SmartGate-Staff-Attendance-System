@@ -4,3 +4,10 @@ __pycache__/
 
 # Credentials for screenshot capture — never commit
 _scripts/.env
+_scripts/_state_vms.json
+_scripts/_state_staff.json
+_scripts/_inspect_login.py
+_assets/screenshots/_inspect-*
+
+# PowerPoint lock files
+output/~$*.pptx

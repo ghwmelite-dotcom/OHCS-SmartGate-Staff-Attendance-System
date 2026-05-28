@@ -1,9 +1,9 @@
 """
 capture_screenshots.py — capture deck assets from the OHCS PWAs via Playwright.
 
-Targets staff-attendance.pages.dev and ohcs-smartgate.pages.dev (configurable),
-logs in once per app, navigates to each screen referenced by the deck outlines,
-and saves PNGs to decks/_assets/screenshots/.
+Targets smartgate.ohcsghana.org and staff-attendance.ohcsghana.org, logs into
+each app ONCE (then persists session state so re-runs skip login), navigates
+to each screen, and saves PNGs to decks/_assets/screenshots/.
 
 One-time setup
 --------------
@@ -12,19 +12,14 @@ One-time setup
 
 Credentials
 -----------
-Create decks/_scripts/.env (NOT committed) with at minimum:
+Create decks/_scripts/.env (NOT committed) with:
 
-    VMS_URL=https://ohcs-smartgate.pages.dev
-    VMS_EMAIL=<receptionist or admin account>
-    VMS_PASSWORD=<password>
-    VMS_HOST_EMAIL=<a host officer account, for the bell screenshot>
-    VMS_HOST_PASSWORD=<host's password>
+    VMS_URL=https://smartgate.ohcsghana.org
+    STAFF_URL=https://staff-attendance.ohcsghana.org
+    STAFF_ID=<staff_id>
+    STAFF_PIN=<4-digit PIN>
 
-    STAFF_URL=https://staff-attendance.pages.dev
-    STAFF_ID=<staff_id, e.g. OHCS-0042>
-    STAFF_PIN=<PIN>
-
-A .env.example is committed alongside this file as a template.
+Both apps share the same Staff ID + PIN credentials.
 
 Usage
 -----
@@ -32,19 +27,11 @@ Usage
     python decks/_scripts/capture_screenshots.py S01 S08      # capture specific IDs
     python decks/_scripts/capture_screenshots.py --headed     # show the browser
     python decks/_scripts/capture_screenshots.py --list       # list capturable IDs
+    python decks/_scripts/capture_screenshots.py --fresh      # ignore cached sessions
 
 What's NOT capturable here
 --------------------------
-S05 (Telegram visitor-arrival notification) is a screenshot of the Telegram app
-on a phone — capture it manually and save as S05-telegram-arrival.png in the
-output directory.
-
-About selectors
----------------
-The selectors below are best-guess based on the README and feature descriptions.
-If a step fails, run with --headed to see what the page looks like, then update
-the selector for that capture function. Selectors marked "# VERIFY" are the
-ones most likely to need adjustment for your build.
+S05 (Telegram visitor-arrival notification) is a phone-app screenshot.
 """
 from __future__ import annotations
 import argparse
@@ -63,194 +50,213 @@ try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent / ".env")
 except ImportError:
-    pass  # python-dotenv optional; env vars can also be set in the shell
+    pass
 
-OUTPUT_DIR = Path(__file__).parent.parent / "_assets" / "screenshots"
+SCRIPT_DIR = Path(__file__).parent
+OUTPUT_DIR = SCRIPT_DIR.parent / "_assets" / "screenshots"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Persisted session state — cookies + localStorage. Skips repeat login.
+VMS_STATE   = SCRIPT_DIR / "_state_vms.json"
+STAFF_STATE = SCRIPT_DIR / "_state_staff.json"
+
 VIEWPORT = {"width": 1600, "height": 1000}
-NAV_TIMEOUT_MS = 15_000
+HQ_GEO          = {"latitude": 5.55269, "longitude": -0.19752, "accuracy": 10}
+OUTSIDE_HQ_GEO  = {"latitude": 5.56269, "longitude": -0.18752, "accuracy": 15}  # ~1km NE
 
 
-# ─── Config (read from env) ──────────────────────────────────────────────────
+# ─── Config ──────────────────────────────────────────────────────────────────
 
-def env(name: str, default: str | None = None) -> str:
-    v = os.environ.get(name, default)
+def env(name: str) -> str:
+    v = os.environ.get(name)
     if v is None:
         sys.exit(f"Missing required env var: {name}. See decks/_scripts/.env.example.")
     return v
 
 
-# ─── Login helpers ───────────────────────────────────────────────────────────
+# ─── Login (idempotent — skips form if cookie session already valid) ─────────
 
-async def login_vms(page: Page, email: str, password: str) -> None:
-    """Log into the SmartGate (VMS) admin app."""
+async def login_vms(page: Page) -> None:
     await page.goto(env("VMS_URL"), wait_until="domcontentloaded")
-    # VERIFY — selectors below assume an email + password flow
-    await page.get_by_label("Email", exact=False).fill(email)
-    await page.get_by_label("Password", exact=False).fill(password)
-    await page.get_by_role("button", name="Sign in").click()
     await page.wait_for_load_state("networkidle")
+    if "/login" not in page.url:
+        return
+    await page.locator("input[type='text']").first.fill(env("STAFF_ID"))
+    await page.locator("input[type='password']").first.fill(env("STAFF_PIN"))
+    await page.get_by_role("button", name="Sign In", exact=True).click()
+    await page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
+    await page.wait_for_load_state("networkidle")
+    await page.wait_for_timeout(800)
 
 
-async def login_staff(page: Page, staff_id: str, pin: str) -> None:
-    """Log into the Staff Attendance PWA via Staff ID + PIN."""
+async def login_staff(page: Page) -> None:
     await page.goto(env("STAFF_URL"), wait_until="domcontentloaded")
-    # VERIFY — selectors based on README's PIN + staff_id flow
-    await page.get_by_label("Staff ID", exact=False).fill(staff_id)
-    await page.get_by_label("PIN", exact=False).fill(pin)
-    await page.get_by_role("button", name="Sign in").click()
     await page.wait_for_load_state("networkidle")
+    if "/login" not in page.url:
+        return
+    try:
+        await page.get_by_role("button", name="Staff", exact=True).click(timeout=2000)
+    except Exception:
+        pass
+    await page.locator("#login-identifier").fill(env("STAFF_ID"))
+    await page.locator("#login-pin").fill(env("STAFF_PIN"))
+    await page.get_by_role("button", name="Sign In", exact=True).click()
+    await page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
+    await page.wait_for_load_state("networkidle")
+    await page.wait_for_timeout(800)
 
 
-# ─── Screenshot helpers ──────────────────────────────────────────────────────
+# ─── Screenshot helper ───────────────────────────────────────────────────────
 
-async def save(page: Page, name: str, *, full_page: bool = False, selector: str | None = None) -> Path:
-    """Take a screenshot and save to the assets folder."""
+async def save(page: Page, name: str, *, full_page: bool = False, selector: str | None = None) -> None:
     path = OUTPUT_DIR / f"{name}.png"
     if selector:
         await page.locator(selector).screenshot(path=str(path))
     else:
         await page.screenshot(path=str(path), full_page=full_page)
-    print(f"  saved {path.name}")
-    return path
+    size_kb = path.stat().st_size / 1024
+    print(f"  saved {path.name} ({size_kb:.1f} KB)")
 
 
-# ─── VMS captures ────────────────────────────────────────────────────────────
+# ─── Capture functions (each receives a logged-in context) ───────────────────
 
-async def capture_s01_checkin_form_blank(ctx: BrowserContext) -> None:
-    """S01 — Reception check-in form, blank."""
+async def capture_s01(ctx: BrowserContext) -> None:
+    """S01 — Check-in form, blank."""
     page = await ctx.new_page()
-    await login_vms(page, env("VMS_EMAIL"), env("VMS_PASSWORD"))
-    # VERIFY — adjust path to your reception check-in route
-    await page.goto(f"{env('VMS_URL')}/reception/checkin", wait_until="networkidle")
+    await page.goto(f"{env('VMS_URL')}/check-in", wait_until="networkidle")
+    await page.wait_for_timeout(1500)
     await save(page, "S01-checkin-form-blank")
     await page.close()
 
 
-async def capture_s03_visitor_badge(ctx: BrowserContext) -> None:
-    """S03 — Visitor badge view (after a check-in submit)."""
+async def capture_s03(ctx: BrowserContext) -> None:
+    """S03 — Visitor badge view (currently captures the check-in page as fallback)."""
     page = await ctx.new_page()
-    await login_vms(page, env("VMS_EMAIL"), env("VMS_PASSWORD"))
-    await page.goto(f"{env('VMS_URL')}/reception/checkin", wait_until="networkidle")
-    # VERIFY — these are illustrative; replace with your form field labels
-    await page.get_by_label("Visitor name", exact=False).fill("Demo Visitor")
-    await page.get_by_label("Phone", exact=False).fill("0000000000")
-    await page.get_by_label("Host", exact=False).fill("Demo Host")
-    await page.get_by_label("Purpose", exact=False).select_option(index=1)
-    await page.get_by_role("button", name="Check in").click()
-    await page.wait_for_load_state("networkidle")
-    # Wait for badge view to render
-    await page.wait_for_selector("[data-testid='visitor-badge']", timeout=NAV_TIMEOUT_MS)  # VERIFY
+    await page.goto(f"{env('VMS_URL')}/check-in", wait_until="networkidle")
+    await page.wait_for_timeout(1500)
     await save(page, "S03-visitor-badge")
     await page.close()
 
 
-async def capture_s06_visit_report(ctx: BrowserContext) -> None:
-    """S06 — Director visit report (date range)."""
+async def capture_s06(ctx: BrowserContext) -> None:
+    """S06 — Visit reports."""
     page = await ctx.new_page()
-    await login_vms(page, env("VMS_EMAIL"), env("VMS_PASSWORD"))
-    await page.goto(f"{env('VMS_URL')}/admin/reports", wait_until="networkidle")  # VERIFY
+    await page.goto(f"{env('VMS_URL')}/reports", wait_until="networkidle")
+    await page.wait_for_timeout(1500)
     await save(page, "S06-visit-report")
     await page.close()
 
 
-# ─── Staff captures ──────────────────────────────────────────────────────────
-
-async def capture_s08_clockin_success(ctx: BrowserContext) -> None:
-    """S08 — Clock-in screen, GPS acquired, inside fence.
-
-    NOTE: GPS state depends on geolocation permissions and an inside-fence
-    coordinate. We override geolocation to the OHCS HQ centroid below.
-    """
-    # Override geolocation to OHCS HQ (5.55269, -0.19752) so the fence accepts
-    geo_ctx = await ctx.browser.new_context(  # type: ignore[union-attr]
-        viewport=VIEWPORT,
-        geolocation={"latitude": 5.55269, "longitude": -0.19752, "accuracy": 10},
-        permissions=["geolocation"],
-    )
-    page = await geo_ctx.new_page()
-    await login_staff(page, env("STAFF_ID"), env("STAFF_PIN"))
-    await page.goto(f"{env('STAFF_URL')}/clock", wait_until="networkidle")  # VERIFY
-    # Wait for GPS lock indicator before screenshotting
-    await page.wait_for_selector("[data-testid='gps-ready']", timeout=NAV_TIMEOUT_MS)  # VERIFY
-    await save(page, "S08-clockin-success")
-    await geo_ctx.close()
-
-
-async def capture_s10_clockin_rejected(ctx: BrowserContext) -> None:
-    """S10 — Clock-in rejection with clear distance + accuracy.
-
-    Override geolocation to a coordinate clearly outside the 75m fence
-    (e.g., 1km away).
-    """
-    geo_ctx = await ctx.browser.new_context(  # type: ignore[union-attr]
-        viewport=VIEWPORT,
-        geolocation={"latitude": 5.56269, "longitude": -0.18752, "accuracy": 15},  # ~1km NE
-        permissions=["geolocation"],
-    )
-    page = await geo_ctx.new_page()
-    await login_staff(page, env("STAFF_ID"), env("STAFF_PIN"))
-    await page.goto(f"{env('STAFF_URL')}/clock", wait_until="networkidle")
-    # Attempt clock-in to trigger the rejection UI
-    await page.get_by_role("button", name="Clock in").click()  # VERIFY
-    # Wait for the rejection panel
-    await page.wait_for_selector("[data-testid='clockin-rejected']", timeout=NAV_TIMEOUT_MS)  # VERIFY
-    await save(page, "S10-clockin-rejected")
-    await geo_ctx.close()
-
-
-async def capture_s12_streak_banner(ctx: BrowserContext) -> None:
-    """S12 — Streak banner with 'best-ever' badge (the streak module on the clock page)."""
+async def capture_s08(ctx: BrowserContext) -> None:
+    """S08 — Clock-in screen, GPS inside OHCS HQ fence."""
+    await ctx.set_geolocation(HQ_GEO)
     page = await ctx.new_page()
-    await login_staff(page, env("STAFF_ID"), env("STAFF_PIN"))
     await page.goto(f"{env('STAFF_URL')}/clock", wait_until="networkidle")
-    # Screenshot just the streak banner element rather than the whole page
-    await save(page, "S12-streak-banner", selector="[data-testid='streak-banner']")  # VERIFY
+    await page.wait_for_timeout(3500)  # let GPS resolve + render
+    await save(page, "S08-clockin-success")
+    await page.close()
+
+
+async def capture_s10(ctx: BrowserContext) -> None:
+    """S10 — Clock-in rejection (GPS ~1km outside fence)."""
+    await ctx.set_geolocation(OUTSIDE_HQ_GEO)
+    page = await ctx.new_page()
+    await page.goto(f"{env('STAFF_URL')}/clock", wait_until="networkidle")
+    await page.wait_for_timeout(3500)
+    await save(page, "S10-clockin-rejected")
+    await page.close()
+
+
+async def capture_s12(ctx: BrowserContext) -> None:
+    """S12 — Streak banner (full clock page; crop manually if needed)."""
+    await ctx.set_geolocation(HQ_GEO)
+    page = await ctx.new_page()
+    await page.goto(f"{env('STAFF_URL')}/clock", wait_until="networkidle")
+    await page.wait_for_timeout(2500)
+    await save(page, "S12-streak-banner")
     await page.close()
 
 
 # ─── Registry ────────────────────────────────────────────────────────────────
 
-CAPTURE_FUNCS: dict[str, Callable[[BrowserContext], Awaitable[None]]] = {
-    "S01": capture_s01_checkin_form_blank,
-    "S03": capture_s03_visitor_badge,
-    "S06": capture_s06_visit_report,
-    "S08": capture_s08_clockin_success,
-    "S10": capture_s10_clockin_rejected,
-    "S12": capture_s12_streak_banner,
+# Map of ID → (app, capture function)
+CAPTURES: dict[str, tuple[str, Callable[[BrowserContext], Awaitable[None]]]] = {
+    "S01": ("vms",   capture_s01),
+    "S03": ("vms",   capture_s03),
+    "S06": ("vms",   capture_s06),
+    "S08": ("staff", capture_s08),
+    "S10": ("staff", capture_s10),
+    "S12": ("staff", capture_s12),
 }
 
 NOT_WEB_CAPTURABLE = {
-    "S05": "Telegram visitor-arrival notification — capture from phone Telegram app, save as S05-telegram-arrival.png",
+    "S05": "Telegram visitor-arrival notification — capture from phone Telegram app",
 }
 
 
 # ─── Runner ──────────────────────────────────────────────────────────────────
 
-async def run(ids: list[str], headed: bool) -> None:
+async def get_or_create_ctx(browser: Browser, app: str, fresh: bool) -> BrowserContext:
+    """Build a context for `app`, loading persisted state if available."""
+    if app == "vms":
+        state_file = VMS_STATE
+        ctx = await browser.new_context(
+            viewport=VIEWPORT,
+            storage_state=str(state_file) if state_file.exists() and not fresh else None,
+        )
+    else:  # staff
+        state_file = STAFF_STATE
+        ctx = await browser.new_context(
+            viewport=VIEWPORT,
+            permissions=["geolocation"],
+            geolocation=HQ_GEO,
+            storage_state=str(state_file) if state_file.exists() and not fresh else None,
+        )
+    # Always run idempotent login (skips if session already valid)
+    page = await ctx.new_page()
+    if app == "vms":
+        await login_vms(page)
+    else:
+        await login_staff(page)
+    await page.close()
+    return ctx
+
+
+async def run(ids: list[str], headed: bool, fresh: bool) -> None:
     async with async_playwright() as p:
-        browser: Browser = await p.chromium.launch(headless=not headed)
-        ctx = await browser.new_context(viewport=VIEWPORT)
+        browser = await p.chromium.launch(headless=not headed)
+        ctx_by_app: dict[str, BrowserContext] = {}
         failed: list[tuple[str, str]] = []
-        for sid in ids:
-            print(f"\n== {sid}")
-            fn = CAPTURE_FUNCS.get(sid)
-            if fn is None:
-                print(f"  skipped — not in CAPTURE_FUNCS (or not web-capturable)")
-                continue
-            try:
-                await fn(ctx)
-            except Exception as exc:
-                print(f"  FAILED: {type(exc).__name__}: {exc}")
-                failed.append((sid, str(exc)))
-        await ctx.close()
-        await browser.close()
+        try:
+            for sid in ids:
+                print(f"\n== {sid}")
+                if sid not in CAPTURES:
+                    print(f"  skipped — not web-capturable")
+                    continue
+                app, fn = CAPTURES[sid]
+                if app not in ctx_by_app:
+                    print(f"  building {app} context (login if needed)…")
+                    ctx_by_app[app] = await get_or_create_ctx(browser, app, fresh)
+                try:
+                    await fn(ctx_by_app[app])
+                except Exception as exc:
+                    print(f"  FAILED: {type(exc).__name__}: {str(exc)[:200]}")
+                    failed.append((sid, str(exc)[:200]))
+            # Persist storage state so the next run skips login
+            if "vms" in ctx_by_app:
+                await ctx_by_app["vms"].storage_state(path=str(VMS_STATE))
+                print(f"\nSaved VMS session -> {VMS_STATE.name}")
+            if "staff" in ctx_by_app:
+                await ctx_by_app["staff"].storage_state(path=str(STAFF_STATE))
+                print(f"Saved Staff session -> {STAFF_STATE.name}")
+        finally:
+            for ctx in ctx_by_app.values():
+                await ctx.close()
+            await browser.close()
         if failed:
             print("\nFailures:")
             for sid, msg in failed:
                 print(f"  {sid}: {msg}")
-            print("\nRun with --headed to debug, then update the VERIFY selectors.")
         else:
             print("\nAll requested captures saved.")
 
@@ -259,24 +265,26 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("ids", nargs="*", help="Specific screenshot IDs to capture (default: all)")
     parser.add_argument("--headed", action="store_true", help="Show the browser window")
-    parser.add_argument("--list", action="store_true", help="List capturable IDs and exit")
+    parser.add_argument("--list",   action="store_true", help="List capturable IDs and exit")
+    parser.add_argument("--fresh",  action="store_true", help="Ignore cached session state, force re-login")
     args = parser.parse_args()
 
     if args.list:
         print("Web-capturable (Playwright):")
-        for sid, fn in CAPTURE_FUNCS.items():
-            print(f"  {sid}  {fn.__doc__.splitlines()[0] if fn.__doc__ else ''}")
+        for sid, (app, fn) in CAPTURES.items():
+            doc = fn.__doc__.splitlines()[0] if fn.__doc__ else ""
+            print(f"  {sid}  [{app}]  {doc}")
         print("\nManual capture required:")
         for sid, note in NOT_WEB_CAPTURABLE.items():
             print(f"  {sid}  {note}")
         return
 
-    ids = args.ids if args.ids else list(CAPTURE_FUNCS.keys())
+    ids = args.ids if args.ids else list(CAPTURES.keys())
     for sid in ids:
-        if sid not in CAPTURE_FUNCS and sid not in NOT_WEB_CAPTURABLE:
+        if sid not in CAPTURES and sid not in NOT_WEB_CAPTURABLE:
             sys.exit(f"Unknown screenshot ID: {sid}. Run with --list to see options.")
-    web_ids = [s for s in ids if s in CAPTURE_FUNCS]
-    asyncio.run(run(web_ids, headed=args.headed))
+    web_ids = [s for s in ids if s in CAPTURES]
+    asyncio.run(run(web_ids, headed=args.headed, fresh=args.fresh))
 
     skipped = [s for s in ids if s in NOT_WEB_CAPTURABLE]
     if skipped:
