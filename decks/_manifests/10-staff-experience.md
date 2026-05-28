@@ -1,7 +1,7 @@
 # Deck 10 · The Staff Experience — Asset Manifest
 
 **Status:** ☐ draft  ☐ assets gathered  ☐ produced  ☐ delivered
-**Slide count target:** 14
+**Slide count target:** 16
 **Audience:** Executive Leadership
 **Tier:** thematic
 **Wow moment:** <N03> clock-ins recorded

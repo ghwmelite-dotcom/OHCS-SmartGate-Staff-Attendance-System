@@ -1,7 +1,7 @@
 # Deck 09 · Reception Workflow — Asset Manifest
 
 **Status:** ☐ draft  ☐ assets gathered  ☐ produced  ☐ delivered
-**Slide count target:** 14
+**Slide count target:** 15
 **Audience:** Executive Leadership
 **Tier:** thematic
 **Wow moment:** <N01> visitors checked in since launch
