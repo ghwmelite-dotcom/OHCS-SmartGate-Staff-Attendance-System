@@ -26,9 +26,13 @@ def parse_outline(path: Path) -> list[dict]:
             list_accumulator = None
         elif current is None:
             continue
-        elif line.strip().startswith("-") and current_key is not None:
+        elif line.strip().startswith("-"):
+            # Naked bullets (no preceding `bullets:` key) default to the `bullets` key,
+            # used by toc slides and any list-only block.
             if list_accumulator is None:
                 list_accumulator = []
+                if current_key is None:
+                    current_key = "bullets"
             list_accumulator.append(line.strip()[1:].strip())
         elif ":" in line and not line.startswith(" "):
             if list_accumulator is not None and current_key is not None:
