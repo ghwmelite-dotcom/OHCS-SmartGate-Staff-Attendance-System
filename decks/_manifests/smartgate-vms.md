@@ -1,37 +1,55 @@
-# Deck 02 · SmartGate — Visitor Management — Asset Manifest
+# SmartGate (VMS) — Asset Manifest
 
-**Status:** ☐ draft  ☐ assets gathered  ☐ produced  ☐ delivered
-**Slide count target:** 15
+**Status:** ☑ draft  ☑ assets gathered  ☑ produced  ☐ delivered
+**Slide count:** 28
 **Audience:** Executive Leadership
 **Tier:** smartgate
-**Wow moment:** <N02> · visitors checked in on an average day
+**Wow moment:** `<N02>` · visitors checked in on an average day
 
 ---
 
-## 1 · Screenshots needed
+## 1 · Screenshots — all in
 
-Pull from `_INDEX.md`. Tick here AND in `_INDEX.md` once captured.
+All 17 user-supplied screenshots live at `decks/_assets/screenshots/OHCS VMS/` and are referenced by the outline.
 
-| Local ref | Index ID | Description | Status |
-|-----------|----------|-------------|--------|
-| (fill from outline `image:` lines) | | | ☐ |
+| Outline slide | File | Status |
+|---|---|---|
+| 5 — Where it begins | `OHCS-VMS-—-Visitor-Management-System.png` | ✓ |
+| 6 — Step 1 | `OHCS-VMS-—-Check_In_p1.png` | ✓ |
+| 7 — Step 2 | `OHCS-VMS-—-Check_In_p2.png` | ✓ |
+| 8 — Step 3 | `OHCS-VMS-—-Check_In_p3.png` | ✓ |
+| 9 — Step 4 (badge) | `OHCS-VMS-—-Check_In_p4_done.png` | ✓ |
+| 12 — Dashboard | `OHCS-VMS-—-Dashboard.png` | ✓ |
+| 13 — Visitors directory | `OHCS-VMS-—-Visitors page.png` | ✓ |
+| 14 — Visit log | `OHCS-VMS-—-Visit Log.png` | ✓ |
+| 16 — Reports | `OHCS-VMS-—-Reports.png` | ✓ |
+| 17 — Analytics | `OHCS-VMS-—-Analytics.png` | ✓ |
+| 19 — Admin · Users | `OHCS-VMS-—-Admin_Users.png` | ✓ |
+| 20 — Admin · Org Entities | `OHCS-VMS-—-Admin_Org_Entities.png` | ✓ |
+| 21 — Admin · NSS | `OHCS-VMS-—-Admin_NSS.png` | ✓ |
+| 22 — Admin · Bulk Import | `OHCS-VMS-—-Admin_Bulk_Import.png` | ✓ |
+| 23 — Admin · Attendance | `OHCS-VMS-—-Admin_Attendance.png` | ✓ |
+| 25 — Chat assistant | `OHCS-VMS-—-Chat_VMS_Assistant.png` | ✓ |
 
-## 2 · Numbers needed
+The `OHCS-VMS-—-Check-In.png` (overview shot) was not used — the 4-step flow tells the story more vividly than a single overview.
 
-| Local ref | Index ID | Description | Status |
-|-----------|----------|-------------|--------|
-| (fill from outline `<N##>` tokens) | | | ☐ |
+## 2 · Numbers needed (still placeholder)
 
-## 3 · Quotes / sign-off needed
+| Token in outline | Description | Status |
+|---|---|---|
+| `<N02>` | Visitors checked in on an average day | ☐ |
 
-| Local ref | Index ID | Description | Status |
-|-----------|----------|-------------|--------|
-| (fill from outline `<Q##>` tokens) | | | ☐ |
+## 3 · Quotes (still placeholder)
 
-## 4 · Anything else this deck needs
+| Token in outline | Description | Status |
+|---|---|---|
+| `<Q03>` | Reception lead — workflow improvement quote | ☐ |
 
-- (deck-specific notes)
+## 4 · Notes
+
+- Captions for Check-In Steps 2 and 3 are best-guesses based on the 4-step flow being a typical visitor-form sequence. Edit `decks/_outlines/smartgate-vms.md` if the actual content of those screens calls for different language.
+- The grey `[REPLACE: ...]` placeholders are gone from this deck. Two remaining textual placeholders (`<N02>` and `<Q03>`) render literally as `<N02>` and `<Q03>` on their slides until swapped for real values.
 
 ---
 
-**Delivery gate:** This deck cannot move from v0 → v1 until every ☐ above is ✓.
+**Delivery gate:** v1 = ✓ once `<N02>` and `<Q03>` are filled in the outline.
