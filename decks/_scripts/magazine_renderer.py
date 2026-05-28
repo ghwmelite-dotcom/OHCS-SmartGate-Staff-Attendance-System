@@ -254,20 +254,30 @@ def _split_into_short_lines(headline: str, max_chars_per_line: int = 28) -> list
     return [headline]
 
 
-def render_statement(headline: str, sub: str, page: int, total: int, eyebrow: str = "") -> Image.Image:
+def render_statement(headline: str, sub: str, page: int, total: int,
+                     eyebrow: str = "",
+                     part_num: int | None = None,
+                     preview_titles: list[str] | None = None) -> Image.Image:
+    """Statement slide. When part_num + preview_titles are supplied, renders as an
+    explicit section opener with 'PART N' label and 'In this part' preview. Otherwise
+    renders as a standalone editorial statement (used for the quote slide etc)."""
     img = Image.new("RGB", (W, H), CREAM_SOFT)
     d = ImageDraw.Draw(img)
     _draw_gold_rule(d)
-    if eyebrow:
+
+    is_section_opener = part_num is not None
+
+    # Top-left: PART label or generic eyebrow
+    if is_section_opener:
+        roman = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"][min(part_num - 1, 9)]
+        d.text((80, 80), f"P A R T   {roman}", font=ft(F_SANS_BOLD, 16), fill=GOLD_DEEP)
+    elif eyebrow:
         _draw_eyebrow(d, 80, 80, eyebrow)
 
-    # Editorial line-break treatment: if the headline is multiple short sentences,
-    # break at each period rather than letting wrap chop awkwardly.
+    # Editorial line-break treatment for headline
     headline_pieces = _split_into_short_lines(headline)
-
-    # Headline — large serif. Auto-shrink if any piece won't fit at the default size.
     max_w = 1700
-    size = 96
+    size = 96 if not is_section_opener else 84
     while size > 56:
         hl_font = ft(F_SERIF_BOLD, size)
         if all(measure(p, hl_font)[0] <= max_w for p in headline_pieces):
@@ -275,7 +285,6 @@ def render_statement(headline: str, sub: str, page: int, total: int, eyebrow: st
         size -= 4
     hl_font = ft(F_SERIF_BOLD, size)
 
-    # Render each piece, applying wrap if a single piece still doesn't fit
     all_lines: list[str] = []
     for piece in headline_pieces:
         if measure(piece, hl_font)[0] <= max_w:
@@ -284,20 +293,33 @@ def render_statement(headline: str, sub: str, page: int, total: int, eyebrow: st
             all_lines.extend(wrap_text(piece, hl_font, max_w))
 
     line_h = int(hl_font.size * 1.05)
-    y0 = 200
+    y0 = 170 if is_section_opener else 200
     for i, line in enumerate(all_lines):
         d.text((80, y0 + i * line_h), line, font=hl_font, fill=INK_DEEP)
 
-    # Gold rule below headline (anchors the sub — not directly under the title)
     sub_y = y0 + len(all_lines) * line_h + 60
     d.rectangle((80, sub_y, 80 + 100, sub_y + 4), fill=GOLD_SIGNATURE)
 
     # Subtitle
-    sub_font = ft(F_SERIF_ITALIC, 32)
+    sub_font = ft(F_SERIF_ITALIC, 28 if is_section_opener else 32)
     sub_lines = wrap_text(sub, sub_font, 1500)
     sub_line_h = int(sub_font.size * 1.35)
     for i, line in enumerate(sub_lines):
         d.text((80, sub_y + 28 + i * sub_line_h), line, font=sub_font, fill=INK_WARM)
+
+    # IN THIS PART — preview list (only for section openers)
+    if is_section_opener and preview_titles:
+        list_y = sub_y + 32 + len(sub_lines) * sub_line_h + 80
+        d.text((80, list_y), "I N   T H I S   P A R T", font=ft(F_SANS_BOLD, 13), fill=GOLD_DEEP)
+        # Gold rule beneath the eyebrow
+        d.rectangle((80, list_y + 28, 80 + 60, list_y + 31), fill=GOLD_SIGNATURE)
+        item_y = list_y + 56
+        for i, t in enumerate(preview_titles[:5]):
+            num = f"{i+1:02d}"
+            d.text((80, item_y + i * 56), num, font=ft(F_SERIF_BOLD, 32), fill=GOLD_SIGNATURE)
+            # Truncate long titles
+            label = t if len(t) <= 60 else t[:57] + "…"
+            d.text((160, item_y + 8 + i * 56), label, font=ft(F_SERIF_REGULAR, 22), fill=INK_WARM)
 
     _draw_pagination(d, page, total)
     return img
@@ -362,90 +384,91 @@ def _evidence_ultrawide(title, src, bullets, caption, page, total, eyebrow):
 
 
 def _evidence_landscape(title, src, bullets, caption, page, total, eyebrow):
-    """1.15 <= AR < 1.8 — magazine-spread layout (headline+pull-quote+stat left, image right)."""
+    """1.15 <= AR < 1.8 — image dominates right, slim text column left."""
     img = Image.new("RGB", (W, H), CREAM_SOFT)
     d = ImageDraw.Draw(img)
     _draw_gold_rule(d)
     if eyebrow:
         _draw_eyebrow(d, 90, 80, eyebrow)
 
-    # Headline (left column)
-    hl_font = ft(F_SERIF_BOLD, 64)
-    hl_lines = wrap_text(title, hl_font, 800)
+    # Text column — slim (~520 wide) so the image gets the room
+    text_col_w = 540
+    hl_font = ft(F_SERIF_BOLD, 52)
+    hl_lines = wrap_text(title, hl_font, text_col_w)
     for i, line in enumerate(hl_lines):
         d.text((84, 130 + i * int(hl_font.size * 1.05)), line, font=hl_font, fill=INK_DEEP)
 
-    sub_y = 130 + len(hl_lines) * int(hl_font.size * 1.05) + 30
-    # If there are bullets, first becomes the italic sub; remaining become pull-quote / stat
+    sub_y = 130 + len(hl_lines) * int(hl_font.size * 1.05) + 24
     if bullets:
-        sub_font = ft(F_SERIF_ITALIC, 26)
-        sub_lines = wrap_text(bullets[0], sub_font, 800)
-        for i, line in enumerate(sub_lines):
-            d.text((90, sub_y + i * int(sub_font.size * 1.35)), line, font=sub_font, fill=INK_WARM)
-
-    # Pull-quote (gold rule + italic)
-    pq_y = 580
-    d.rectangle((90, pq_y, 90 + 60, pq_y + 4), fill=GOLD_SIGNATURE)
-    quote_text = bullets[1] if len(bullets) > 1 else ""
-    pq_font = ft(F_SERIF_ITALIC, 24)
-    if quote_text:
-        for i, line in enumerate(wrap_text(f"“{quote_text}”", pq_font, 740)):
-            d.text((90, pq_y + 26 + i * int(pq_font.size * 1.35)), line, font=pq_font, fill=INK_WARM)
-
-    # Stat callout
-    stat_text = bullets[2] if len(bullets) > 2 else ""
-    if stat_text:
-        d.text((90, pq_y + 200), "STEP COMPLETE", font=ft(F_SANS_BOLD, 12), fill=GOLD_DEEP)
-        stat_lines = wrap_text(stat_text, ft(F_SANS_REGULAR, 15), 760)
-        for j, line in enumerate(stat_lines):
-            d.text((90, pq_y + 224 + j * 22), line, font=ft(F_SANS_REGULAR, 15), fill=INK_WARM)
-
-    # Image on the right
-    framed = frame_screenshot(src)
-    fit = fit_image_to_box(framed, 920, 680)
-    img_x = W - fit.width - 90
-    img_y = (H - fit.height) // 2 + 20
-    img = composite_shadow(img, fit, img_x, img_y, blur=22, opacity=80, offset=(0, 14))
-    d = ImageDraw.Draw(img)
-
-    # Caption + page
-    d.text((84, H - 60), "   ".join(caption.upper()), font=ft(F_SANS_BOLD, 11), fill=GOLD_DEEP)
-    _draw_pagination(d, page, total)
-    return img
-
-
-def _evidence_square(title, src, bullets, caption, page, total, eyebrow):
-    """0.85 <= AR < 1.15 — square image right, slimmer sidebar left."""
-    img = Image.new("RGB", (W, H), CREAM_SOFT)
-    d = ImageDraw.Draw(img)
-    _draw_gold_rule(d)
-    if eyebrow:
-        _draw_eyebrow(d, 90, 80, eyebrow)
-
-    # Headline
-    hl_font = ft(F_SERIF_BOLD, 56)
-    hl_lines = wrap_text(title, hl_font, 720)
-    for i, line in enumerate(hl_lines):
-        d.text((84, 130 + i * int(hl_font.size * 1.05)), line, font=hl_font, fill=INK_DEEP)
-
-    sub_y = 130 + len(hl_lines) * int(hl_font.size * 1.05) + 30
-    if bullets:
-        sub_font = ft(F_SERIF_ITALIC, 24)
-        for i, line in enumerate(wrap_text(bullets[0], sub_font, 720)):
+        sub_font = ft(F_SERIF_ITALIC, 22)
+        for i, line in enumerate(wrap_text(bullets[0], sub_font, text_col_w)):
             d.text((90, sub_y + i * int(sub_font.size * 1.35)), line, font=sub_font, fill=INK_WARM)
 
     # Pull-quote
     pq_y = 600
     d.rectangle((90, pq_y, 90 + 60, pq_y + 4), fill=GOLD_SIGNATURE)
     if len(bullets) > 1:
-        for i, line in enumerate(wrap_text(f"“{bullets[1]}”", ft(F_SERIF_ITALIC, 22), 720)):
+        for i, line in enumerate(wrap_text(f"“{bullets[1]}”", ft(F_SERIF_ITALIC, 22), text_col_w)):
             d.text((90, pq_y + 24 + i * 30), line, font=ft(F_SERIF_ITALIC, 22), fill=INK_WARM)
 
-    # Square image — large, right side
+    # Stat note
+    if len(bullets) > 2:
+        d.text((90, pq_y + 200), "A L S O", font=ft(F_SANS_BOLD, 12), fill=GOLD_DEEP)
+        for j, line in enumerate(wrap_text(bullets[2], ft(F_SANS_REGULAR, 14), text_col_w)):
+            d.text((90, pq_y + 224 + j * 22), line, font=ft(F_SANS_REGULAR, 14), fill=INK_WARM)
+
+    # Image — large, right side (was 920x680 → now 1200x820 for visual dominance)
     framed = frame_screenshot(src)
-    fit = fit_image_to_box(framed, 840, 760)
-    img_x = W - fit.width - 90
-    img_y = (H - fit.height) // 2 + 20
+    fit = fit_image_to_box(framed, 1200, 820)
+    img_x = W - fit.width - 80
+    img_y = (H - fit.height) // 2 + 10
+    img = composite_shadow(img, fit, img_x, img_y, blur=22, opacity=80, offset=(0, 14))
+    d = ImageDraw.Draw(img)
+
+    d.text((84, H - 60), "   ".join(caption.upper()), font=ft(F_SANS_BOLD, 11), fill=GOLD_DEEP)
+    _draw_pagination(d, page, total)
+    return img
+
+
+def _evidence_square(title, src, bullets, caption, page, total, eyebrow):
+    """0.85 <= AR < 1.15 — square image takes right side big; text column slim on left."""
+    img = Image.new("RGB", (W, H), CREAM_SOFT)
+    d = ImageDraw.Draw(img)
+    _draw_gold_rule(d)
+    if eyebrow:
+        _draw_eyebrow(d, 90, 80, eyebrow)
+
+    # Text column — slim (~520 wide)
+    text_col_w = 540
+    hl_font = ft(F_SERIF_BOLD, 50)
+    hl_lines = wrap_text(title, hl_font, text_col_w)
+    for i, line in enumerate(hl_lines):
+        d.text((84, 130 + i * int(hl_font.size * 1.05)), line, font=hl_font, fill=INK_DEEP)
+
+    sub_y = 130 + len(hl_lines) * int(hl_font.size * 1.05) + 24
+    if bullets:
+        sub_font = ft(F_SERIF_ITALIC, 22)
+        for i, line in enumerate(wrap_text(bullets[0], sub_font, text_col_w)):
+            d.text((90, sub_y + i * int(sub_font.size * 1.35)), line, font=sub_font, fill=INK_WARM)
+
+    # Pull-quote
+    pq_y = 620
+    d.rectangle((90, pq_y, 90 + 60, pq_y + 4), fill=GOLD_SIGNATURE)
+    if len(bullets) > 1:
+        for i, line in enumerate(wrap_text(f"“{bullets[1]}”", ft(F_SERIF_ITALIC, 20), text_col_w)):
+            d.text((90, pq_y + 22 + i * 28), line, font=ft(F_SERIF_ITALIC, 20), fill=INK_WARM)
+
+    # Stat note
+    if len(bullets) > 2:
+        d.text((90, pq_y + 170), "A L S O", font=ft(F_SANS_BOLD, 12), fill=GOLD_DEEP)
+        for j, line in enumerate(wrap_text(bullets[2], ft(F_SANS_REGULAR, 14), text_col_w)):
+            d.text((90, pq_y + 194 + j * 22), line, font=ft(F_SANS_REGULAR, 14), fill=INK_WARM)
+
+    # Square image — significantly larger (was 840x760 → now 1100x920)
+    framed = frame_screenshot(src)
+    fit = fit_image_to_box(framed, 1100, 920)
+    img_x = W - fit.width - 80
+    img_y = (H - fit.height) // 2 + 10
     img = composite_shadow(img, fit, img_x, img_y, blur=22, opacity=80, offset=(0, 14))
     d = ImageDraw.Draw(img)
 

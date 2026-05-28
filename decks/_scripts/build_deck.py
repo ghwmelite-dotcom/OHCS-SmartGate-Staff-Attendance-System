@@ -10,7 +10,6 @@ edit the outline .md and rebuild.
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from pptx import Presentation
-from pptx.util import Emu
 
 import theme
 import magazine_renderer as mag
@@ -35,7 +34,10 @@ def build(outline_path: Path, output_path: Path, deck_id: str, deck_title: str):
         for i, slide_data in enumerate(slides, start=1):
             t = slide_data["type"]
             eyebrow = section_eyebrows.get(i, "")
-            img = _render_one(t, slide_data, deck_id, deck_title, i, total, eyebrow, outline_path.parent)
+            img = _render_one(
+                t, slide_data, deck_id, deck_title, i, total, eyebrow,
+                outline_path.parent, slides,
+            )
             png_path = td_path / f"slide_{i:02d}.png"
             img.save(png_path, optimize=True)
             slide = prs.slides.add_slide(blank_layout)
@@ -54,7 +56,6 @@ def _derive_eyebrows(slides: list[dict], deck_title: str) -> dict[int, str]:
     current = deck_title.split("—")[0].strip()
     for i, sd in enumerate(slides, start=1):
         if sd["type"] == "statement":
-            # Use a short version of the statement headline as the eyebrow for following slides
             current = sd.get("headline", current).split(".")[0].strip()
             if len(current) > 38:
                 current = current[:35].rstrip() + "…"
@@ -62,7 +63,38 @@ def _derive_eyebrows(slides: list[dict], deck_title: str) -> dict[int, str]:
     return out
 
 
-def _render_one(t: str, sd: dict, deck_id: str, deck_title: str, page: int, total: int, eyebrow: str, outline_dir: Path):
+def _is_section_opener(slides: list[dict], idx: int) -> bool:
+    """A statement slide is a section opener iff the next slide is evidence or wow."""
+    if idx + 1 >= len(slides):
+        return False
+    return slides[idx + 1]["type"] in ("evidence", "wow")
+
+
+def _statement_part_num(slides: list[dict], idx: int) -> int:
+    """1-based count of section-opener statements up to and including this one."""
+    n = 0
+    for j in range(idx + 1):
+        if slides[j]["type"] == "statement" and _is_section_opener(slides, j):
+            n += 1
+    return n
+
+
+def _section_preview(slides: list[dict], idx: int) -> list[str]:
+    """Titles of slides following idx until the next statement / divider / end."""
+    titles: list[str] = []
+    j = idx + 1
+    while j < len(slides) and slides[j]["type"] not in ("statement", "divider"):
+        sd = slides[j]
+        if sd["type"] == "evidence":
+            titles.append(sd.get("title", ""))
+        elif sd["type"] == "wow":
+            titles.append(f"The number — {sd.get('label', '')}")
+        j += 1
+    return titles[:5]
+
+
+def _render_one(t: str, sd: dict, deck_id: str, deck_title: str, page: int, total: int,
+                eyebrow: str, outline_dir: Path, all_slides: list[dict]):
     if t == "cover":
         return mag.render_cover(
             deck_id=deck_id,
@@ -77,6 +109,16 @@ def _render_one(t: str, sd: dict, deck_id: str, deck_title: str, page: int, tota
     if t == "toc":
         return mag.render_toc(sd.get("bullets", []), page, total)
     if t == "statement":
+        idx = page - 1
+        if _is_section_opener(all_slides, idx):
+            return mag.render_statement(
+                headline=sd["headline"],
+                sub=sd.get("sub", ""),
+                page=page, total=total,
+                part_num=_statement_part_num(all_slides, idx),
+                preview_titles=_section_preview(all_slides, idx),
+            )
+        # Standalone statement (e.g., quote slide) — no part chrome
         return mag.render_statement(
             headline=sd["headline"],
             sub=sd.get("sub", ""),
