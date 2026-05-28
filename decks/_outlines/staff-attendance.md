@@ -76,6 +76,4 @@ line: Attendance is dignity. SmartGate treats it that way.
 links:
     - staff-attendance.pages.dev
 related:
-    - Deck 07 · GPS Geofence Precision
-    - Deck 10 · The Staff Experience
-    - Deck 11 · Director Visibility
+    - Companion deck — SmartGate: Visitor Management in Production

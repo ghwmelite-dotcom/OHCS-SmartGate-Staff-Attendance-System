@@ -82,6 +82,4 @@ links:
     - ohcs-smartgate.pages.dev
     - ohcs-smartgate-api.ghwmelite.workers.dev
 related:
-    - Deck 06 · The Notifications Engine
-    - Deck 09 · Reception Workflow
-    - Deck 11 · Director Visibility
+    - Companion deck — Staff Attendance: Clocking In, Honestly
