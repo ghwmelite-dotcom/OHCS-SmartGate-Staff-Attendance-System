@@ -36,10 +36,6 @@ headline: Six colours do all the work.
 sub: Ink-deep, cream-page, gold-signature, gold-deep, green-SmartGate, neutral-line. No rainbow. No drift.
 
 ## [statement]
-headline: Gold is the signature.
-sub: One colour — #C9A14A — connects every deck, every screen, every page.
-
-## [statement]
 headline: Kente is the anchor.
 sub: A 12px accent strip on every body slide. Different pattern per tier. Always present.
 

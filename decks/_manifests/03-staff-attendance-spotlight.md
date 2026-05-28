@@ -1,7 +1,7 @@
 # Deck 03 · Staff Attendance — Clocking In, Honestly — Asset Manifest
 
 **Status:** ☐ draft  ☐ assets gathered  ☐ produced  ☐ delivered
-**Slide count target:** 20
+**Slide count target:** 15
 **Audience:** Executive Leadership
 **Tier:** staff
 **Wow moment:** <N04>% first-try GPS success

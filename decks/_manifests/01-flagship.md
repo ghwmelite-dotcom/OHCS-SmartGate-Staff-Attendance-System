@@ -1,7 +1,7 @@
 # Deck 01 · The Story So Far — Asset Manifest
 
 **Status:** ☐ draft  ☐ assets gathered  ☐ produced  ☐ delivered
-**Slide count target:** 18
+**Slide count target:** 14
 **Audience:** Executive Leadership
 **Tier:** flagship
 **Wow moment:** <N03> · clock-ins to date

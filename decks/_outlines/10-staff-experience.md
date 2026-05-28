@@ -70,15 +70,6 @@ caption: Absence modal, in-progress.
 headline: The eBadge — staff identity, in the pocket.
 sub: Digital, scannable, refreshable. The paper card retires.
 
-## [evidence]
-title: Two apps, distinct icons
-image: ../_assets/screenshots/S24-home-screen-icons.png
-bullets:
-    - Green clock badge for Staff Attendance.
-    - Gold user-plus badge for SmartGate.
-    - Find the right app at a glance.
-caption: Home screen, both apps installed.
-
 ## [statement]
 headline: One staff voice.
 sub: "<Q05>"

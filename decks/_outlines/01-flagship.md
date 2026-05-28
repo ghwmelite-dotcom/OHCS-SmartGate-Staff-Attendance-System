@@ -70,22 +70,6 @@ bullets:
     - Telegram summary to leadership at 9:00 AM sharp.
 caption: staff-attendance.pages.dev, captured May 2026.
 
-## [statement]
-headline: When the Wi-Fi drops, the work doesn't.
-sub: Both apps queue mutations locally and replay them on reconnect.
-
-## [statement]
-headline: Security shipped in writing.
-sub: Twelve fixes. Constant-time PIN. Self-hosted Web Push. RBAC. Audited migrations.
-
-## [statement]
-headline: Designed in a civic register.
-sub: Kente Executive — Playfair Display, gold deco, Ghanaian Kente texture. Cultural, not decorative.
-
-## [statement]
-headline: Care continues.
-sub: Automated tests, bundle optimisation, manifest shortcuts, iOS startup images — stewardship, not unfinished work.
-
 ## [divider]
 line: SmartGate isn't a product. It's how OHCS shows up for itself.
 

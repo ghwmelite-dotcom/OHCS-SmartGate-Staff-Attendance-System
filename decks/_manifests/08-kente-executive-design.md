@@ -1,7 +1,7 @@
 # Deck 08 · Kente Executive — A Civic Design Language — Asset Manifest
 
 **Status:** ☐ draft  ☐ assets gathered  ☐ produced  ☐ delivered
-**Slide count target:** 16
+**Slide count target:** 15
 **Audience:** Executive Leadership
 **Tier:** thematic
 **Wow moment:** Type pair specimen — Playfair + DM Sans

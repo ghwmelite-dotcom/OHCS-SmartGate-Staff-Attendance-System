@@ -61,27 +61,9 @@ label: Third-party push services in the delivery path. Zero.
 headline: Role-based access, centralised.
 sub: One requireRole guard. Six roles. Every authenticated endpoint passes through it.
 
-## [evidence]
-title: Six roles, one guard
-image: ../_assets/screenshots/S20-rbac-middleware.png
-bullets:
-    - superadmin, admin, director, receptionist, it, staff.
-    - Routes declare required role inline.
-    - Drift is detectable — every endpoint exercises the guard.
-caption: packages/api/src/lib/require-role.ts
-
 ## [statement]
 headline: Login attempts are rate-limited at the edge.
 sub: KV-backed counters per email, per IP, per staff ID. Brute force has nowhere to land.
-
-## [evidence]
-title: Rate-limit hit, surfaced to the user
-image: ../_assets/screenshots/S33-ratelimit-hit.png
-bullets:
-    - /auth/login, /auth/verify, /auth/pin-login all gated.
-    - Cloudflare KV stores hit counts with TTL.
-    - Counters reset cleanly — no false lockouts.
-caption: Captured from staff-attendance.pages.dev DevTools
 
 ## [statement]
 headline: Migrations are tracked, not whispered.

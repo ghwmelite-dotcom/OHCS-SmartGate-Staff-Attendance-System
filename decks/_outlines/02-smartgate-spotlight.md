@@ -27,15 +27,6 @@ bullets:
     - Host selection is type-ahead by directorate.
 caption: ohcs-smartgate.pages.dev — reception view.
 
-## [evidence]
-title: The form, mid-fill
-image: ../_assets/screenshots/S02-checkin-form-midfill.png
-bullets:
-    - Purpose is a curated list, not free text.
-    - Host's directorate auto-fills.
-    - Submit is one tap.
-caption: Same form, second screen.
-
 ## [statement]
 headline: The badge prints. The alert fires.
 sub: Host knows before the visitor reaches the waiting area.
@@ -50,22 +41,13 @@ bullets:
 caption: Badge view, post-submit.
 
 ## [evidence]
-title: Three-channel arrival alert
-image: ../_assets/screenshots/S04-in-app-bell.png
-bullets:
-    - In-app bell — for hosts at their desk.
-    - Telegram — for hosts on the move.
-    - Web Push — for hosts on mobile, app closed.
-caption: Three independent channels, one event.
-
-## [evidence]
 title: Telegram alert, the host's phone
 image: ../_assets/screenshots/S05-telegram-arrival.png
 bullets:
     - Visitor name, purpose, badge code.
     - Tap to acknowledge.
     - Directorate director cc'd automatically.
-caption: Telegram bot message, captured live.
+caption: One of three independent channels — in-app, Telegram, Web Push.
 
 ## [wow]
 hero: <N02>
@@ -80,35 +62,13 @@ title: Visit reports
 image: ../_assets/screenshots/S06-visit-report.png
 bullets:
     - Filter by directorate, by date, by category.
-    - Sortable, sortable, sortable.
     - Director-level scoping built in.
+    - One-click PDF export — server-side rendering.
 caption: /admin/reports — director view.
-
-## [evidence]
-title: PDF export
-image: ../_assets/screenshots/S07-pdf-export.png
-bullets:
-    - One-click export.
-    - Server-side rendering — no client memory hog.
-    - Same layout as on-screen — what you see is what you share.
-caption: Exported PDF, first page.
 
 ## [statement]
 headline: When connectivity drops, reception doesn't stop.
 sub: Queued check-ins replay on reconnect. Idempotent. Lossless.
-
-## [evidence]
-title: Offline check-in queue
-image: ../_assets/screenshots/S22-queue-replay.png
-bullets:
-    - IndexedDB stores the pending check-in.
-    - Background Sync replays when online.
-    - iOS gets a flush-queue message fallback.
-caption: Chrome DevTools — Application → IndexedDB.
-
-## [statement]
-headline: One workflow. Six roles. No leakage.
-sub: Receptionists check in. Directors see their directorate. Admins see everything. RBAC, enforced.
 
 ## [statement]
 headline: One feature deserves a quote.

@@ -18,15 +18,6 @@ line: A paper sheet records that you were here. Staff Attendance records that yo
 headline: First login is a moment, not a friction point.
 sub: Enforced PIN change with clear language, gentle motion, no jargon.
 
-## [evidence]
-title: Enforced PIN change
-image: ../_assets/screenshots/S11-first-login-pin.png
-bullets:
-    - Triggered automatically on default PIN.
-    - Validates length + character variety.
-    - Confirmation reduces silent re-entry.
-caption: First login, fresh account.
-
 ## [statement]
 headline: The 75-metre circle isn't a circle.
 sub: It's a circle plus your phone's reported GPS accuracy.
@@ -39,15 +30,6 @@ bullets:
     - Camera-verified selfie on capture.
     - Streak counter ticks.
 caption: Typical clock-in, captured live.
-
-## [evidence]
-title: Clock-in, weak GPS at boundary
-image: ../_assets/screenshots/S09-clockin-weak-gps.png
-bullets:
-    - Accuracy ~40m at the edge — accepted.
-    - Buffer scales with reported accuracy.
-    - Real users in real buildings get through.
-caption: Edge case, validated.
 
 ## [evidence]
 title: Clock-in rejected, clearly
@@ -79,35 +61,13 @@ caption: Clock page hero — streak module.
 headline: Absence is a flow, not a phone call.
 sub: Sick, family emergency, transport, other. Optional note. Optional return date.
 
-## [evidence]
-title: Absence notice
-image: ../_assets/screenshots/S13-absence-modal.png
-bullets:
-    - One self-service flow.
-    - Directors notified immediately.
-    - Morning clock-reminder suppressed automatically.
-caption: Absence modal, in-progress.
-
 ## [statement]
 headline: Leadership reads the summary, not the spreadsheet.
 sub: Telegram message at 9:00 AM weekdays. Per-directorate breakdown. One screen.
 
-## [evidence]
-title: 9:00 AM daily summary
-image: ../_assets/screenshots/S14-daily-summary.png
-bullets:
-    - Sent every weekday at 9:00 sharp.
-    - Per-directorate counts of clocked/not-clocked.
-    - Outlier names surfaced — no scrolling.
-caption: Daily summary, captured today.
-
 ## [statement]
 headline: One staff voice on what's changed.
 sub: "<Q05>"
-
-## [statement]
-headline: The eBadge — staff identity, in the pocket.
-sub: Digital, scannable, refreshable. The paper card retires.
 
 ## [divider]
 line: Attendance is dignity. SmartGate treats it that way.

@@ -1,7 +1,7 @@
 # Deck 02 · SmartGate — Visitor Management — Asset Manifest
 
 **Status:** ☐ draft  ☐ assets gathered  ☐ produced  ☐ delivered
-**Slide count target:** 20
+**Slide count target:** 15
 **Audience:** Executive Leadership
 **Tier:** smartgate
 **Wow moment:** <N02> · visitors checked in on an average day
