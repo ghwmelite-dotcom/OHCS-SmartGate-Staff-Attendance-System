@@ -1,7 +1,7 @@
 # Deck 04 · Security & Trust — Asset Manifest
 
 **Status:** ☐ draft  ☐ assets gathered  ☐ produced  ☐ delivered
-**Slide count target:** 16
+**Slide count target:** 17
 **Audience:** Executive Leadership
 **Tier:** thematic
 **Wow moment:** 0 third-party push services
