@@ -1,7 +1,7 @@
 # Deck 13 · Roadmap — Care Continues — Asset Manifest
 
 **Status:** ☐ draft  ☐ assets gathered  ☐ produced  ☐ delivered
-**Slide count target:** 12
+**Slide count target:** 14
 **Audience:** Executive Leadership
 **Tier:** thematic
 **Wow moment:** 6 roadmap items, each specced
