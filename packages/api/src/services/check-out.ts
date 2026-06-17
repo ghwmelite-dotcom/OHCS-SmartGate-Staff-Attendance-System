@@ -24,9 +24,12 @@ export async function checkOutById(env: Env, visitId: string): Promise<CheckOutO
     (new Date(checkOutAt).getTime() - new Date(visit.check_in_at).getTime()) / 60000
   );
 
-  await env.DB.prepare(
-    `UPDATE visits SET status = 'checked_out', check_out_at = ?, duration_minutes = ? WHERE id = ?`
+  const res = await env.DB.prepare(
+    `UPDATE visits SET status = 'checked_out', check_out_at = ?, duration_minutes = ? WHERE id = ? AND status = 'checked_in'`
   ).bind(checkOutAt, durationMinutes, visitId).run();
+
+  // Lost a concurrent checkout race — another request already checked this visit out.
+  if (res.meta?.changes === 0) return { ok: false, code: 'ALREADY_CHECKED_OUT' };
 
   const updated = await env.DB.prepare(SELECT_VISIT_WITH_JOINS).bind(visitId).first();
   return { ok: true, visit: (updated ?? {}) as Record<string, unknown> };

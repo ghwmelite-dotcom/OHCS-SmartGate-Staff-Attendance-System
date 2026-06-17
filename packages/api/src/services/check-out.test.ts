@@ -3,7 +3,7 @@ import { checkOutByBadgeCode } from './check-out';
 import type { Env } from '../types';
 
 // Minimal D1 mock: queue up `first()` return values in call order, record run() calls.
-function mockEnv(firstResults: unknown[]) {
+function mockEnv(firstResults: unknown[], runChanges = 1) {
   const runCalls: { sql: string; binds: unknown[] }[] = [];
   let firstIdx = 0;
   const prepare = vi.fn((sql: string) => {
@@ -11,7 +11,7 @@ function mockEnv(firstResults: unknown[]) {
       _binds: [] as unknown[],
       bind(...b: unknown[]) { this._binds = b; return this; },
       first: vi.fn(async () => firstResults[firstIdx++] ?? null),
-      run: vi.fn(async () => { runCalls.push({ sql, binds: stmt._binds }); return { success: true }; }),
+      run: vi.fn(async () => { runCalls.push({ sql, binds: stmt._binds }); return { success: true, meta: { changes: runChanges } }; }),
     };
     return stmt;
   });
@@ -45,5 +45,15 @@ describe('checkOutByBadgeCode', () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.visit).toMatchObject({ status: 'checked_out' });
     expect(runCalls.length).toBe(1); // exactly one UPDATE ran
+    expect(runCalls[0].binds).toEqual([expect.stringMatching(/^\d{4}-/), expect.any(Number), 'v1']);
+  });
+
+  it('returns ALREADY_CHECKED_OUT when a concurrent checkout won the race (0 rows updated)', async () => {
+    const { env } = mockEnv([
+      { id: 'v1' },
+      { id: 'v1', check_in_at: '2026-06-17T08:00:00Z', status: 'checked_in' },
+    ], 0); // UPDATE affects 0 rows
+    const result = await checkOutByBadgeCode(env, 'SG-RACE');
+    expect(result).toEqual({ ok: false, code: 'ALREADY_CHECKED_OUT' });
   });
 });
