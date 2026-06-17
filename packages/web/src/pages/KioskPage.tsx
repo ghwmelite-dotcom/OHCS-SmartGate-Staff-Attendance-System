@@ -8,7 +8,7 @@ import { kioskApi, type KioskVisit } from '@/lib/kioskApi';
 import { API_BASE, ID_TYPES } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
-import { CheckCircle2, LogIn, LogOut, Loader2 } from 'lucide-react';
+import { CheckCircle2, LogIn, LogOut, Loader2, X } from 'lucide-react';
 
 const visitorSchema = z.object({
   first_name: z.string().min(1, 'First name is required').max(100),
@@ -32,6 +32,8 @@ export function KioskPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [checkoutBadge, setCheckoutBadge] = useState<string | null>(null);
   const [checkoutVisit, setCheckoutVisit] = useState<KioskVisit | null>(null);
+  const checkingInRef = useRef(false);
+  const checkingOutRef = useRef(false);
 
   const form = useForm<VisitorForm>({
     resolver: zodResolver(visitorSchema),
@@ -67,7 +69,8 @@ export function KioskPage() {
   }
 
   async function finishCheckIn() {
-    if (!visitorId) return;
+    if (!visitorId || checkingInRef.current) return;
+    checkingInRef.current = true;
     setMode('submitting');
     setSubmitError(null);
     try {
@@ -80,6 +83,8 @@ export function KioskPage() {
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Check-in failed. Please see reception.');
       setMode('success');
+    } finally {
+      checkingInRef.current = false;
     }
   }
 
@@ -90,6 +95,8 @@ export function KioskPage() {
     setSubmitError(null);
     setCheckoutBadge(null);
     setCheckoutVisit(null);
+    checkingInRef.current = false;
+    checkingOutRef.current = false;
     setMode('welcome');
   }
 
@@ -99,7 +106,8 @@ export function KioskPage() {
   }
 
   async function confirmCheckout() {
-    if (!checkoutBadge) return;
+    if (!checkoutBadge || checkingOutRef.current) return;
+    checkingOutRef.current = true;
     try {
       const visit = await kioskApi.checkOut(checkoutBadge);
       setCheckoutVisit(visit);
@@ -107,6 +115,8 @@ export function KioskPage() {
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Checkout failed. Please see reception.');
       setMode('checkout-done');
+    } finally {
+      checkingOutRef.current = false;
     }
   }
 
@@ -157,7 +167,9 @@ export function KioskPage() {
             {submitError && <p className="text-danger text-xs">{submitError}</p>}
             <div className="flex gap-3">
               <button type="button" onClick={resetAll} className="h-11 px-4 text-sm text-muted">Cancel</button>
-              <button type="submit" className="flex-1 h-11 bg-primary text-white text-sm font-semibold rounded-xl">Continue to Photo</button>
+              <button type="submit" disabled={form.formState.isSubmitting} className="flex-1 h-11 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
+                {form.formState.isSubmitting ? 'Registering…' : 'Continue to Photo'}
+              </button>
             </div>
           </form>
         )}
@@ -222,8 +234,8 @@ export function KioskPage() {
 
         {mode === 'checkout-done' && (
           <div className="mt-6 text-center space-y-4">
-            <div className="w-12 h-12 bg-success/10 rounded-full flex items-center justify-center mx-auto">
-              <CheckCircle2 className="h-6 w-6 text-success" />
+            <div className={`w-12 h-12 ${checkoutVisit ? 'bg-success/10' : 'bg-danger/10'} rounded-full flex items-center justify-center mx-auto`}>
+              {checkoutVisit ? <CheckCircle2 className="h-6 w-6 text-success" /> : <X className="h-6 w-6 text-danger" />}
             </div>
             <h2 className="text-lg font-semibold text-foreground">{checkoutVisit ? 'Checked Out' : 'Could Not Check Out'}</h2>
             {submitError && !checkoutVisit && <p className="text-danger text-sm">{submitError}</p>}
@@ -261,8 +273,10 @@ function KioskBadgeQr({ badgeCode }: { badgeCode: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     if (!canvasRef.current) return;
-    const origin = API_BASE.replace(/\/api$/, '');
-    QRCode.toCanvas(canvasRef.current, `${origin}/badge/${badgeCode}`, {
+    const apiBase = import.meta.env.PROD
+      ? 'https://ohcs-smartgate-api.ohcsghana-main.workers.dev'
+      : 'http://localhost:8787';
+    QRCode.toCanvas(canvasRef.current, `${apiBase}/badge/${badgeCode}`, {
       width: 200, margin: 2, color: { dark: '#1B3A5C', light: '#FFFFFF' },
     });
   }, [badgeCode]);
