@@ -14,22 +14,22 @@ interface Props {
 }
 
 /**
- * Toggle that promotes/demotes a staff user between `staff` and `f_and_a_admin`.
+ * Toggle that promotes/demotes a staff user between `staff` and `hr`.
  * Hidden when the viewer is not `superadmin`, or when the target user is NSS.
  */
 export function UserRoleToggle({ user }: Props) {
   const viewer = useAuthStore((s) => s.user);
   const qc = useQueryClient();
 
-  const isFA = user.role === 'f_and_a_admin';
+  const isHr = user.role === 'hr';
 
   const mutation = useMutation({
     mutationFn: () =>
       api.put(`/users/${user.id}`, {
-        role: isFA ? 'staff' : 'f_and_a_admin',
+        role: isHr ? 'staff' : 'hr',
       }),
     onSuccess: () => {
-      toast.success(isFA ? 'Demoted to Staff' : 'Promoted to F&A Admin');
+      toast.success(isHr ? 'Demoted to Staff' : 'Promoted to HR');
       qc.invalidateQueries({ queryKey: ['users'] });
     },
     onError: (err) =>
@@ -47,29 +47,29 @@ export function UserRoleToggle({ user }: Props) {
           <ShieldCheck className="h-4.5 w-4.5 text-secondary" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-semibold text-foreground">F&A Admin Access</p>
+          <p className="text-[13px] font-semibold text-foreground">HR Access</p>
           <p className="text-[12px] text-muted mt-0.5">
-            Grants access to the Finance & Administration admin views (NSS register,
-            attendance reports). Toggle off to revert to plain staff.
+            Grants the HR admin views (NSS register, attendance reports) plus
+            visitor-management oversight. Toggle off to revert to plain staff.
           </p>
         </div>
         <button
           type="button"
           onClick={() => mutation.mutate()}
           disabled={mutation.isPending}
-          aria-pressed={isFA}
-          aria-label={isFA ? 'Demote to staff' : 'Promote to F&A Admin'}
+          aria-pressed={isHr}
+          aria-label={isHr ? 'Demote to staff' : 'Promote to HR'}
           className={cn(
             'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors',
             'focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 focus:ring-offset-surface',
-            isFA ? 'bg-primary' : 'bg-border',
+            isHr ? 'bg-primary' : 'bg-border',
             mutation.isPending && 'opacity-60 cursor-wait',
           )}
         >
           <span
             className={cn(
               'inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform',
-              isFA ? 'translate-x-5' : 'translate-x-0.5',
+              isHr ? 'translate-x-5' : 'translate-x-0.5',
             )}
           />
           {mutation.isPending && (

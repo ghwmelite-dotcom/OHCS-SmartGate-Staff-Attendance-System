@@ -61,7 +61,7 @@ function daysUntil(iso: string | null): number | null {
 export function NssTab() {
   const qc = useQueryClient();
   const currentUser = useAuthStore(s => s.user);
-  const canRunEos = currentUser?.role === 'superadmin' || currentUser?.role === 'f_and_a_admin';
+  const canRunEos = currentUser?.role === 'superadmin' || currentUser?.role === 'hr';
   const [status, setStatus] = useState<StatusFilter>('active');
   const [directorateId, setDirectorateId] = useState('');
   const [search, setSearch] = useState('');

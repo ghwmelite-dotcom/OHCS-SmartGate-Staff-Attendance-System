@@ -79,7 +79,7 @@ const createNssSchema = z.object({
 });
 
 adminNssRoutes.post('/', zValidator('json', createNssSchema), async (c) => {
-  const forbidden = requireRole(c, 'superadmin', 'f_and_a_admin');
+  const forbidden = requireRole(c, 'superadmin', 'hr');
   if (forbidden) return forbidden;
 
   const body = c.req.valid('json');
@@ -145,7 +145,7 @@ adminNssRoutes.post('/', zValidator('json', createNssSchema), async (c) => {
 /* ------------------------------------------------------------------ */
 
 adminNssRoutes.get('/', async (c) => {
-  const forbidden = requireRole(c, 'superadmin', 'f_and_a_admin');
+  const forbidden = requireRole(c, 'superadmin', 'hr');
   if (forbidden) return forbidden;
 
   const directorateId = c.req.query('directorate_id') ?? null;
@@ -215,7 +215,7 @@ interface NssTodayRow {
 }
 
 adminNssRoutes.get('/today', async (c) => {
-  const forbidden = requireRole(c, 'superadmin', 'f_and_a_admin');
+  const forbidden = requireRole(c, 'superadmin', 'hr');
   if (forbidden) return forbidden;
 
   const today = new Date().toISOString().slice(0, 10);
@@ -253,7 +253,7 @@ adminNssRoutes.get('/today', async (c) => {
 /*  Range export — GET /api/admin/nss/export                           */
 /*                                                                      */
 /*  Roll-up of NSS attendance over a date range, optionally scoped to  */
-/*  one directorate. Used by the F&A admin to download NSS-only PDFs/  */
+/*  one directorate. Used by HR to download NSS-only PDFs/             */
 /*  CSVs.                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -271,7 +271,7 @@ interface NssExportRow {
 }
 
 adminNssRoutes.get('/export', async (c) => {
-  const forbidden = requireRole(c, 'superadmin', 'f_and_a_admin');
+  const forbidden = requireRole(c, 'superadmin', 'hr');
   if (forbidden) return forbidden;
 
   const from = c.req.query('from');
@@ -419,7 +419,7 @@ adminNssRoutes.get('/export', async (c) => {
 /* ------------------------------------------------------------------ */
 
 adminNssRoutes.post('/run-eos', async (c) => {
-  const forbidden = requireRole(c, 'superadmin', 'f_and_a_admin');
+  const forbidden = requireRole(c, 'superadmin', 'hr');
   if (forbidden) return forbidden;
 
   const result = await runNssEndOfServiceCheck(c.env);
@@ -440,7 +440,7 @@ interface NssActivityRow {
 }
 
 adminNssRoutes.get('/:id/activity', async (c) => {
-  const forbidden = requireRole(c, 'superadmin', 'f_and_a_admin');
+  const forbidden = requireRole(c, 'superadmin', 'hr');
   if (forbidden) return forbidden;
 
   const id = c.req.param('id');
@@ -490,7 +490,7 @@ adminNssRoutes.get('/:id/activity', async (c) => {
 /* ------------------------------------------------------------------ */
 
 adminNssRoutes.get('/:id', async (c) => {
-  const forbidden = requireRole(c, 'superadmin', 'f_and_a_admin');
+  const forbidden = requireRole(c, 'superadmin', 'hr');
   if (forbidden) return forbidden;
 
   const id = c.req.param('id');
@@ -520,7 +520,7 @@ const updateNssSchema = z.object({
 });
 
 adminNssRoutes.patch('/:id', zValidator('json', updateNssSchema), async (c) => {
-  const forbidden = requireRole(c, 'superadmin', 'f_and_a_admin');
+  const forbidden = requireRole(c, 'superadmin', 'hr');
   if (forbidden) return forbidden;
 
   const id = c.req.param('id');
@@ -584,7 +584,7 @@ adminNssRoutes.patch('/:id', zValidator('json', updateNssSchema), async (c) => {
 /* ------------------------------------------------------------------ */
 
 adminNssRoutes.delete('/:id', async (c) => {
-  const forbidden = requireRole(c, 'superadmin', 'f_and_a_admin');
+  const forbidden = requireRole(c, 'superadmin', 'hr');
   if (forbidden) return forbidden;
 
   const id = c.req.param('id');
@@ -613,7 +613,7 @@ adminNssRoutes.delete('/:id', async (c) => {
 /* ------------------------------------------------------------------ */
 
 adminNssRoutes.post('/:id/reset-pin', async (c) => {
-  const forbidden = requireRole(c, 'superadmin', 'f_and_a_admin');
+  const forbidden = requireRole(c, 'superadmin', 'hr');
   if (forbidden) return forbidden;
 
   const id = c.req.param('id');
@@ -704,7 +704,7 @@ function parseCsv(text: string): BulkImportRow[] {
 }
 
 adminNssRoutes.post('/bulk-import', async (c) => {
-  const forbidden = requireRole(c, 'superadmin', 'f_and_a_admin');
+  const forbidden = requireRole(c, 'superadmin', 'hr');
   if (forbidden) return forbidden;
 
   let payload: { csv?: string; rows?: unknown[] };
