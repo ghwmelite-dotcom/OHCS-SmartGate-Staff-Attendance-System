@@ -9,7 +9,7 @@ export type Role =
   | 'it'
   | 'director'
   | 'staff'
-  | 'f_and_a_admin'
+  | 'hr'
   | 'visitor';
 
 export function requireRole(

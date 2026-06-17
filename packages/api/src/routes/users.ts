@@ -49,7 +49,7 @@ const createUserSchema = z.object({
   email: z.string().email().max(255).toLowerCase().trim(),
   staff_id: z.string().min(1).max(20).trim(),
   pin: z.string().length(4).regex(/^\d{4}$/, 'PIN must be 4 digits'),
-  role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff', 'f_and_a_admin']),
+  role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff', 'hr']),
   grade: z.string().max(100).optional().or(z.literal('')),
   directorate_code: z.string().max(20).optional().or(z.literal('')),
 });
@@ -96,7 +96,7 @@ const updateUserSchema = z.object({
   email: z.string().email().max(255).toLowerCase().trim().optional(),
   staff_id: z.string().min(1).max(20).trim().optional(),
   pin: z.string().length(4).regex(/^\d{4}$/).optional(),
-  role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff', 'f_and_a_admin']).optional(),
+  role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff', 'hr']).optional(),
   grade: z.string().max(100).optional().or(z.literal('')),
   directorate_code: z.string().max(20).optional().or(z.literal('')),
   is_active: z.number().min(0).max(1).optional(),
