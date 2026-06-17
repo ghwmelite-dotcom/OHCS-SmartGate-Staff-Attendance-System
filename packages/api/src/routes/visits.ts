@@ -6,6 +6,7 @@ import { success, created, notFound, error } from '../lib/response';
 import { classifyAndUpdate } from '../services/classifier';
 import { notifyOnCheckIn } from '../services/notifier';
 import { requireRole } from '../lib/require-role';
+import { checkOutById } from '../services/check-out';
 import { z } from 'zod';
 
 export const visitRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
@@ -185,29 +186,10 @@ visitRoutes.post('/check-in', zValidator('json', CheckInSchema), async (c) => {
 });
 
 visitRoutes.post('/:id/check-out', async (c) => {
-  const id = c.req.param('id');
-
-  const visit = await c.env.DB.prepare('SELECT id, check_in_at, status FROM visits WHERE id = ?').bind(id).first<{ id: string; check_in_at: string; status: string }>();
-  if (!visit) return notFound(c, 'Visit');
-  if (visit.status !== 'checked_in') return error(c, 'ALREADY_CHECKED_OUT', 'This visit has already ended', 400);
-
-  const checkOutAt = new Date().toISOString();
-  const checkInDate = new Date(visit.check_in_at);
-  const durationMinutes = Math.round((new Date(checkOutAt).getTime() - checkInDate.getTime()) / 60000);
-
-  await c.env.DB.prepare(
-    `UPDATE visits SET status = 'checked_out', check_out_at = ?, duration_minutes = ? WHERE id = ?`
-  ).bind(checkOutAt, durationMinutes, id).run();
-
-  const updated = await c.env.DB.prepare(
-    `SELECT v.*, vis.first_name, vis.last_name, vis.organisation,
-            COALESCE(o.name, v.host_name_manual) as host_name, d.abbreviation as directorate_abbr
-     FROM visits v
-     JOIN visitors vis ON v.visitor_id = vis.id
-     LEFT JOIN officers o ON v.host_officer_id = o.id
-     LEFT JOIN directorates d ON v.directorate_id = d.id
-     WHERE v.id = ?`
-  ).bind(id).first();
-
-  return success(c, updated);
+  const result = await checkOutById(c.env, c.req.param('id'));
+  if (!result.ok) {
+    if (result.code === 'NOT_FOUND') return notFound(c, 'Visit');
+    return error(c, 'ALREADY_CHECKED_OUT', 'This visit has already ended', 400);
+  }
+  return success(c, result.visit);
 });
