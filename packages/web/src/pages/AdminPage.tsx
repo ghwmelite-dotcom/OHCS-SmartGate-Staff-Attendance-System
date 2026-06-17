@@ -37,7 +37,7 @@ interface UserRecord {
 const ROLES = [
   { value: 'superadmin', label: 'Super Admin', color: 'bg-secondary/10 text-secondary' },
   { value: 'admin', label: 'Admin', color: 'bg-accent/15 text-accent-warm' },
-  { value: 'f_and_a_admin', label: 'F&A Admin', color: 'bg-secondary/10 text-secondary' },
+  { value: 'hr', label: 'HR', color: 'bg-secondary/10 text-secondary' },
   { value: 'receptionist', label: 'Receptionist', color: 'bg-primary/10 text-primary' },
   { value: 'it', label: 'IT Support', color: 'bg-info/10 text-info' },
   { value: 'director', label: 'Director', color: 'bg-accent/10 text-accent-warm' },
@@ -49,7 +49,7 @@ const createUserSchema = z.object({
   email: z.string().email('Invalid email').max(255),
   staff_id: z.string().min(1, 'Staff ID is required').max(20),
   pin: z.string().length(4, 'PIN must be 4 digits').regex(/^\d{4}$/, 'PIN must be 4 digits'),
-  role: z.enum(['superadmin', 'admin', 'f_and_a_admin', 'receptionist', 'it', 'director', 'staff']),
+  role: z.enum(['superadmin', 'admin', 'hr', 'receptionist', 'it', 'director', 'staff']),
   grade: z.string().max(100).optional(),
   directorate_code: z.string().max(20).optional(),
 });
@@ -59,7 +59,7 @@ const editUserSchema = z.object({
   name: z.string().min(1).max(100),
   email: z.string().email().max(255),
   staff_id: z.string().min(1).max(20),
-  role: z.enum(['superadmin', 'admin', 'f_and_a_admin', 'receptionist', 'it', 'director', 'staff']),
+  role: z.enum(['superadmin', 'admin', 'hr', 'receptionist', 'it', 'director', 'staff']),
   grade: z.string().max(100).optional(),
   directorate_code: z.string().max(20).optional(),
   pin: z.string().length(4).regex(/^\d{4}$/).or(z.literal('')).optional(),
@@ -71,12 +71,12 @@ type AdminTab = 'users' | 'org' | 'attendance' | 'nss' | 'import';
 export function AdminPage() {
   const user = useAuthStore(s => s.user);
   const role = user?.role ?? '';
-  const isFAndA = role === 'f_and_a_admin';
+  const isHr = role === 'hr';
   const isSuperadmin = role === 'superadmin';
 
   // Tab visibility:
   // - superadmin: all tabs
-  // - f_and_a_admin: NSS only (everything else hidden — they cannot manage system users)
+  // - hr: NSS only (everything else hidden — they cannot manage system users)
   // - other roles: shouldn't reach this page (Sidebar gates the link), but render NSS as a safe default if they do
   const tabs = useMemo<{ value: AdminTab; label: string }[]>(() => {
     if (isSuperadmin) {
@@ -91,14 +91,14 @@ export function AdminPage() {
     return [{ value: 'nss', label: 'NSS' }];
   }, [isSuperadmin]);
 
-  // F&A admin defaults to NSS; superadmin defaults to ?tab= or 'users'.
+  // HR admin defaults to NSS; superadmin defaults to ?tab= or 'users'.
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const initialTab: AdminTab = (() => {
     const fromUrl = searchParams.get('tab') as AdminTab | null;
     const allowed = tabs.map(t => t.value);
     if (fromUrl && allowed.includes(fromUrl)) return fromUrl;
-    if (isFAndA) return 'nss';
+    if (isHr) return 'nss';
     return 'users';
   })();
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
@@ -123,12 +123,12 @@ export function AdminPage() {
   // Hard-block users who shouldn't be here at all (Sidebar already hides the
   // link, but a direct URL can still reach the route).
   useEffect(() => {
-    if (!isSuperadmin && !isFAndA) {
+    if (!isSuperadmin && !isHr) {
       navigate('/', { replace: true });
     }
-  }, [isSuperadmin, isFAndA, navigate]);
+  }, [isSuperadmin, isHr, navigate]);
 
-  if (!isSuperadmin && !isFAndA) return null;
+  if (!isSuperadmin && !isHr) return null;
 
   return (
     <div className="space-y-6">
@@ -138,7 +138,7 @@ export function AdminPage() {
             Administration
           </h1>
           <p className="text-[15px] text-muted mt-0.5">
-            {isFAndA
+            {isHr
               ? 'NSS personnel oversight'
               : 'Manage users, directorates, and officers'}
           </p>
