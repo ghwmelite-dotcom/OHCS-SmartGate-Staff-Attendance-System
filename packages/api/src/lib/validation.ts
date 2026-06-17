@@ -18,7 +18,7 @@ export const CreateVisitorSchema = z.object({
   phone: ghanaPhoneSchema,
   email: z.string().email().max(255).optional().or(z.literal('')),
   organisation: z.string().max(200).optional().or(z.literal('')),
-  id_type: idTypeSchema.optional(),
+  id_type: idTypeSchema.optional().or(z.literal('')),
   id_number: z.string().max(50).optional().or(z.literal('')),
 });
 
@@ -42,4 +42,17 @@ export const LoginSchema = z.object({
 export const VerifyOtpSchema = z.object({
   email: z.string().email().max(255).toLowerCase().trim(),
   code: z.string().length(6),
+});
+
+export const KioskCheckOutSchema = z.object({
+  badge_code: z.string().min(1).max(40),
+});
+
+export const KioskCheckInSchema = z.object({
+  visitor_id: z.string().min(1),
+  host_officer_id: z.string().optional(),
+  host_name_manual: z.string().max(100).optional(),
+  directorate_id: z.string().optional(),
+  purpose_raw: z.string().max(500).optional(),
+  idempotency_key: z.string().min(1).max(100).optional(),
 });

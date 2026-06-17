@@ -9,7 +9,8 @@ export type Role =
   | 'it'
   | 'director'
   | 'staff'
-  | 'f_and_a_admin';
+  | 'f_and_a_admin'
+  | 'visitor';
 
 export function requireRole(
   c: Context<{ Bindings: Env; Variables: { session: SessionData } }>,

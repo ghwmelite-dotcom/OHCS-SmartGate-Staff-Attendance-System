@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 import type { Env } from '../types';
 import { success, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
+import { visitorPhotoKey } from '../lib/photo-key';
 
 export const badgeRoutes = new Hono<{ Bindings: Env }>();
 
@@ -51,6 +52,32 @@ badgeRoutes.get('/:code', async (c) => {
   const visit = await c.env.DB.prepare(BADGE_QUERY).bind(code).first<BadgeData>();
   if (!visit) return notFound(c, 'Badge');
   return success(c, visit);
+});
+
+// Public, badge-scoped photo — serves the visitor's face photo only when
+// addressed via a valid badge code. Keeps the auth-gated /api/photos route
+// untouched. Rate-limited to deter badge-code enumeration.
+badgeRoutes.get('/:code/photo', async (c) => {
+  const rl = await checkBadgeRateLimit(c);
+  if (!rl.allowed) {
+    c.header('Retry-After', String(rl.retryAfter));
+    return error(c, 'RATE_LIMITED', 'Too many requests. Try again shortly.', 429);
+  }
+  const code = c.req.param('code');
+  const row = await c.env.DB.prepare(
+    `SELECT vis.id as visitor_id
+     FROM visits v JOIN visitors vis ON v.visitor_id = vis.id
+     WHERE v.badge_code = ?`
+  ).bind(code).first<{ visitor_id: string }>();
+  if (!row) return notFound(c, 'Photo');
+
+  const object = await c.env.STORAGE.get(visitorPhotoKey(row.visitor_id));
+  if (!object) return notFound(c, 'Photo');
+
+  const headers = new Headers();
+  headers.set('Content-Type', 'image/jpeg');
+  headers.set('Cache-Control', 'public, max-age=3600');
+  return new Response(object.body, { headers });
 });
 
 // Public HTML badge page
@@ -161,7 +188,7 @@ export async function serveBadgePage(c: Context<{ Bindings: Env }>) {
       ${isActive ? '\u25CF Active Visitor' : '\u25CB Visit Ended'}
     </div>
     <div class="content">
-      ${visit.photo_url ? `<div style="width:80px;height:80px;border-radius:12px;overflow:hidden;margin:0 auto 12px;border:2px solid #E8DFC9"><img src="${escapeHtml(visit.photo_url)}" style="width:100%;height:100%;object-fit:cover" alt=""></div>` : ''}
+      ${visit.photo_url ? `<div style="width:80px;height:80px;border-radius:12px;overflow:hidden;margin:0 auto 12px;border:2px solid #E8DFC9"><img src="/api/badges/${encodeURIComponent(visit.badge_code)}/photo" style="width:100%;height:100%;object-fit:cover" alt=""></div>` : ''}
       <div class="visitor-name">${escapeHtml(visit.visitor_name)}</div>
       ${visit.organisation ? `<div class="organisation">${escapeHtml(visit.organisation)}</div>` : ''}
       <div class="details">

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { apiOrQueue } from '@/lib/offlineQueue';
 import { CheckCircle2, LogOut, Loader2 } from 'lucide-react';
+import { QrScanner } from '@/components/QrScanner';
 
 interface BadgeData {
   badge_code: string;
@@ -19,6 +20,7 @@ export function BadgeCheckoutPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [checkedOut, setCheckedOut] = useState(false);
+  const [showScanner, setShowScanner] = useState(!code);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['badge', code],
@@ -40,6 +42,17 @@ export function BadgeCheckoutPage() {
   });
 
   const badge = data?.data;
+
+  if (!code && showScanner) {
+    return (
+      <div className="max-w-sm mx-auto py-12">
+        <QrScanner
+          onScan={(scanned) => { setShowScanner(false); navigate(`/checkout/${scanned}`); }}
+          onCancel={() => navigate('/')}
+        />
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

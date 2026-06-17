@@ -3,9 +3,9 @@ import { zValidator } from '@hono/zod-validator';
 import type { Env, SessionData } from '../types';
 import { CheckInSchema } from '../lib/validation';
 import { success, created, notFound, error } from '../lib/response';
-import { classifyAndUpdate } from '../services/classifier';
-import { notifyOnCheckIn } from '../services/notifier';
 import { requireRole } from '../lib/require-role';
+import { checkOutById } from '../services/check-out';
+import { performCheckIn } from '../services/check-in';
 import { z } from 'zod';
 
 export const visitRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
@@ -105,109 +105,27 @@ visitRoutes.post('/check-in', zValidator('json', CheckInSchema), async (c) => {
   const body = c.req.valid('json');
   const session = c.get('session');
 
-  const visitor = await c.env.DB.prepare('SELECT id FROM visitors WHERE id = ?').bind(body.visitor_id).first();
-  if (!visitor) return notFound(c, 'Visitor');
+  const result = await performCheckIn(c.env, c.executionCtx, {
+    visitor_id: body.visitor_id,
+    host_officer_id: body.host_officer_id,
+    host_name_manual: body.host_name_manual,
+    directorate_id: body.directorate_id,
+    purpose_raw: body.purpose_raw,
+    purpose_category: body.purpose_category,
+    idempotency_key: body.idempotency_key,
+    created_by: session.userId,
+    check_in_source: 'staff',
+  });
 
-  if (body.idempotency_key) {
-    const existing = await c.env.DB.prepare(
-      "SELECT id, badge_code FROM visits WHERE idempotency_key = ? LIMIT 1"
-    ).bind(body.idempotency_key).first<{ id: string; badge_code: string }>();
-    if (existing) {
-      const dup = await c.env.DB.prepare(
-        `SELECT v.*, vis.first_name, vis.last_name, vis.organisation,
-                COALESCE(o.name, v.host_name_manual) as host_name, d.abbreviation as directorate_abbr
-         FROM visits v
-         JOIN visitors vis ON v.visitor_id = vis.id
-         LEFT JOIN officers o ON v.host_officer_id = o.id
-         LEFT JOIN directorates d ON v.directorate_id = d.id
-         WHERE v.id = ?`
-      ).bind(existing.id).first();
-      return created(c, dup);
-    }
-  }
-
-  const visitId = crypto.randomUUID().replace(/-/g, '');
-  const randomSuffix = Array.from(crypto.getRandomValues(new Uint8Array(2)))
-    .map(b => b.toString(36)).join('').slice(0, 4).toUpperCase();
-  const badgeCode = `SG-${Date.now().toString(36).toUpperCase()}${randomSuffix}`;
-
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      `INSERT INTO visits (id, visitor_id, host_officer_id, host_name_manual, directorate_id, purpose_raw, purpose_category, badge_code, status, created_by, idempotency_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', ?, ?)`
-    ).bind(visitId, body.visitor_id, body.host_officer_id || null, body.host_name_manual || null,
-           body.directorate_id || null, body.purpose_raw || null, body.purpose_category || null, badgeCode, session.userId, body.idempotency_key ?? null),
-
-    c.env.DB.prepare(
-      `UPDATE visitors SET total_visits = total_visits + 1, last_visit_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-       updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?`
-    ).bind(body.visitor_id),
-  ]);
-
-  const visit = await c.env.DB.prepare(
-    `SELECT v.*, vis.first_name, vis.last_name, vis.organisation,
-            COALESCE(o.name, v.host_name_manual) as host_name, d.abbreviation as directorate_abbr
-     FROM visits v
-     JOIN visitors vis ON v.visitor_id = vis.id
-     LEFT JOIN officers o ON v.host_officer_id = o.id
-     LEFT JOIN directorates d ON v.directorate_id = d.id
-     WHERE v.id = ?`
-  ).bind(visitId).first();
-
-  // Fire classification in background (non-blocking)
-  if (body.purpose_raw) {
-    c.executionCtx.waitUntil(
-      classifyAndUpdate(visitId, body.purpose_raw, body.directorate_id || null, c.env)
-    );
-  }
-
-  // Notify host + directorate leadership (Telegram + in-app)
-  if (body.host_officer_id && visit) {
-    const v = visit as Record<string, unknown>;
-    c.executionCtx.waitUntil(
-      notifyOnCheckIn({
-        visit_id: visitId,
-        host_officer_id: body.host_officer_id,
-        first_name: String(v.first_name ?? ''),
-        last_name: String(v.last_name ?? ''),
-        organisation: (v.organisation as string | null) ?? null,
-        purpose_raw: body.purpose_raw || null,
-        purpose_category: body.purpose_category || null,
-        badge_code: badgeCode,
-        check_in_at: String(v.check_in_at ?? ''),
-        directorate_id: body.directorate_id || null,
-        directorate_abbr: (v.directorate_abbr as string | null) ?? null,
-      }, c.env)
-    );
-  }
-
-  return created(c, visit);
+  if (!result.ok) return notFound(c, 'Visitor');
+  return created(c, result.visit);
 });
 
 visitRoutes.post('/:id/check-out', async (c) => {
-  const id = c.req.param('id');
-
-  const visit = await c.env.DB.prepare('SELECT id, check_in_at, status FROM visits WHERE id = ?').bind(id).first<{ id: string; check_in_at: string; status: string }>();
-  if (!visit) return notFound(c, 'Visit');
-  if (visit.status !== 'checked_in') return error(c, 'ALREADY_CHECKED_OUT', 'This visit has already ended', 400);
-
-  const checkOutAt = new Date().toISOString();
-  const checkInDate = new Date(visit.check_in_at);
-  const durationMinutes = Math.round((new Date(checkOutAt).getTime() - checkInDate.getTime()) / 60000);
-
-  await c.env.DB.prepare(
-    `UPDATE visits SET status = 'checked_out', check_out_at = ?, duration_minutes = ? WHERE id = ?`
-  ).bind(checkOutAt, durationMinutes, id).run();
-
-  const updated = await c.env.DB.prepare(
-    `SELECT v.*, vis.first_name, vis.last_name, vis.organisation,
-            COALESCE(o.name, v.host_name_manual) as host_name, d.abbreviation as directorate_abbr
-     FROM visits v
-     JOIN visitors vis ON v.visitor_id = vis.id
-     LEFT JOIN officers o ON v.host_officer_id = o.id
-     LEFT JOIN directorates d ON v.directorate_id = d.id
-     WHERE v.id = ?`
-  ).bind(id).first();
-
-  return success(c, updated);
+  const result = await checkOutById(c.env, c.req.param('id'));
+  if (!result.ok) {
+    if (result.code === 'NOT_FOUND') return notFound(c, 'Visit');
+    return error(c, 'ALREADY_CHECKED_OUT', 'This visit has already ended', 400);
+  }
+  return success(c, result.visit);
 });

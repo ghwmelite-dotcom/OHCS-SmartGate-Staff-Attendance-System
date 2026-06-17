@@ -44,6 +44,10 @@ INSERT OR IGNORE INTO users (id, name, email, staff_id, pin_hash, role) VALUES
 INSERT OR IGNORE INTO users (id, name, email, staff_id, pin_hash, role) VALUES
 ('user_reception', 'OHCS Reception', 'reception@ohcs.gov.gh', 'OHCS-001', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 'receptionist');
 
+-- Self-service kiosk system user (attributes kiosk check-ins)
+INSERT OR IGNORE INTO users (id, name, email, role) VALUES
+('user_kiosk', 'Self-Service Kiosk', 'kiosk@ohcs.gov.gh', 'visitor');
+
 -- Seed: Sample officers (mapped to real directorates)
 INSERT OR IGNORE INTO officers (id, name, title, directorate_id, email, office_number) VALUES
 ('off_mensah', 'Mr. Kwabena Mensah', 'Director', 'dir_rsimd', 'k.mensah@ohcs.gov.gh', 'Room 19'),

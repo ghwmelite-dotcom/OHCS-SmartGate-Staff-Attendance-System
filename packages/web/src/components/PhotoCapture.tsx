@@ -7,9 +7,22 @@ interface PhotoCaptureProps {
   onCapture: (blob: Blob) => void;
   onSkip: () => void;
   existingPhotoUrl?: string | null;
+  /** 'user' = front/selfie camera (default), 'environment' = rear camera (for IDs). */
+  facingMode?: 'user' | 'environment';
+  /** Heading shown above the camera. Defaults to a face-capture label. */
+  title?: string;
+  /** Mirror the preview/capture horizontally. Defaults true for selfies, set false for IDs. */
+  mirror?: boolean;
 }
 
-export function PhotoCapture({ onCapture, onSkip, existingPhotoUrl }: PhotoCaptureProps) {
+export function PhotoCapture({
+  onCapture,
+  onSkip,
+  existingPhotoUrl,
+  facingMode = 'user',
+  title,
+  mirror = facingMode === 'user',
+}: PhotoCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -21,7 +34,7 @@ export function PhotoCapture({ onCapture, onSkip, existingPhotoUrl }: PhotoCaptu
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 480 }, height: { ideal: 640 }, facingMode: 'user' },
+        video: { width: { ideal: 480 }, height: { ideal: 640 }, facingMode },
       });
       streamRef.current = stream;
       if (videoRef.current) {
@@ -31,7 +44,7 @@ export function PhotoCapture({ onCapture, onSkip, existingPhotoUrl }: PhotoCaptu
     } catch {
       setCameraError(true);
     }
-  }, []);
+  }, [facingMode]);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach(t => t.stop());
@@ -60,9 +73,11 @@ export function PhotoCapture({ onCapture, onSkip, existingPhotoUrl }: PhotoCaptu
     canvas.height = 400;
     const ctx = canvas.getContext('2d')!;
 
-    // Mirror horizontally for natural selfie feel
-    ctx.translate(400, 0);
-    ctx.scale(-1, 1);
+    if (mirror) {
+      // Mirror horizontally for natural selfie feel
+      ctx.translate(400, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, sx, sy, size, size, 0, 0, 400, 400);
 
     canvas.toBlob(
@@ -120,7 +135,7 @@ export function PhotoCapture({ onCapture, onSkip, existingPhotoUrl }: PhotoCaptu
   return (
     <div className="text-center space-y-4 animate-fade-in">
       <p className="text-[14px] font-semibold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
-        {captured ? 'Photo Preview' : 'Capture Visitor Photo'}
+        {captured ? 'Photo Preview' : (title ?? 'Capture Visitor Photo')}
       </p>
 
       {/* Camera / Preview */}
@@ -138,7 +153,7 @@ export function PhotoCapture({ onCapture, onSkip, existingPhotoUrl }: PhotoCaptu
               className={cn(
                 'w-48 h-48 rounded-2xl object-cover bg-primary-deep',
                 cameraReady ? 'opacity-100' : 'opacity-0',
-                'scale-x-[-1]' // Mirror
+                mirror && 'scale-x-[-1]' // Mirror only for selfies
               )}
             />
             {!cameraReady && !cameraError && (

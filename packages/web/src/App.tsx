@@ -8,6 +8,7 @@ import { VisitorsPage } from './pages/VisitorsPage';
 import { VisitorDetailPage } from './pages/VisitorDetailPage';
 import { LinkTelegramPage } from './pages/LinkTelegramPage';
 import { BadgeCheckoutPage } from './pages/BadgeCheckoutPage';
+import { KioskPage } from './pages/KioskPage';
 import { AdminPage } from './pages/AdminPage';
 import { VisitLogPage } from './pages/VisitLogPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
@@ -151,6 +152,7 @@ export function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/kiosk" element={<KioskPage />} />
           <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
             <Route index element={<DashboardPage />} />
             <Route path="check-in" element={<CheckInPage />} />
@@ -158,6 +160,7 @@ export function App() {
             <Route path="visitors/:id" element={<VisitorDetailPage />} />
             <Route path="link-telegram" element={<LinkTelegramPage />} />
             <Route path="checkout/:code" element={<BadgeCheckoutPage />} />
+            <Route path="checkout" element={<BadgeCheckoutPage />} />
             <Route path="visit-log" element={<VisitLogPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="reports" element={<ReportsPage />} />
