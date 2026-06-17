@@ -23,7 +23,7 @@ const listSchema = z.object({
 });
 
 visitRoutes.get('/', zValidator('query', listSchema), async (c) => {
-  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director');
+  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'hr');
   if (blocked) return blocked;
   const { date, from, to, status, directorate_id, badge_code, q, limit, cursor } = c.req.valid('query');
   let sql = `SELECT v.*, vis.first_name, vis.last_name, vis.organisation, vis.phone,
@@ -85,7 +85,7 @@ visitRoutes.get('/', zValidator('query', listSchema), async (c) => {
 });
 
 visitRoutes.get('/active', async (c) => {
-  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director');
+  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'hr');
   if (blocked) return blocked;
   const results = await c.env.DB.prepare(
     `SELECT v.*, vis.first_name, vis.last_name, vis.organisation,
