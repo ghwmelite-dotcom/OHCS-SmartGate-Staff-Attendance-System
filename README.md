@@ -218,7 +218,9 @@ Subsequent schema changes use the migration runner — see `docs/superpowers/spe
 
 ## Deployment
 
-Each piece deploys independently via Wrangler (no CI/CD pipeline — deployments are deliberate).
+Pushing to `main` auto-deploys everything via GitHub Actions (`.github/workflows/deploy.yml`): it typechecks all three packages, builds both PWAs, deploys the API Worker, then deploys both Pages projects. It can also be run on demand from the **Actions** tab (`workflow_dispatch`).
+
+To deploy manually with Wrangler (e.g. a hotfix outside CI):
 
 ```bash
 # API Worker
@@ -234,6 +236,8 @@ cd packages/web && npm run build && \
 ```
 
 **One-time secrets setup** (VAPID keys for Web Push): see `docs/ops/pwa-secrets.md`.
+
+**Lobby kiosk setup** (tablet + printable QR poster for `smartgate.ohcsghana.org/kiosk`): see `docs/ops/lobby-kiosk-setup.md`.
 
 **Database migrations on remote D1** (after first install of the migration runner): superadmin `POST /api/admin/migrations/run` runs all pending migrations idempotently.
 

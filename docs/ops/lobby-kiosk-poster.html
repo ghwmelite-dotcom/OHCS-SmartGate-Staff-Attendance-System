@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OHCS Visitor Check-In — Lobby Poster</title>
+  <!--
+    Printable lobby poster. The visitor scans the QR with their phone (or it
+    opens on the lobby tablet) to reach the self-service kiosk at
+    https://smartgate.ohcsghana.org/kiosk
+    To print: open this file in a browser and Print (Ctrl/Cmd+P) → A4/Letter, portrait.
+    The QR is an inline SVG, so it prints crisp at any size and needs no network.
+  -->
+  <style>
+    @page { size: A4 portrait; margin: 0; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: #fff;
+      color: #1B3A5C;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 32px;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .poster {
+      width: 100%;
+      max-width: 640px;
+      text-align: center;
+      border: 3px solid #1B3A5C;
+      border-radius: 24px;
+      overflow: hidden;
+    }
+    .header { background: #1B3A5C; color: #fff; padding: 28px 24px 22px; }
+    .header .org { font-size: 14px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.8; }
+    .header h1 { font-size: 30px; font-weight: 800; margin-top: 6px; }
+    .gold { height: 5px; background: #D4A017; }
+    .body { padding: 32px 28px 24px; }
+    .lead { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 15px; color: #4b5563; margin-top: 6px; }
+    .qr {
+      width: 300px; height: 300px;
+      margin: 26px auto 18px;
+      padding: 14px;
+      border: 2px solid #E8DFC9;
+      border-radius: 16px;
+    }
+    .qr svg { width: 100%; height: 100%; display: block; }
+    .url {
+      display: inline-block;
+      font-family: ui-monospace, monospace;
+      font-size: 16px; font-weight: 700;
+      background: #FEF3C7; color: #92400E;
+      padding: 10px 18px; border-radius: 10px;
+      margin-top: 4px;
+    }
+    .steps { font-size: 14px; color: #374151; margin-top: 22px; line-height: 1.6; }
+    .footer {
+      border-top: 1px solid #E5E7EB;
+      padding: 14px; font-size: 12px; color: #9CA3AF;
+    }
+    .flag { height: 6px; background: linear-gradient(90deg,#CE1126 33%,#FCD116 33% 66%,#006B3F 66%); }
+  </style>
+</head>
+<body>
+  <div class="poster">
+    <div class="header">
+      <div class="org">Office of the Head of the Civil Service</div>
+      <h1>Visitor Check-In</h1>
+    </div>
+    <div class="gold"></div>
+    <div class="body">
+      <div class="lead">Scan to check in</div>
+      <div class="sub">Point your phone camera at the code — no app or password needed.</div>
+      <div class="qr">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33 33" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h33v33H0z"/><path stroke="#1B3A5C" d="M2 2.5h7m1 0h2m4 0h3m1 0h1m3 0h7M2 3.5h1m5 0h1m2 0h1m1 0h1m2 0h1m1 0h2m1 0h1m2 0h1m5 0h1M2 4.5h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h4m2 0h1m1 0h3m1 0h1M2 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m4 0h1m2 0h1m1 0h1m1 0h1m1 0h3m1 0h1M2 6.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h5m3 0h1m1 0h3m1 0h1M2 7.5h1m5 0h1m1 0h2m1 0h1m4 0h1m1 0h2m2 0h1m5 0h1M2 8.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M10 9.5h2m1 0h1m1 0h1m3 0h1m1 0h1M2 10.5h1m3 0h1m1 0h3m1 0h2m1 0h1m1 0h1m1 0h1m1 0h7m2 0h1M5 11.5h1m1 0h1m1 0h1m1 0h2m2 0h4m1 0h1m2 0h8M2 12.5h3m1 0h1m1 0h2m2 0h1m1 0h1m2 0h1m1 0h1m4 0h3m3 0h1M2 13.5h1m3 0h1m3 0h2m4 0h5m2 0h3m1 0h1m1 0h2M2 14.5h1m1 0h1m2 0h2m1 0h1m2 0h5m1 0h1m2 0h2m1 0h1m3 0h1M3 15.5h1m1 0h3m2 0h4m3 0h4m3 0h7M2 16.5h1m1 0h1m3 0h3m2 0h5m2 0h1m1 0h1m1 0h1m2 0h2m1 0h1M3 17.5h5m2 0h3m1 0h2m2 0h2m1 0h2m2 0h1m3 0h2M4 18.5h1m1 0h4m1 0h1m1 0h1m1 0h1m1 0h1m2 0h2m5 0h1M2 19.5h2m1 0h1m1 0h1m1 0h1m2 0h1m2 0h4m1 0h1m3 0h4m1 0h2M8 20.5h1m2 0h2m4 0h1m1 0h1m3 0h2m3 0h1m1 0h1M4 21.5h3m2 0h1m2 0h1m1 0h1m1 0h1m2 0h4m1 0h1m1 0h1m2 0h2M2 22.5h12m1 0h3m1 0h2m1 0h6m2 0h1M10 23.5h2m2 0h1m2 0h1m1 0h4m3 0h1m3 0h1M2 24.5h7m1 0h1m1 0h2m1 0h3m2 0h3m1 0h1m1 0h3m1 0h1M2 25.5h1m5 0h1m2 0h3m1 0h1m3 0h1m2 0h1m3 0h1m3 0h1M2 26.5h1m1 0h3m1 0h1m1 0h4m1 0h1m3 0h1m1 0h7m1 0h1M2 27.5h1m1 0h3m1 0h1m2 0h3m1 0h6m1 0h2m6 0h1M2 28.5h1m1 0h3m1 0h1m2 0h4m2 0h2m1 0h2m5 0h4M2 29.5h1m5 0h1m2 0h3m1 0h1m2 0h3m1 0h1m1 0h1m1 0h2m1 0h2M2 30.5h7m1 0h4m4 0h2m2 0h1m3 0h1m2 0h1"/></svg>
+      </div>
+      <div class="url">smartgate.ohcsghana.org/kiosk</div>
+      <div class="steps">
+        Fill in your details &middot; take a quick photo &middot; receive your visitor badge.<br>
+        On the way out, choose <strong>Check Out</strong> and scan your badge.
+      </div>
+    </div>
+    <div class="footer">Need help? Please see the reception desk.</div>
+    <div class="flag"></div>
+  </div>
+</body>
+</html>
