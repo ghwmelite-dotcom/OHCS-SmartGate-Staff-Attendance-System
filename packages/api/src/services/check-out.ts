@@ -1,16 +1,9 @@
 import type { Env } from '../types';
+import { SELECT_VISIT_WITH_JOINS } from './visit-queries';
 
 export type CheckOutOutcome =
   | { ok: true; visit: Record<string, unknown> }
   | { ok: false; code: 'NOT_FOUND' | 'ALREADY_CHECKED_OUT' };
-
-const SELECT_VISIT_WITH_JOINS = `SELECT v.*, vis.first_name, vis.last_name, vis.organisation,
-        COALESCE(o.name, v.host_name_manual) as host_name, d.abbreviation as directorate_abbr
- FROM visits v
- JOIN visitors vis ON v.visitor_id = vis.id
- LEFT JOIN officers o ON v.host_officer_id = o.id
- LEFT JOIN directorates d ON v.directorate_id = d.id
- WHERE v.id = ?`;
 
 export async function checkOutById(env: Env, visitId: string): Promise<CheckOutOutcome> {
   const visit = await env.DB.prepare('SELECT id, check_in_at, status FROM visits WHERE id = ?')
