@@ -72,15 +72,6 @@ app.post('/api/telegram/webhook', telegramWebhook);
 
 // Protected routes
 app.use('/api/*', authMiddleware);
-app.get('/api/photos/visitors/:id', async (c) => {
-  const visitorId = c.req.param('id');
-  const object = await c.env.STORAGE.get(`photos/visitors/${visitorId}.jpg`);
-  if (!object) return c.json({ data: null, error: { code: 'NOT_FOUND', message: 'Photo not found' } }, 404);
-  const headers = new Headers();
-  headers.set('Content-Type', 'image/jpeg');
-  headers.set('Cache-Control', 'public, max-age=3600');
-  return new Response(object.body, { headers });
-});
 app.get('/api/photos/clock/:id', async (c) => {
   const clockId = c.req.param('id');
   const object = await c.env.STORAGE.get(`photos/clock/${clockId}.jpg`);
