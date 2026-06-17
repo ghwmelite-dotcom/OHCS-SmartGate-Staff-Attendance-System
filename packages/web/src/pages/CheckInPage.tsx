@@ -54,7 +54,7 @@ const checkInSchema = z.object({
 type CheckInForm = z.infer<typeof checkInSchema>;
 
 /* ---- Steps ---- */
-type Step = 'search' | 'new-visitor' | 'photo' | 'check-in' | 'success';
+type Step = 'search' | 'new-visitor' | 'photo' | 'id-photo' | 'check-in' | 'success';
 
 export function CheckInPage() {
   const navigate = useNavigate();
@@ -169,6 +169,23 @@ export function CheckInPage() {
       queryClient.invalidateQueries({ queryKey: ['visitors'] });
     } catch {
       // Photo upload failed silently — continue to check-in
+    }
+    setStep('id-photo');
+  }
+
+  /* ---- ID photo upload ---- */
+  async function handleIdPhotoCapture(blob: Blob) {
+    if (!selectedVisitor) { setStep('check-in'); return; }
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      await fetch(`${import.meta.env.PROD ? 'https://ohcs-smartgate-api.ohcsghana-main.workers.dev' : ''}/api/photos/visitors/${selectedVisitor.id}/id-photo`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'image/jpeg' },
+        body: arrayBuffer,
+      });
+    } catch {
+      // ID photo upload failed silently — continue to check-in
     }
     setStep('check-in');
   }
@@ -382,6 +399,29 @@ export function CheckInPage() {
             <PhotoCapture
               existingPhotoUrl={(selectedVisitor as Visitor & { photo_url?: string }).photo_url || null}
               onCapture={handlePhotoCapture}
+              onSkip={() => setStep('check-in')}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* STEP 2c: ID photo capture */}
+      {step === 'id-photo' && selectedVisitor && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
+              ID Document Photo
+            </h2>
+            <p className="text-[14px] text-muted mt-0.5">
+              Photograph {selectedVisitor.first_name}'s ID document
+            </p>
+          </div>
+          <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
+            <PhotoCapture
+              title="Photograph the ID"
+              facingMode="environment"
+              mirror={false}
+              onCapture={handleIdPhotoCapture}
               onSkip={() => setStep('check-in')}
             />
           </div>

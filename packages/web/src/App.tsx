@@ -160,6 +160,7 @@ export function App() {
             <Route path="visitors/:id" element={<VisitorDetailPage />} />
             <Route path="link-telegram" element={<LinkTelegramPage />} />
             <Route path="checkout/:code" element={<BadgeCheckoutPage />} />
+            <Route path="checkout" element={<BadgeCheckoutPage />} />
             <Route path="visit-log" element={<VisitLogPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="reports" element={<ReportsPage />} />
