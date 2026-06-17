@@ -6,6 +6,7 @@ import { success, created, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
 import { CreateVisitorSchema, KioskCheckInSchema, KioskCheckOutSchema } from '../lib/validation';
 import { visitorPhotoKey, visitorIdPhotoKey } from '../lib/photo-key';
+import { uploadVisitorPhoto } from '../lib/photo-upload';
 import { performCheckIn } from '../services/check-in';
 import { checkOutByBadgeCode } from '../services/check-out';
 
@@ -45,11 +46,8 @@ kioskRoutes.post('/visitors/:id/photo', async (c) => {
   const buf = await c.req.arrayBuffer();
   if (buf.byteLength === 0) return error(c, 'EMPTY_BODY', 'No photo data', 400);
   if (buf.byteLength > MAX_PHOTO_BYTES) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
-  await c.env.STORAGE.put(visitorPhotoKey(visitorId), buf, { httpMetadata: { contentType: 'image/jpeg' } });
   const photoUrl = `/api/photos/visitors/${visitorId}`;
-  await c.env.DB.prepare(
-    "UPDATE visitors SET photo_url = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?"
-  ).bind(photoUrl, visitorId).run();
+  await uploadVisitorPhoto(c.env, visitorId, buf, visitorPhotoKey(visitorId), 'photo_url', photoUrl);
   return success(c, { photo_url: photoUrl });
 });
 
@@ -62,11 +60,8 @@ kioskRoutes.post('/visitors/:id/id-photo', async (c) => {
   const buf = await c.req.arrayBuffer();
   if (buf.byteLength === 0) return error(c, 'EMPTY_BODY', 'No photo data', 400);
   if (buf.byteLength > MAX_PHOTO_BYTES) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
-  await c.env.STORAGE.put(visitorIdPhotoKey(visitorId), buf, { httpMetadata: { contentType: 'image/jpeg' } });
   const idPhotoUrl = `/api/photos/visitors/${visitorId}/id`;
-  await c.env.DB.prepare(
-    "UPDATE visitors SET id_photo_url = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?"
-  ).bind(idPhotoUrl, visitorId).run();
+  await uploadVisitorPhoto(c.env, visitorId, buf, visitorIdPhotoKey(visitorId), 'id_photo_url', idPhotoUrl);
   return success(c, { id_photo_url: idPhotoUrl });
 });
 

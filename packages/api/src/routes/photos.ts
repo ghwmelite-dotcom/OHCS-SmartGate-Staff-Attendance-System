@@ -2,26 +2,11 @@ import { Hono } from 'hono';
 import type { Env, SessionData } from '../types';
 import { success, error, notFound } from '../lib/response';
 import { visitorPhotoKey, visitorIdPhotoKey } from '../lib/photo-key';
+import { uploadVisitorPhoto } from '../lib/photo-upload';
 
 export const photoRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
 const MAX_PHOTO_BYTES = 500_000;
-
-// Shared raw-JPEG upload handler. Stores to R2 under `key` and writes the
-// resulting public URL into `column` on the visitor row.
-async function uploadVisitorPhoto(
-  env: Env,
-  visitorId: string,
-  body: ArrayBuffer,
-  key: string,
-  column: 'photo_url' | 'id_photo_url',
-  publicUrl: string,
-): Promise<void> {
-  await env.STORAGE.put(key, body, { httpMetadata: { contentType: 'image/jpeg' } });
-  await env.DB.prepare(
-    `UPDATE visitors SET ${column} = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?`
-  ).bind(publicUrl, visitorId).run();
-}
 
 // Upload visitor face photo — accepts raw JPEG body
 photoRoutes.post('/visitors/:id/photo', async (c) => {
