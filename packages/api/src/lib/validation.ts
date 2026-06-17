@@ -18,7 +18,7 @@ export const CreateVisitorSchema = z.object({
   phone: ghanaPhoneSchema,
   email: z.string().email().max(255).optional().or(z.literal('')),
   organisation: z.string().max(200).optional().or(z.literal('')),
-  id_type: idTypeSchema.optional(),
+  id_type: idTypeSchema.optional().or(z.literal('')),
   id_number: z.string().max(50).optional().or(z.literal('')),
 });
 

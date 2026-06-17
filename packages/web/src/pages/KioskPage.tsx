@@ -153,7 +153,7 @@ export function KioskPage() {
               <input {...form.register('organisation')} className={fieldCls} />
             </Field>
             <Field label="ID Type (optional)">
-              <select {...form.register('id_type')} className={fieldCls}>
+              <select {...form.register('id_type', { setValueAs: (v) => v || undefined })} className={fieldCls}>
                 <option value="">Select...</option>
                 {ID_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
@@ -219,7 +219,7 @@ export function KioskPage() {
           <div className="mt-6 text-center space-y-4">
             <h2 className="text-lg font-semibold text-foreground">Confirm Check Out</h2>
             <div className="w-24 h-24 rounded-2xl overflow-hidden mx-auto border-2 border-border">
-              <img src={`${API_BASE}/badges/${checkoutBadge}/photo`} alt="" className="w-full h-full object-cover" />
+              <img src={`${API_BASE}/badges/${checkoutBadge}/photo`} alt="" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
             </div>
             <p className="text-sm font-mono text-accent">{checkoutBadge}</p>
             {submitError && <p className="text-danger text-xs">{submitError}</p>}

@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 import type { Env } from '../types';
 import { success, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
+import { visitorPhotoKey } from '../lib/photo-key';
 
 export const badgeRoutes = new Hono<{ Bindings: Env }>();
 
@@ -70,7 +71,7 @@ badgeRoutes.get('/:code/photo', async (c) => {
   ).bind(code).first<{ visitor_id: string }>();
   if (!row) return notFound(c, 'Photo');
 
-  const object = await c.env.STORAGE.get(`photos/visitors/${row.visitor_id}.jpg`);
+  const object = await c.env.STORAGE.get(visitorPhotoKey(row.visitor_id));
   if (!object) return notFound(c, 'Photo');
 
   const headers = new Headers();
