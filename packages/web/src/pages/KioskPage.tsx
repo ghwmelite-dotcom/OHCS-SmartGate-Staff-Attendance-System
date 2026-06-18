@@ -4,7 +4,7 @@ import QRCode from 'qrcode';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { kioskApi, type KioskVisit } from '@/lib/kioskApi';
+import { kioskApi, type KioskVisit, type KioskDirectorate } from '@/lib/kioskApi';
 import { API_BASE, ID_TYPES } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
@@ -13,11 +13,15 @@ import { CheckCircle2, LogIn, LogOut, Loader2, X } from 'lucide-react';
 const visitorSchema = z.object({
   first_name: z.string().min(1, 'First name is required').max(100),
   last_name: z.string().min(1, 'Last name is required').max(100),
-  phone: z.string().regex(/^(\+233|0)\d{9}$/, 'Invalid Ghana phone').or(z.literal('')).optional(),
+  phone: z.string().regex(/^(\+233|0)\d{9}$/, 'A valid Ghana phone is required'),
   organisation: z.string().max(200).optional(),
-  id_type: z.enum(['ghana_card', 'passport', 'drivers_license', 'staff_id', 'other']).optional(),
+  directorate_id: z.string().min(1, 'Select a directorate'),
+  host_name: z.string().min(1, 'Enter who you are visiting').max(100),
+  id_type: z.enum(['ghana_card', 'passport', 'drivers_license', 'staff_id', 'other'], {
+    errorMap: () => ({ message: 'Select an ID type' }),
+  }),
   id_number: z.string().max(50).optional(),
-  purpose_raw: z.string().max(500).optional(),
+  purpose_raw: z.string().min(1, 'Purpose of visit is required').max(500),
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
 
@@ -37,8 +41,15 @@ export function KioskPage() {
 
   const form = useForm<VisitorForm>({
     resolver: zodResolver(visitorSchema),
-    defaultValues: { first_name: '', last_name: '', phone: '', organisation: '', id_number: '', purpose_raw: '' },
+    defaultValues: { first_name: '', last_name: '', phone: '', organisation: '', directorate_id: '', host_name: '', id_number: '', purpose_raw: '' },
   });
+
+  const [directorates, setDirectorates] = useState<KioskDirectorate[]>([]);
+  useEffect(() => {
+    if (mode === 'form' && directorates.length === 0) {
+      kioskApi.getDirectorates().then(setDirectorates).catch(() => { /* leave empty; reception assists */ });
+    }
+  }, [mode, directorates.length]);
 
   async function onSubmitForm(data: VisitorForm) {
     setSubmitError(null);
@@ -76,7 +87,9 @@ export function KioskPage() {
     try {
       const visit = await kioskApi.checkIn({
         visitor_id: visitorId,
-        purpose_raw: form.getValues('purpose_raw') || '',
+        directorate_id: form.getValues('directorate_id'),
+        host_name_manual: form.getValues('host_name'),
+        purpose_raw: form.getValues('purpose_raw'),
       });
       setCreatedVisit(visit);
       setMode('success');
@@ -146,13 +159,24 @@ export function KioskPage() {
                 <input {...form.register('last_name')} className={fieldCls} />
               </Field>
             </div>
-            <Field label="Phone (optional)" error={form.formState.errors.phone?.message}>
+            <Field label="Phone" error={form.formState.errors.phone?.message}>
               <input {...form.register('phone')} className={fieldCls} placeholder="0241234567" />
             </Field>
             <Field label="Organisation (optional)">
               <input {...form.register('organisation')} className={fieldCls} />
             </Field>
-            <Field label="ID Type (optional)">
+            <Field label="Directorate" error={form.formState.errors.directorate_id?.message}>
+              <select {...form.register('directorate_id')} className={fieldCls}>
+                <option value="">Select directorate...</option>
+                {directorates.map((d) => (
+                  <option key={d.id} value={d.id}>{d.abbreviation} — {d.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Who are you visiting?" error={form.formState.errors.host_name?.message}>
+              <input {...form.register('host_name')} className={fieldCls} placeholder="e.g. Mr. Mensah" />
+            </Field>
+            <Field label="ID Type" error={form.formState.errors.id_type?.message}>
               <select {...form.register('id_type', { setValueAs: (v) => v || undefined })} className={fieldCls}>
                 <option value="">Select...</option>
                 {ID_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
@@ -161,7 +185,7 @@ export function KioskPage() {
             <Field label="ID Number (optional)">
               <input {...form.register('id_number')} className={fieldCls} />
             </Field>
-            <Field label="Purpose of Visit (optional)">
+            <Field label="Purpose of Visit" error={form.formState.errors.purpose_raw?.message}>
               <textarea {...form.register('purpose_raw')} rows={2} className={`${fieldCls} h-auto py-2 resize-none`} />
             </Field>
             {submitError && <p className="text-danger text-xs">{submitError}</p>}
@@ -176,13 +200,13 @@ export function KioskPage() {
 
         {mode === 'face' && (
           <div className="mt-6">
-            <PhotoCapture title="Take Your Photo" facingMode="user" onCapture={handleFaceCapture} onSkip={() => setMode('id')} />
+            <PhotoCapture title="Take Your Photo" facingMode="user" required onCapture={handleFaceCapture} onSkip={() => setMode('id')} />
           </div>
         )}
 
         {mode === 'id' && (
           <div className="mt-6">
-            <PhotoCapture title="Photograph Your ID" facingMode="environment" mirror={false} onCapture={handleIdCapture} onSkip={finishCheckIn} />
+            <PhotoCapture title="Photograph Your ID" facingMode="environment" mirror={false} required onCapture={handleIdCapture} onSkip={finishCheckIn} />
           </div>
         )}
 

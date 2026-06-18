@@ -13,6 +13,8 @@ interface PhotoCaptureProps {
   title?: string;
   /** Mirror the preview/capture horizontally. Defaults true for selfies, set false for IDs. */
   mirror?: boolean;
+  /** When true, the visitor must capture — the Skip button is hidden. */
+  required?: boolean;
 }
 
 export function PhotoCapture({
@@ -22,6 +24,7 @@ export function PhotoCapture({
   facingMode = 'user',
   title,
   mirror = facingMode === 'user',
+  required = false,
 }: PhotoCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -179,12 +182,14 @@ export function PhotoCapture({
       <div className="flex items-center justify-center gap-3">
         {!captured ? (
           <>
-            <button
-              onClick={onSkip}
-              className="h-10 px-4 text-[13px] font-medium text-muted hover:text-foreground transition-colors"
-            >
-              Skip Photo
-            </button>
+            {!required && (
+              <button
+                onClick={onSkip}
+                className="h-10 px-4 text-[13px] font-medium text-muted hover:text-foreground transition-colors"
+              >
+                Skip Photo
+              </button>
+            )}
             <button
               onClick={capture}
               disabled={!cameraReady}
