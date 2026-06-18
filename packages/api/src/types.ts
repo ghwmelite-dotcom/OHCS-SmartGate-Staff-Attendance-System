@@ -21,9 +21,7 @@ export type Role =
   | 'receptionist'
   | 'it'
   | 'director'
-  | 'staff'
-  | 'hr'
-  | 'visitor';
+  | 'staff';
 
 export type UserType = 'staff' | 'nss';
 

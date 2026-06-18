@@ -17,7 +17,7 @@ const userRowSchema = z.object({
   email: z.string().email(),
   staff_id: z.string().min(1),
   pin: z.string().length(4).regex(/^\d{4}$/),
-  role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff', 'hr']),
+  role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']),
   grade: z.string().optional().or(z.literal('')),
   directorate_code: z.string().optional().or(z.literal('')),
 });

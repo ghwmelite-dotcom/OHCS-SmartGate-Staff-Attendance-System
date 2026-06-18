@@ -15,7 +15,7 @@ const searchSchema = z.object({
 });
 
 visitorRoutes.get('/', zValidator('query', searchSchema), async (c) => {
-  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'hr');
+  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
   if (blocked) return blocked;
   const { q, limit, cursor } = c.req.valid('query');
   let sql = 'SELECT * FROM visitors';
@@ -50,7 +50,7 @@ visitorRoutes.get('/', zValidator('query', searchSchema), async (c) => {
 });
 
 visitorRoutes.get('/:id', async (c) => {
-  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'hr');
+  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
   if (blocked) return blocked;
   const id = c.req.param('id');
   const visitor = await c.env.DB.prepare('SELECT * FROM visitors WHERE id = ?').bind(id).first();

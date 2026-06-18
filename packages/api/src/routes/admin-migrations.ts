@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, SessionData } from '../types';
-import { success, error } from '../lib/response';
+import { success } from '../lib/response';
 import { requireRole } from '../lib/require-role';
 import { MIGRATIONS, sha256Hex } from '../db/migrations-index';
 
@@ -54,44 +54,4 @@ adminMigrationsRoutes.post('/run', async (c) => {
   }
 
   return success(c, { applied, skipped, failures });
-});
-
-// One-time, idempotent fix: drop the legacy users.role CHECK constraint via a
-// single DB.batch() transaction (the only place PRAGMA defer_foreign_keys is
-// honored). Not handled by /run because prod's applied_migrations is out of sync.
-adminMigrationsRoutes.post('/drop-users-role-check', async (c) => {
-  const blocked = requireRole(c, 'superadmin');
-  if (blocked) return blocked;
-
-  const ddl = await c.env.DB.prepare(
-    "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
-  ).first<{ sql: string }>();
-  if (!ddl) return error(c, 'NO_USERS_TABLE', 'users table not found', 500);
-
-  // Idempotent: if the role CHECK is already gone, do nothing.
-  if (!/CHECK\s*\(\s*role\s+IN/i.test(ddl.sql)) {
-    return success(c, { status: 'already-dropped' });
-  }
-
-  const migration = MIGRATIONS.find((m) => m.filename === 'migration-users-role-check-drop.sql');
-  if (!migration) return error(c, 'MIGRATION_MISSING', 'migration not registered', 500);
-
-  // Same strip-comments / split-on-`;\n` logic as the /run handler.
-  const cleaned = migration.sql
-    .split('\n')
-    .filter((line) => !line.trim().startsWith('--'))
-    .join('\n');
-  const statements = cleaned
-    .split(/;\s*\n/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-
-  try {
-    // Single transaction → PRAGMA defer_foreign_keys=TRUE (first statement) holds,
-    // so DROP TABLE users is allowed and FK integrity re-checks at commit.
-    await c.env.DB.batch(statements.map((s) => c.env.DB.prepare(s)));
-    return success(c, { status: 'applied', statements: statements.length });
-  } catch (err) {
-    return error(c, 'MIGRATION_FAILED', err instanceof Error ? err.message : String(err), 500);
-  }
 });

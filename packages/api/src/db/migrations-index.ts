@@ -17,8 +17,6 @@ import nssFoundation from './migration-nss-foundation.sql';
 import clockinReauth from './migration-clockin-reauth.sql';
 import passiveLiveness from './migration-passive-liveness.sql';
 import kioskVisitor from './migration-kiosk-visitor.sql';
-import hrRole from './migration-hr-role.sql';
-import usersRoleCheckDrop from './migration-users-role-check-drop.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -40,8 +38,6 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-clockin-reauth.sql', sql: clockinReauth },
   { filename: 'migration-passive-liveness.sql', sql: passiveLiveness },
   { filename: 'migration-kiosk-visitor.sql', sql: kioskVisitor },
-  { filename: 'migration-hr-role.sql', sql: hrRole },
-  { filename: 'migration-users-role-check-drop.sql', sql: usersRoleCheckDrop },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {

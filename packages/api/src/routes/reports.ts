@@ -15,7 +15,7 @@ const reportSchema = z.object({
 });
 
 reportRoutes.get('/visits', zValidator('query', reportSchema), async (c) => {
-  const blocked = requireRole(c, 'superadmin', 'admin', 'director', 'receptionist', 'hr');
+  const blocked = requireRole(c, 'superadmin', 'admin', 'director', 'receptionist');
   if (blocked) return blocked;
   const { from, to, directorate_id, limit } = c.req.valid('query');
 

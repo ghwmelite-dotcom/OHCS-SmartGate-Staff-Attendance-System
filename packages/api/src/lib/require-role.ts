@@ -8,9 +8,7 @@ export type Role =
   | 'receptionist'
   | 'it'
   | 'director'
-  | 'staff'
-  | 'hr'
-  | 'visitor';
+  | 'staff';
 
 export function requireRole(
   c: Context<{ Bindings: Env; Variables: { session: SessionData } }>,
