@@ -19,8 +19,10 @@ import { sendToAdminSubscribers } from './daily-summary';
 interface ExpiringRow {
   name: string;
   nss_number: string | null;
+  intern_code: string | null;
   directorate_abbr: string | null;
   nss_end_date: string;
+  user_type: string;
 }
 
 export interface NssEosResult {
@@ -48,18 +50,21 @@ function formatDateGB(iso: string): string {
 
 function buildMessage(rows: ExpiringRow[], deactivated: number): string {
   const lines: string[] = [];
-  lines.push('⏰ <b>NSS End-of-Service — This Week</b>');
+  lines.push('⏰ <b>Service Personnel Ending — This Week</b>');
   lines.push(
-    `${rows.length} National Service Personnel finish their service in the next 7 days.`,
+    `${rows.length} service personnel (NSS & interns) finish in the next 7 days.`,
   );
   lines.push('');
 
   for (const r of rows.slice(0, MAX_LIST_NAMES)) {
     const name = escapeHtml(r.name);
-    const nssNumber = r.nss_number ? escapeHtml(r.nss_number) : '—';
     const dir = r.directorate_abbr ? escapeHtml(r.directorate_abbr) : '—';
     const ends = formatDateGB(r.nss_end_date);
-    lines.push(`• ${name} (${nssNumber}) — ${dir} — ends ${ends}`);
+    const typeTag = r.user_type === 'intern' ? 'Intern' : 'NSS';
+    const idLabel = r.user_type === 'intern'
+      ? (r.intern_code ? escapeHtml(r.intern_code) : '—')
+      : (r.nss_number ? escapeHtml(r.nss_number) : '—');
+    lines.push(`• ${name} (${idLabel}) — ${dir} — ${typeTag} — ends ${ends}`);
   }
 
   if (rows.length > MAX_LIST_NAMES) {
@@ -92,7 +97,7 @@ export async function runNssEndOfServiceCheck(env: Env): Promise<NssEosResult> {
       `UPDATE users
           SET is_active = 0,
               updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        WHERE user_type = 'nss'
+        WHERE user_type IN ('nss','intern')
           AND is_active = 1
           AND nss_end_date IS NOT NULL
           AND nss_end_date < ?`,
@@ -108,11 +113,13 @@ export async function runNssEndOfServiceCheck(env: Env): Promise<NssEosResult> {
     .prepare(
       `SELECT u.name,
               u.nss_number,
+              u.intern_code,
               d.abbreviation AS directorate_abbr,
-              u.nss_end_date
+              u.nss_end_date,
+              u.user_type
          FROM users u
          LEFT JOIN directorates d ON u.directorate_id = d.id
-        WHERE u.user_type = 'nss'
+        WHERE u.user_type IN ('nss','intern')
           AND u.is_active = 1
           AND u.nss_end_date IS NOT NULL
           AND u.nss_end_date >= ?
@@ -132,10 +139,10 @@ export async function runNssEndOfServiceCheck(env: Env): Promise<NssEosResult> {
     // Edge case: someone ended yesterday but nobody is finishing this week.
     // Still tell admins so the deactivation isn't silent.
     const lines = [
-      '⏰ <b>NSS End-of-Service</b>',
+      '⏰ <b>Service Personnel Ending</b>',
       `Auto-deactivated today: ${deactivated}`,
       '',
-      'No National Service Personnel finish their service in the next 7 days.',
+      'No service personnel finish in the next 7 days.',
       '',
       '— OHCS Staff Attendance',
     ];
