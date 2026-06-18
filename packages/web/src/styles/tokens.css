@@ -58,6 +58,25 @@
   background-position: 0 0, 0 10px, 10px -10px, -10px 0;
 }
 
+/* Civic Prestige kiosk backdrop — deep-green letterhead crown fading to warm cream,
+   gold ambient warmth at the foot, over a faint guilloché security-paper weave.
+   Pairs with a faint OHCS-crest watermark element + a Ghana-flag stripe on the card. */
+.bg-civic {
+  background-color: #FEFCF6;
+  background-image:
+    radial-gradient(135% 78% at 50% -10%, rgba(15, 46, 27, 0.95) 0%, rgba(26, 77, 46, 0.42) 14%, rgba(26, 77, 46, 0) 40%),
+    radial-gradient(95% 55% at 50% 114%, rgba(212, 160, 23, 0.16) 0%, rgba(212, 160, 23, 0) 60%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='32'%3E%3Cpath d='M0 16 Q16 2 32 16 T64 16' fill='none' stroke='%231A4D2E' stroke-opacity='0.05' stroke-width='1'/%3E%3Cpath d='M0 24 Q16 10 32 24 T64 24' fill='none' stroke='%23D4A017' stroke-opacity='0.06' stroke-width='1'/%3E%3C/svg%3E");
+  background-repeat: no-repeat, no-repeat, repeat;
+}
+.dark .bg-civic {
+  background-color: #0F1410;
+  background-image:
+    radial-gradient(135% 78% at 50% -10%, rgba(0, 0, 0, 0.6) 0%, rgba(26, 77, 46, 0.35) 16%, rgba(26, 77, 46, 0) 42%),
+    radial-gradient(95% 55% at 50% 114%, rgba(212, 160, 23, 0.1) 0%, rgba(212, 160, 23, 0) 60%);
+  background-repeat: no-repeat, no-repeat;
+}
+
 /* Gold shimmer effect for accents */
 .gold-shimmer {
   background: linear-gradient(135deg, #D4A017 0%, #F5D76E 50%, #D4A017 100%);
