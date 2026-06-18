@@ -10,6 +10,7 @@ import { apiOrQueue, type ApiOrQueueResult } from '@/lib/offlineQueue';
 import { cn, getInitials, formatDate } from '@/lib/utils';
 import { BADGE_BASE, ID_TYPES } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
+import { FieldWrapper } from '@/components/checkin/FieldWrapper';
 import { toast } from '@/stores/toast';
 import { playCheckInChime } from '@/lib/sounds';
 import {
@@ -609,28 +610,6 @@ export function CheckInPage() {
 const fieldCls =
   'w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary';
 
-function FieldWrapper({
-  icon,
-  label,
-  error,
-  children,
-}: {
-  icon?: React.ReactNode;
-  label: string;
-  error?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="flex items-center gap-1.5 text-xs font-medium text-foreground mb-1.5">
-        {icon && <span className="text-muted">{icon}</span>}
-        {label}
-      </label>
-      {children}
-      {error && <p className="text-danger text-xs mt-1">{error}</p>}
-    </div>
-  );
-}
 
 /* ---- Smart routing based on purpose keywords ---- */
 
