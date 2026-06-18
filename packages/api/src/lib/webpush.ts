@@ -97,7 +97,19 @@ export async function encryptPayload(payload: Uint8Array, p256dhB64: string, aut
 }
 
 async function trackPushStatus(env: { KV: KVNamespace }, status: number): Promise<void> {
+  // Unified outcome log + ok/fail counter (cross-channel observability).
   await recordNotifyOutcome(env, 'push', status >= 200 && status < 300, String(status));
+  // Per-HTTP-status counters power the superadmin push-health endpoint
+  // (routes/admin-health.ts GET /push). Best-effort; never throws.
+  try {
+    const date = new Date().toISOString().slice(0, 10);
+    const key = `push-stat:${date}:${status}`;
+    const raw = await env.KV.get(key);
+    const n = raw ? parseInt(raw, 10) : 0;
+    await env.KV.put(key, String(n + 1), { expirationTtl: 8 * 86400 });
+  } catch {
+    // best-effort — counters never affect delivery
+  }
 }
 
 export interface WebPushEnv {
