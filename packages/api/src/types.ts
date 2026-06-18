@@ -4,6 +4,7 @@ export interface Env {
   STORAGE: R2Bucket;
   AI: Ai;
   TELEGRAM_BOT_TOKEN: string;
+  TELEGRAM_BOT_USERNAME: string;
   TELEGRAM_WEBHOOK_SECRET?: string;
   ENVIRONMENT: string;
   VAPID_PUBLIC_X: string;

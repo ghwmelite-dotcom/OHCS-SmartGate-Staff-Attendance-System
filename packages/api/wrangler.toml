@@ -29,6 +29,7 @@ crons = ["*/15 7-9 * * 1-5", "0 9 * * 1-5", "0 16 * * 5", "0 9 1 * *", "0 9 1 1 
 [vars]
 ENVIRONMENT = "production"
 VAPID_SUBJECT = "mailto:ops@ohcs.gov.gh"
+TELEGRAM_BOT_USERNAME = "REPLACE_WITH_BOT_USERNAME"
 # Dev/staging only — accept any webauthn_assertion at clock-in for testing.
 # The Worker refuses requests in production when this is "true".
 DEV_BYPASS_REAUTH = "false"
@@ -54,6 +55,7 @@ binding = "AI"
 [env.dev.vars]
 ENVIRONMENT = "development"
 VAPID_SUBJECT = "mailto:ops@ohcs.gov.gh"
+TELEGRAM_BOT_USERNAME = "REPLACE_WITH_BOT_USERNAME"
 
 [[env.dev.d1_databases]]
 binding = "DB"

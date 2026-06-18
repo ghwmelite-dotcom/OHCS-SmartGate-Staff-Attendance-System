@@ -87,7 +87,7 @@ export function DirectoratesTab() {
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Name</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Type</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Rooms</th>
-                <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Reception</th>
+                <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Reception team</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -104,11 +104,7 @@ export function DirectoratesTab() {
                     </td>
                     <td className="px-6 py-3 text-[13px] text-muted">{d.rooms ?? '—'}</td>
                     <td className="px-6 py-3">
-                      <ReceptionOfficerCell
-                        directorate={d}
-                        officers={officers}
-                        onSaved={() => queryClient.invalidateQueries({ queryKey: ['directorates-admin'] })}
-                      />
+                      <ReceptionTeamCell directorate={d} officers={officers} onChanged={() => queryClient.invalidateQueries({ queryKey: ['directorates-admin'] })} />
                     </td>
                   </tr>
                 );
@@ -180,27 +176,58 @@ export function DirectoratesTab() {
   );
 }
 
-function ReceptionOfficerCell({ directorate, officers, onSaved }: {
+interface ReceiverRow { id: string; name: string; linked: boolean; primary: boolean }
+
+function ReceptionTeamCell({ directorate, officers, onChanged }: {
   directorate: DirectorateExt;
   officers: OfficerExt[];
-  onSaved: () => void;
+  onChanged: () => void;
 }) {
-  const mutation = useMutation({
-    mutationFn: (reception_officer_id: string) =>
-      api.put(`/admin/directorates/${directorate.id}`, { reception_officer_id }),
-    onSuccess: onSaved,
+  const { data, refetch } = useQuery({
+    queryKey: ['dir-receivers', directorate.id],
+    queryFn: () => api.get<ReceiverRow[]>(`/admin/directorates/${directorate.id}/receivers`),
   });
+  const receivers = data?.data ?? [];
+  const [linkUrl, setLinkUrl] = useState<string | null>(null);
+
   const own = officers.filter((o) => o.directorate_id === directorate.id);
+  const candidates = own.filter((o) => !receivers.some((r) => r.id === o.id));
+
+  const after = () => { refetch(); onChanged(); };
+  const addM = useMutation({ mutationFn: (officer_id: string) => api.post(`/admin/directorates/${directorate.id}/receivers`, { officer_id }), onSuccess: after });
+  const delM = useMutation({ mutationFn: (officerId: string) => api.delete(`/admin/directorates/${directorate.id}/receivers/${officerId}`), onSuccess: after });
+  const primaryM = useMutation({ mutationFn: (reception_officer_id: string) => api.put(`/admin/directorates/${directorate.id}`, { reception_officer_id }), onSuccess: after });
+  const linkM = useMutation({ mutationFn: (officerId: string) => api.post<{ url: string }>(`/admin/directorates/officers/${officerId}/link-token`, {}), onSuccess: (r) => setLinkUrl(r.data?.url ?? null) });
+  const unlinkM = useMutation({ mutationFn: (officerId: string) => api.delete(`/admin/directorates/officers/${officerId}/telegram`), onSuccess: after });
+
   return (
-    <select
-      value={directorate.reception_officer_id ?? ''}
-      onChange={(e) => mutation.mutate(e.target.value)}
-      disabled={mutation.isPending}
-      className="h-8 px-2 rounded-lg border border-border bg-background text-[13px] disabled:opacity-50"
-    >
-      <option value="">— none —</option>
-      {own.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-    </select>
+    <div className="space-y-1.5 min-w-[260px]">
+      {receivers.length === 0 && <p className="text-[12px] text-muted">No receivers</p>}
+      {receivers.map((r) => (
+        <div key={r.id} className="flex items-center gap-2 text-[13px] flex-wrap">
+          <span className="font-medium text-foreground">{r.name}</span>
+          {r.primary && <span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded">PRIMARY</span>}
+          <span className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded', r.linked ? 'bg-success/10 text-success' : 'bg-border text-muted')}>{r.linked ? 'linked' : 'not linked'}</span>
+          {!r.primary && <button type="button" onClick={() => primaryM.mutate(r.id)} className="text-[11px] text-primary hover:underline">make primary</button>}
+          <button type="button" onClick={() => linkM.mutate(r.id)} className="text-[11px] text-accent-warm hover:underline">generate link</button>
+          {r.linked && <button type="button" onClick={() => unlinkM.mutate(r.id)} className="text-[11px] text-muted hover:text-danger">unlink</button>}
+          <button type="button" onClick={() => delM.mutate(r.id)} className="text-[11px] text-muted hover:text-danger ml-auto">remove</button>
+        </div>
+      ))}
+      {candidates.length > 0 && (
+        <select value="" onChange={(e) => { if (e.target.value) addM.mutate(e.target.value); }}
+          className="h-8 px-2 rounded-lg border border-border bg-background text-[12px]">
+          <option value="">+ add receiver…</option>
+          {candidates.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      )}
+      {linkUrl && (
+        <div className="text-[11px] space-y-0.5">
+          <input readOnly value={linkUrl} onFocus={(e) => e.currentTarget.select()} className="w-full h-7 px-2 rounded border border-border bg-background font-mono" />
+          <p className="text-muted">Copy &amp; send to the officer; they tap it once on their phone.</p>
+        </div>
+      )}
+    </div>
   );
 }
 

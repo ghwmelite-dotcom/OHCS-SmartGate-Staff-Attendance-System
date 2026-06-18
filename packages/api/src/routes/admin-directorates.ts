@@ -54,12 +54,10 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
   if (body.reception_officer_id !== undefined) {
     const recId = body.reception_officer_id || null;
     if (recId !== null) {
-      const officer = await c.env.DB.prepare('SELECT directorate_id FROM officers WHERE id = ?')
-        .bind(recId).first<{ directorate_id: string }>();
-      if (!officer) return error(c, 'INVALID_OFFICER', 'Officer not found', 400);
-      if (officer.directorate_id !== id) {
-        return error(c, 'INVALID_OFFICER', 'Reception officer must belong to this directorate', 400);
-      }
+      const member = await c.env.DB.prepare(
+        'SELECT 1 FROM directorate_receivers WHERE directorate_id = ? AND officer_id = ?'
+      ).bind(id, recId).first();
+      if (!member) return error(c, 'NOT_A_RECEIVER', 'Add the officer to the team before making them primary', 400);
     }
     fields.push('reception_officer_id = ?');
     values.push(recId);
@@ -72,6 +70,49 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
 
   const row = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first();
   return success(c, row);
+});
+
+// List a directorate's receiver team with link + primary state (superadmin).
+adminDirectorateRoutes.get('/:id/receivers', async (c) => {
+  if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+  const id = c.req.param('id');
+  const dir = await c.env.DB.prepare('SELECT reception_officer_id FROM directorates WHERE id = ?')
+    .bind(id).first<{ reception_officer_id: string | null }>();
+  if (!dir) return notFound(c, 'Directorate');
+  const rows = await c.env.DB.prepare(
+    `SELECT o.id, o.name, (o.telegram_chat_id IS NOT NULL) AS linked
+     FROM directorate_receivers dr JOIN officers o ON dr.officer_id = o.id
+     WHERE dr.directorate_id = ? ORDER BY o.name`
+  ).bind(id).all<{ id: string; name: string; linked: number }>();
+  const receivers = (rows.results ?? []).map((r) => ({
+    id: r.id, name: r.name, linked: !!r.linked, primary: r.id === dir.reception_officer_id,
+  }));
+  return success(c, receivers);
+});
+
+const addReceiverSchema = z.object({ officer_id: z.string().min(1) });
+adminDirectorateRoutes.post('/:id/receivers', zValidator('json', addReceiverSchema), async (c) => {
+  if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+  const id = c.req.param('id');
+  const { officer_id } = c.req.valid('json');
+  const officer = await c.env.DB.prepare('SELECT directorate_id FROM officers WHERE id = ?')
+    .bind(officer_id).first<{ directorate_id: string }>();
+  if (!officer) return error(c, 'INVALID_OFFICER', 'Officer not found', 400);
+  if (officer.directorate_id !== id) return error(c, 'INVALID_OFFICER', 'Officer must belong to this directorate', 400);
+  await c.env.DB.prepare('INSERT OR IGNORE INTO directorate_receivers (directorate_id, officer_id) VALUES (?, ?)')
+    .bind(id, officer_id).run();
+  return created(c, { officer_id });
+});
+
+adminDirectorateRoutes.delete('/:id/receivers/:officerId', async (c) => {
+  if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+  const id = c.req.param('id');
+  const officerId = c.req.param('officerId');
+  await c.env.DB.prepare('DELETE FROM directorate_receivers WHERE directorate_id = ? AND officer_id = ?')
+    .bind(id, officerId).run();
+  await c.env.DB.prepare('UPDATE directorates SET reception_officer_id = NULL WHERE id = ? AND reception_officer_id = ?')
+    .bind(id, officerId).run();
+  return success(c, { removed: true });
 });
 
 // Admin: create/update officers
@@ -131,4 +172,28 @@ adminDirectorateRoutes.put('/officers/:id', zValidator('json', officerUpdateSche
     `SELECT o.*, d.abbreviation as directorate_abbr FROM officers o JOIN directorates d ON o.directorate_id = d.id WHERE o.id = ?`
   ).bind(id).first();
   return success(c, row);
+});
+
+// Generate a one-time Telegram deep-link for an officer (superadmin).
+adminDirectorateRoutes.post('/officers/:id/link-token', async (c) => {
+  if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+  // Guard: until the real bot @username is configured, a deep link would be malformed.
+  if (!c.env.TELEGRAM_BOT_USERNAME || c.env.TELEGRAM_BOT_USERNAME === 'REPLACE_WITH_BOT_USERNAME') {
+    return error(c, 'BOT_NOT_CONFIGURED', 'Telegram bot username is not configured yet. Set TELEGRAM_BOT_USERNAME before generating deep links.', 503);
+  }
+  const id = c.req.param('id');
+  const officer = await c.env.DB.prepare('SELECT id FROM officers WHERE id = ?').bind(id).first();
+  if (!officer) return notFound(c, 'Officer');
+  const token = crypto.randomUUID().replace(/-/g, '');
+  await c.env.KV.put(`officer-link:${token}`, id, { expirationTtl: 7 * 86400 });
+  const url = `https://t.me/${c.env.TELEGRAM_BOT_USERNAME}?start=${token}`;
+  return success(c, { url, token });
+});
+
+// Revoke an officer's Telegram link (superadmin).
+adminDirectorateRoutes.delete('/officers/:id/telegram', async (c) => {
+  if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+  const id = c.req.param('id');
+  await c.env.DB.prepare('UPDATE officers SET telegram_chat_id = NULL WHERE id = ?').bind(id).run();
+  return success(c, { unlinked: true });
 });

@@ -237,6 +237,19 @@ INSERT OR IGNORE INTO app_settings (id, work_start_time, late_threshold_time, wo
 VALUES (1, '08:00', '08:30', '17:00');
 
 -- ---------------------------------------------------------------------------
+-- Directorate reception team (join table)
+-- ---------------------------------------------------------------------------
+-- Officers alerted (private DM + in-app) when a visitor self-routes to this
+-- directorate at the kiosk. directorates.reception_officer_id (the primary) is
+-- always also a row here — enforced at write time.
+CREATE TABLE IF NOT EXISTS directorate_receivers (
+    directorate_id TEXT NOT NULL REFERENCES directorates(id),
+    officer_id     TEXT NOT NULL REFERENCES officers(id),
+    created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    PRIMARY KEY (directorate_id, officer_id)
+);
+
+-- ---------------------------------------------------------------------------
 -- Migration bookkeeping (kept last)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS applied_migrations (
