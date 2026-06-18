@@ -70,12 +70,12 @@ export async function performCheckIn(
     ctx.waitUntil(classifyAndUpdate(visitId, params.purpose_raw, params.directorate_id || null, env));
   }
 
-  if (params.host_officer_id && visit) {
+  if (visit && (params.host_officer_id || params.check_in_source === 'kiosk')) {
     const v = visit as Record<string, unknown>;
     ctx.waitUntil(
       notifyOnCheckIn({
         visit_id: visitId,
-        host_officer_id: params.host_officer_id,
+        host_officer_id: params.host_officer_id || '',
         first_name: String(v.first_name ?? ''),
         last_name: String(v.last_name ?? ''),
         organisation: (v.organisation as string | null) ?? null,
