@@ -141,6 +141,9 @@ async function notifyDirectorateLeadership(data: VisitNotifyData, env: Env): Pro
 
     // Check KV for user-linked Telegram
     const user = await findUserByOfficer(leader, env);
+    if (!leader.telegram_chat_id && !user) {
+      console.warn(JSON.stringify({ kind: 'notify', channel: 'none', ok: false, detail: 'unreachable', officer_id: leader.id, visit_id: data.visit_id }));
+    }
     if (user) {
       const kvChatId = await env.KV.get(`telegram-user:${user.id}`);
       if (kvChatId && kvChatId !== leader.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
