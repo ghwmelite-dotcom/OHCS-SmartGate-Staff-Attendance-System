@@ -1,18 +1,25 @@
 -- migration-intern-foundation.sql
 -- Adds 'intern' to users.user_type and the intern-specific columns.
 --
--- APPLIED OUT-OF-BAND ONLY:
---   node "<repo>/node_modules/wrangler/bin/wrangler.js" d1 execute <db> \
---        --file=src/db/migration-intern-foundation.sql            (local)
---   …add --remote for production (after a backup + confirmation).
+-- APPLIED OUT-OF-BAND ONLY, against REAL D1 (db name: smartgate-db):
+--   node "<repo>/node_modules/wrangler/bin/wrangler.js" d1 execute smartgate-db \
+--        --remote --file=src/db/migration-intern-foundation.sql   (production; back up + confirm first)
 --
 -- This file is intentionally NOT in the MIGRATIONS array in migrations-index.ts:
 -- the per-statement app runner (routes/admin-migrations.ts) cannot run a table
--- rebuild safely (no transaction). SQLite cannot ALTER a column CHECK, so the
--- users table must be rebuilt. defer_foreign_keys defers FK validation to COMMIT;
--- all row ids are preserved through the copy, so the 8 child FKs stay valid.
-PRAGMA defer_foreign_keys=on;
-BEGIN TRANSACTION;
+-- rebuild safely. SQLite cannot ALTER a column CHECK, so the users table must be
+-- rebuilt. Per Cloudflare D1 docs, `wrangler d1 execute --file` runs the whole
+-- file as ONE implicit transaction and D1 forbids explicit BEGIN/COMMIT/SAVEPOINT
+-- statements — so we do NOT write them. `PRAGMA defer_foreign_keys = true` defers
+-- FK validation to the end of that implicit transaction; all row ids are preserved
+-- through the copy, so the 8 child FKs (incl. the ON DELETE CASCADE one) stay valid.
+--
+-- LOCAL miniflare CANNOT run this: its D1 engine commits each statement to Durable
+-- Object storage separately and validates FKs at every commit (ignoring
+-- defer_foreign_keys), so `DROP TABLE users` aborts on any existing child row.
+-- For local dev, re-initialise from schema.sql instead (it already has the final
+-- state): `wrangler d1 execute smartgate-db --local --file=src/db/schema.sql`.
+PRAGMA defer_foreign_keys = true;
 
 CREATE TABLE users_new (
     id               TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
@@ -59,5 +66,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_nss_number_unique ON users(nss_numbe
 CREATE INDEX IF NOT EXISTS idx_users_nss_active ON users(user_type, nss_end_date) WHERE user_type = 'nss';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_intern_code_unique ON users(intern_code) WHERE intern_code IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_users_intern_active ON users(user_type, nss_end_date) WHERE user_type = 'intern';
-
-COMMIT;

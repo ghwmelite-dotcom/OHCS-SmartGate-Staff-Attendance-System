@@ -633,7 +633,12 @@ git commit -m "feat(interns): intern segment in attendance reports/exports"
 
 - [ ] **Step 1: Static gates** — API: `tsc --noEmit` 0 errors + `vitest run` all green (intern-code + admin-interns + existing). Web: `tsc --noEmit` + build `✓`. Staff: `tsc --noEmit`.
 
-- [ ] **Step 2: Remote migration (gated)** — **Confirm with the user before any prod DB write.** First export a backup of `users` (`wrangler d1 execute … --remote --command "SELECT * FROM users;" --json > docs/ops/backups/users-pre-intern-<date>.json`). Read the current prod constraint (`SELECT sql FROM sqlite_master WHERE name='users';`) — per [[prod-users-role-check-drift]], do **not** assume it matches the repo; if it already lacks the user_type CHECK, the rebuild still applies cleanly (it sets the canonical post-state). Apply `--remote --file=src/db/migration-intern-foundation.sql`; re-read the constraint and assert it now contains `'intern'` + the four columns; then record it: `INSERT INTO applied_migrations (filename, hash) VALUES ('migration-intern-foundation.sql', '<sha256 of the file>');`.
+- [ ] **Step 2: Remote migration (gated)** — **Confirm with the user before any prod DB write.** The D1 database name is **`smartgate-db`** (confirmed from `wrangler.toml` in Task 1 — NOT `ohcs-smartgate`). The migration file uses `PRAGMA defer_foreign_keys = true` with **no** explicit `BEGIN/COMMIT` (D1 runs the `--file` as one implicit transaction and forbids explicit transaction statements; this was corrected after Task 1). Steps:
+  1. Back up `users`: `node "…/wrangler.js" d1 execute smartgate-db --remote --command "SELECT * FROM users;" --json > docs/ops/backups/users-pre-intern-<date>.json`.
+  2. Read the current prod constraint: `… --remote --command "SELECT sql FROM sqlite_master WHERE name='users';"` — per [[prod-users-role-check-drift]], do **not** assume it matches the repo; if it already lacks the user_type CHECK, the rebuild still applies cleanly (it sets the canonical post-state). (If prod's real column set differs from the migration's `CREATE TABLE users_new`, STOP and reconcile before applying.)
+  3. Apply: `… --remote --file=src/db/migration-intern-foundation.sql`.
+  4. Re-read the constraint and assert it now contains `'intern'` + the four columns; spot-check `SELECT COUNT(*) FROM users;` matches the pre-count.
+  5. Record it: `… --remote --command "INSERT INTO applied_migrations (filename, hash) VALUES ('migration-intern-foundation.sql', '<sha256 of the file>');"`.
 
 - [ ] **Step 3: Deploy** — merge to `main`, poll `deploy.yml` to `success` (per the standard flow).
 
