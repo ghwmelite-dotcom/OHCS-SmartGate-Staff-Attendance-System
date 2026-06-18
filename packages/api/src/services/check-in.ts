@@ -11,6 +11,7 @@ export interface CheckInParams {
   purpose_raw?: string | null;
   purpose_category?: string | null;
   idempotency_key?: string | null;
+  id_photo_check?: string | null;
   created_by: string | null;
   check_in_source: 'staff' | 'kiosk';
 }
@@ -49,12 +50,13 @@ export async function performCheckIn(
 
   await env.DB.batch([
     env.DB.prepare(
-      `INSERT INTO visits (id, visitor_id, host_officer_id, host_name_manual, directorate_id, purpose_raw, purpose_category, badge_code, status, created_by, idempotency_key, check_in_source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', ?, ?, ?)`
+      `INSERT INTO visits (id, visitor_id, host_officer_id, host_name_manual, directorate_id, purpose_raw, purpose_category, badge_code, status, created_by, idempotency_key, check_in_source, id_photo_check)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', ?, ?, ?, ?)`
     ).bind(
       visitId, params.visitor_id, params.host_officer_id || null, params.host_name_manual || null,
       params.directorate_id || null, params.purpose_raw || null, params.purpose_category || null,
       badgeCode, params.created_by, params.idempotency_key ?? null, params.check_in_source,
+      params.id_photo_check ?? null,
     ),
     env.DB.prepare(
       `UPDATE visitors SET total_visits = total_visits + 1, last_visit_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),

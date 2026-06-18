@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { kioskApi, type KioskVisit, type KioskDirectorate } from '@/lib/kioskApi';
+import { kioskApi, type KioskVisit, type KioskDirectorate, type IdCheckVerdict } from '@/lib/kioskApi';
 import { API_BASE, BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
@@ -36,6 +36,7 @@ export function KioskPage() {
   const [mode, setMode] = useState<Mode>('welcome');
   const [visitorId, setVisitorId] = useState<string | null>(null);
   const [createdVisit, setCreatedVisit] = useState<KioskVisit | null>(null);
+  const [idCheck, setIdCheck] = useState<IdCheckVerdict | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [checkoutBadge, setCheckoutBadge] = useState<string | null>(null);
   const [checkoutVisit, setCheckoutVisit] = useState<KioskVisit | null>(null);
@@ -78,7 +79,12 @@ export function KioskPage() {
   }
 
   async function handleIdCapture(blob: Blob) {
-    if (visitorId) { try { await kioskApi.uploadIdPhoto(visitorId, blob); } catch { /* continue */ } }
+    setMode('submitting');
+    let verdict: IdCheckVerdict | undefined;
+    if (visitorId) {
+      try { verdict = (await kioskApi.uploadIdPhoto(visitorId, blob)).id_check; } catch { /* continue */ }
+    }
+    setIdCheck(verdict ?? null);
     await finishCheckIn();
   }
 
@@ -108,6 +114,7 @@ export function KioskPage() {
     form.reset();
     setVisitorId(null);
     setCreatedVisit(null);
+    setIdCheck(null);
     setSubmitError(null);
     setCheckoutBadge(null);
     setCheckoutVisit(null);
@@ -250,7 +257,7 @@ export function KioskPage() {
               <p className="text-sm text-muted mt-0.5">Place your ID in the frame and capture it</p>
             </div>
             <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
-              <PhotoCapture title="Photograph Your ID" facingMode="environment" mirror={false} required onCapture={handleIdCapture} onSkip={finishCheckIn} />
+              <PhotoCapture title="Photograph Your ID" facingMode="environment" mirror={false} required qualityGuard onCapture={handleIdCapture} onSkip={finishCheckIn} />
             </div>
           </div>
         )}
@@ -272,6 +279,18 @@ export function KioskPage() {
                 </div>
                 <KioskBadgeQr badgeCode={createdVisit.badge_code} />
                 <p className="text-sm font-mono font-bold text-accent">{createdVisit.badge_code}</p>
+                {(() => {
+                  const declared = form.getValues('id_type');
+                  const flagged = idCheck && (
+                    idCheck.verdict === 'not_document' ||
+                    (idCheck.detected_type && idCheck.detected_type !== 'none' && declared && idCheck.detected_type !== declared)
+                  );
+                  return flagged ? (
+                    <p className="text-[13px] text-accent-warm bg-accent/10 border border-accent/20 rounded-xl px-3 py-2">
+                      ⚠ ID photo looks unclear or doesn't match the chosen ID type — please verify with reception.
+                    </p>
+                  ) : null;
+                })()}
                 <button onClick={resetAll} className="h-12 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Done</button>
               </div>
             ) : (

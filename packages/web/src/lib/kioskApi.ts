@@ -18,14 +18,16 @@ async function kioskRequest<T>(path: string, body: unknown): Promise<T> {
   return json.data as T;
 }
 
-async function kioskUploadPhoto(visitorId: string, kind: 'photo' | 'id-photo', blob: Blob): Promise<void> {
+async function kioskUploadPhoto<T>(visitorId: string, kind: 'photo' | 'id-photo', blob: Blob): Promise<T> {
   const buf = await blob.arrayBuffer();
   const res = await fetch(`${API_BASE}/kiosk/visitors/${visitorId}/${kind}`, {
     method: 'POST',
     headers: { 'Content-Type': 'image/jpeg' },
     body: buf,
   });
-  if (!res.ok) throw new Error(`Photo upload failed (${res.status})`);
+  const json = (await res.json()) as ApiResponse<T>;
+  if (!res.ok || json.error) throw new Error(json.error?.message ?? `Photo upload failed (${res.status})`);
+  return json.data as T;
 }
 
 async function kioskGet<T>(path: string): Promise<T> {
@@ -55,10 +57,19 @@ export interface KioskDirectorate {
   abbreviation: string;
 }
 
+export interface IdCheckVerdict {
+  verdict: 'document' | 'not_document' | 'indeterminate';
+  detected_type?: 'ghana_card' | 'passport' | 'drivers_license' | 'staff_id' | 'other' | 'none';
+  confidence?: number;
+  model?: string;
+  checked_at?: string;
+}
+export interface IdPhotoResult { id_photo_url: string; id_check?: IdCheckVerdict; }
+
 export const kioskApi = {
   createVisitor: (body: Record<string, unknown>) => kioskRequest<KioskVisitor>('/visitors', body),
-  uploadFacePhoto: (id: string, blob: Blob) => kioskUploadPhoto(id, 'photo', blob),
-  uploadIdPhoto: (id: string, blob: Blob) => kioskUploadPhoto(id, 'id-photo', blob),
+  uploadFacePhoto: (id: string, blob: Blob) => kioskUploadPhoto<{ photo_url: string }>(id, 'photo', blob),
+  uploadIdPhoto: (id: string, blob: Blob) => kioskUploadPhoto<IdPhotoResult>(id, 'id-photo', blob),
   checkIn: (body: Record<string, unknown>) => kioskRequest<KioskVisit>('/check-in', body),
   checkOut: (badgeCode: string) => kioskRequest<KioskVisit>('/check-out', { badge_code: badgeCode }),
   getDirectorates: () => kioskGet<KioskDirectorate[]>('/directorates'),

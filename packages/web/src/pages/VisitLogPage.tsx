@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, type Visit, type Directorate } from '@/lib/api';
 import { cn, formatDate, formatTime } from '@/lib/utils';
 import { VISIT_STATUS } from '@/lib/constants';
+import { IdCheckBadge } from '@/components/IdCheckBadge';
 import { Search, Filter, X, ChevronDown } from 'lucide-react';
 
 export function VisitLogPage() {
@@ -203,11 +204,14 @@ export function VisitLogPage() {
                           {v.duration_minutes ? `${v.duration_minutes}m` : '—'}
                         </td>
                         <td className="px-5 py-3">
-                          <span className={cn(
-                            'inline-flex items-center h-6 px-2.5 text-[10px] font-bold rounded-full',
-                            statusCfg.color
-                          )}>
-                            {statusCfg.label}
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className={cn(
+                              'inline-flex items-center h-6 px-2.5 text-[10px] font-bold rounded-full',
+                              statusCfg.color
+                            )}>
+                              {statusCfg.label}
+                            </span>
+                            <IdCheckBadge value={v.id_photo_check} />
                           </span>
                         </td>
                       </tr>
