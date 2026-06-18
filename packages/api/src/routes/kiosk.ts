@@ -4,7 +4,7 @@ import { zValidator } from '@hono/zod-validator';
 import type { Env } from '../types';
 import { success, created, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
-import { CreateVisitorSchema, KioskCheckInSchema, KioskCheckOutSchema } from '../lib/validation';
+import { KioskCreateVisitorSchema, KioskCheckInSchema, KioskCheckOutSchema } from '../lib/validation';
 import { visitorPhotoKey, visitorIdPhotoKey } from '../lib/photo-key';
 import { uploadVisitorPhoto } from '../lib/photo-upload';
 import { performCheckIn } from '../services/check-in';
@@ -24,17 +24,26 @@ async function kioskRateLimit(c: Context<{ Bindings: Env }>): Promise<boolean> {
 }
 
 // Create a visitor (no search/list exposure on the kiosk surface).
-kioskRoutes.post('/visitors', zValidator('json', CreateVisitorSchema), async (c) => {
+kioskRoutes.post('/visitors', zValidator('json', KioskCreateVisitorSchema), async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
   const body = c.req.valid('json');
   const id = crypto.randomUUID().replace(/-/g, '');
   await c.env.DB.prepare(
-    `INSERT INTO visitors (id, first_name, last_name, phone, email, organisation, id_type, id_number)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(id, body.first_name, body.last_name, body.phone || null, body.email || null,
+    `INSERT INTO visitors (id, first_name, last_name, phone, organisation, id_type, id_number)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(id, body.first_name, body.last_name, body.phone || null,
          body.organisation || null, body.id_type || null, body.id_number || null).run();
   const visitor = await c.env.DB.prepare('SELECT * FROM visitors WHERE id = ?').bind(id).first();
   return created(c, visitor);
+});
+
+// Public directorate list for the kiosk form (id/name/abbreviation only — no PII).
+kioskRoutes.get('/directorates', async (c) => {
+  if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
+  const rows = await c.env.DB.prepare(
+    "SELECT id, name, abbreviation FROM directorates WHERE is_active = 1 ORDER BY name"
+  ).all();
+  return success(c, rows.results ?? []);
 });
 
 // Raw-JPEG face photo upload.
