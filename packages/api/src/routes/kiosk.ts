@@ -9,6 +9,7 @@ import { visitorPhotoKey, visitorIdPhotoKey } from '../lib/photo-key';
 import { uploadVisitorPhoto } from '../lib/photo-upload';
 import { performCheckIn } from '../services/check-in';
 import { checkOutByBadgeCode } from '../services/check-out';
+import { checkIdDocument } from '../services/id-check';
 
 export const kioskRoutes = new Hono<{ Bindings: Env }>();
 
@@ -71,17 +72,26 @@ kioskRoutes.post('/visitors/:id/id-photo', async (c) => {
   if (buf.byteLength > MAX_PHOTO_BYTES) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
   const idPhotoUrl = `/api/photos/visitors/${visitorId}/id`;
   await uploadVisitorPhoto(c.env, visitorId, buf, visitorIdPhotoKey(visitorId), 'id_photo_url', idPhotoUrl);
-  return success(c, { id_photo_url: idPhotoUrl });
+
+  // Non-blocking soft-flag: run the AI document check inline (raced ~5s), return
+  // it for the live receptionist nudge, and stash it for the check-in to persist.
+  const idCheck = await checkIdDocument(c.env, buf);
+  await c.env.KV.put(`idcheck:${visitorId}`, JSON.stringify(idCheck), { expirationTtl: 900 });
+
+  return success(c, { id_photo_url: idPhotoUrl, id_check: idCheck });
 });
 
 // Check in — attributed to the kiosk system user, source = 'kiosk'.
 kioskRoutes.post('/check-in', zValidator('json', KioskCheckInSchema), async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
   const body = c.req.valid('json');
+  const idCheckRaw = await c.env.KV.get(`idcheck:${body.visitor_id}`);
+  if (idCheckRaw !== null) await c.env.KV.delete(`idcheck:${body.visitor_id}`);
   const result = await performCheckIn(c.env, c.executionCtx, {
     ...body,
     created_by: KIOSK_USER_ID,
     check_in_source: 'kiosk',
+    id_photo_check: idCheckRaw ?? JSON.stringify({ verdict: 'indeterminate' }),
   });
   if (!result.ok) return notFound(c, 'Visitor');
   return created(c, result.visit);
