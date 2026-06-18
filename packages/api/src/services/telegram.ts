@@ -53,13 +53,6 @@ export function formatVisitorArrivalMessage(visitor: {
   return lines.join('\n');
 }
 
-export function parseStartToken(text: string): string | null {
-  if (!text.startsWith('/start')) return null;
-  const rest = text.slice('/start'.length).trim();
-  if (!rest) return null;
-  return rest.split(/\s+/)[0] ?? null;
-}
-
 export function parseCommand(text: string): { command: string; args: string } | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith('/')) return null;
