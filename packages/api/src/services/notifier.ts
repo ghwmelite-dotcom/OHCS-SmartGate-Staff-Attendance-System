@@ -3,7 +3,7 @@ import { sendTelegramMessage } from './telegram';
 import { sendWebPush, type PushTarget } from '../lib/webpush';
 import { escapeHtml } from '../lib/html';
 import { devError } from '../lib/log';
-import { recordNotifyOutcome } from '../lib/notify-metrics';
+import { recordNotifyOutcome, isDeadPushStatus } from '../lib/notify-metrics';
 
 const PERSONAL_CATEGORIES = ['personal_visit'];
 
@@ -190,11 +190,18 @@ export async function sendTypedNotification(env: Env, opts: {
     const subs = await env.DB.prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?')
       .bind(opts.userId).all<{ endpoint: string; p256dh: string; auth: string }>();
     await Promise.all(
-      (subs.results ?? []).map((s) => {
+      (subs.results ?? []).map(async (s) => {
         const target: PushTarget = { endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth };
-        return sendWebPush(target, { title: opts.title, body: opts.body, url: opts.url, type: opts.type }, env).catch((err) => {
-          devError(env, '[webpush] send failed', err);
-        });
+        try {
+          const status = await sendWebPush(target, { title: opts.title, body: opts.body, url: opts.url, type: opts.type }, env);
+          if (isDeadPushStatus(status)) {
+            await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(s.endpoint).run();
+            console.warn(JSON.stringify({ kind: 'notify', channel: 'push', ok: false, detail: `cleaned ${status}` }));
+          }
+        } catch (err) {
+          await recordNotifyOutcome(env, 'push', false, 'exception');
+          devError(env, '[webpush] send threw', err);
+        }
       }),
     );
   }
