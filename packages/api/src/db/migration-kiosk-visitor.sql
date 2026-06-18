@@ -4,8 +4,9 @@
 --   * visits.check_in_source — 'staff' (default) or 'kiosk'
 --   * a seeded system "kiosk" user for attributing self-service check-ins
 --
--- NOTE: users.role is a free-text column (no CHECK constraint), so the new
--- 'visitor' role needs no schema change here — only the TypeScript Role unions.
+-- NOTE: the kiosk system user is seeded with role 'staff' — an allowed role (the
+-- production users.role CHECK permits only superadmin/admin/receptionist/it/
+-- director/staff). It never logs in; the role is only the created_by FK target.
 
 ALTER TABLE visitors ADD COLUMN id_photo_url TEXT;
 
