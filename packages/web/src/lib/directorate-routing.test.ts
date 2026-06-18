@@ -1,11 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { suggestDirectorate } from './directorate-routing';
-import type { Directorate } from '@/lib/api';
+import { suggestDirectorate, type DirectorateOption } from './directorate-routing';
 
-const dirs = [
+const dirs: DirectorateOption[] = [
   { id: 'd_fa', name: 'Finance & Administration', abbreviation: 'F&A' },
   { id: 'd_reg', name: 'Confidential Registry', abbreviation: 'REGISTRY' },
-] as unknown as Directorate[];
+];
 
 describe('suggestDirectorate', () => {
   it('returns null for short/empty purpose', () => {

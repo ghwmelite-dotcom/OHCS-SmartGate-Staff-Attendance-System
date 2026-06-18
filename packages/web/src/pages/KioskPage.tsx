@@ -4,7 +4,6 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { kioskApi, type KioskVisit, type KioskDirectorate } from '@/lib/kioskApi';
-import type { Directorate } from '@/lib/api';
 import { API_BASE, BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
@@ -217,7 +216,7 @@ export function KioskPage() {
               </FieldWrapper>
               <PurposeRoutingHint
                 purpose={form.watch('purpose_raw') ?? ''}
-                directorates={directorates as unknown as Directorate[]}
+                directorates={directorates}
                 currentDirectorateId={form.watch('directorate_id') ?? ''}
                 onAccept={(id) => form.setValue('directorate_id', id)}
               />

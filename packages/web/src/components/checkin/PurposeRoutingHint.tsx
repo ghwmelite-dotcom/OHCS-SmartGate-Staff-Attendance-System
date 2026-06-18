@@ -1,10 +1,9 @@
 import { CheckCircle2, Building2 } from 'lucide-react';
-import type { Directorate } from '@/lib/api';
-import { ROUTING_KEYWORDS, suggestDirectorate } from '@/lib/directorate-routing';
+import { ROUTING_KEYWORDS, suggestDirectorate, type DirectorateOption } from '@/lib/directorate-routing';
 
 export function PurposeRoutingHint({ purpose, directorates, currentDirectorateId, onAccept }: {
   purpose: string;
-  directorates: Directorate[];
+  directorates: DirectorateOption[];
   currentDirectorateId: string;
   onAccept: (id: string) => void;
 }) {
