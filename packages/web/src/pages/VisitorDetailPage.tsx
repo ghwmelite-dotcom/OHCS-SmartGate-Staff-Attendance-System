@@ -6,6 +6,7 @@ import { cn, getInitials, formatDate, formatTime, formatDateTime } from '@/lib/u
 import { VISIT_STATUS, ID_TYPES } from '@/lib/constants';
 import { useAuthStore } from '@/stores/auth';
 import { toast } from '@/stores/toast';
+import { IdCheckBadge } from '@/components/IdCheckBadge';
 import {
   ChevronLeft,
   User,
@@ -209,13 +210,16 @@ export function VisitorDetailPage() {
                         )}
                       </td>
                       <td className="px-5 py-3 whitespace-nowrap">
-                        <span
-                          className={cn(
-                            'inline-flex items-center h-5 px-2 text-[10px] font-medium rounded-full',
-                            statusCfg.color
-                          )}
-                        >
-                          {statusCfg.label}
+                        <span className="inline-flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              'inline-flex items-center h-5 px-2 text-[10px] font-medium rounded-full',
+                              statusCfg.color
+                            )}
+                          >
+                            {statusCfg.label}
+                          </span>
+                          <IdCheckBadge value={visit.id_photo_check} />
                         </span>
                       </td>
                     </tr>
