@@ -10,6 +10,7 @@ import { QrScanner } from '@/components/QrScanner';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
 import { SmartIdFields } from '@/components/checkin/SmartIdFields';
 import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
+import { suggestDirectorate } from '@/lib/directorate-routing';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
 import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2 } from 'lucide-react';
 
@@ -194,6 +195,27 @@ export function KioskPage() {
               <FieldWrapper icon={<Briefcase className="h-4 w-4" />} label="Organisation (optional)">
                 <input {...form.register('organisation')} className={fieldCls} />
               </FieldWrapper>
+              <FieldWrapper label="Purpose of Visit" error={form.formState.errors.purpose_raw?.message}>
+                <textarea
+                  {...form.register('purpose_raw', {
+                    onChange: (e) => {
+                      const match = suggestDirectorate(e.currentTarget.value, directorates);
+                      if (match && !form.getValues('directorate_id')) {
+                        form.setValue('directorate_id', match.id);
+                      }
+                    },
+                  })}
+                  rows={2}
+                  className={`${fieldCls} h-auto py-2 resize-none`}
+                  placeholder="e.g. Submit documents, salary enquiry, training..."
+                />
+              </FieldWrapper>
+              <PurposeRoutingHint
+                purpose={form.watch('purpose_raw') ?? ''}
+                directorates={directorates}
+                currentDirectorateId={form.watch('directorate_id') ?? ''}
+                onAccept={(id) => form.setValue('directorate_id', id)}
+              />
               <FieldWrapper icon={<Building2 className="h-4 w-4" />} label="Directorate" error={form.formState.errors.directorate_id?.message}>
                 <select {...form.register('directorate_id')} className={fieldCls}>
                   <option value="">Select directorate...</option>
@@ -225,15 +247,6 @@ export function KioskPage() {
                 idTypeError={form.formState.errors.id_type?.message}
                 idNumberError={form.formState.errors.id_number?.message}
                 inputClassName={fieldCls}
-              />
-              <FieldWrapper label="Purpose of Visit" error={form.formState.errors.purpose_raw?.message}>
-                <textarea {...form.register('purpose_raw')} rows={2} className={`${fieldCls} h-auto py-2 resize-none`} placeholder="e.g. Submit documents, salary enquiry, training..." />
-              </FieldWrapper>
-              <PurposeRoutingHint
-                purpose={form.watch('purpose_raw') ?? ''}
-                directorates={directorates}
-                currentDirectorateId={form.watch('directorate_id') ?? ''}
-                onAccept={(id) => form.setValue('directorate_id', id)}
               />
             </div>
             {submitError && <p className="text-danger text-xs">{submitError}</p>}
