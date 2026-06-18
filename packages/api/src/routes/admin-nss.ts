@@ -469,7 +469,7 @@ adminNssRoutes.get('/:id/activity', async (c) => {
     .bind(id)
     .first<{ id: string; user_type: string }>();
 
-  if (!existing) return notFound(c, 'NSS user');
+  if (!existing) return notFound(c, 'Personnel');
   if (existing.user_type !== 'nss' && existing.user_type !== 'intern') {
     return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
@@ -524,7 +524,7 @@ adminNssRoutes.get('/:id', async (c) => {
     .bind(id)
     .first<NssUserRow>();
 
-  if (!row) return notFound(c, 'NSS user');
+  if (!row) return notFound(c, 'Personnel');
   return success(c, row);
 });
 
@@ -557,7 +557,7 @@ adminNssRoutes.patch('/:id', zValidator('json', updateNssSchema), async (c) => {
     .bind(id)
     .first<{ id: string; user_type: string; nss_start_date: string | null; nss_end_date: string | null }>();
 
-  if (!existing) return notFound(c, 'NSS user');
+  if (!existing) return notFound(c, 'Personnel');
   if (existing.user_type !== 'nss' && existing.user_type !== 'intern') {
     return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
@@ -631,7 +631,7 @@ adminNssRoutes.delete('/:id', async (c) => {
     .bind(id)
     .first<{ id: string; user_type: string }>();
 
-  if (!existing) return notFound(c, 'NSS user');
+  if (!existing) return notFound(c, 'Personnel');
   if (existing.user_type !== 'nss' && existing.user_type !== 'intern') {
     return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
@@ -642,7 +642,7 @@ adminNssRoutes.delete('/:id', async (c) => {
     .bind(id)
     .run();
 
-  return success(c, { message: 'NSS user deactivated' });
+  return success(c, { message: 'Personnel deactivated' });
 });
 
 /* ------------------------------------------------------------------ */
@@ -660,7 +660,7 @@ adminNssRoutes.post('/:id/reset-pin', async (c) => {
     .bind(id)
     .first<{ id: string; user_type: string }>();
 
-  if (!existing) return notFound(c, 'NSS user');
+  if (!existing) return notFound(c, 'Personnel');
   if (existing.user_type !== 'nss' && existing.user_type !== 'intern') {
     return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
