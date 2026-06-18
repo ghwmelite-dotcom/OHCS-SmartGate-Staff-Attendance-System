@@ -50,6 +50,7 @@ export const api = {
   post: <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
   put: <T>(path: string, body: unknown) => request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 
 // Resolve a stored photo URL (e.g. "/api/photos/clock/abc") to an absolute URL
