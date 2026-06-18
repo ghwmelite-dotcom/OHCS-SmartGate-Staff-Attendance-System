@@ -13,6 +13,7 @@ import { PhotoCapture } from '@/components/PhotoCapture';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
 import { SmartIdFields } from '@/components/checkin/SmartIdFields';
 import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
+import { StepIndicator } from '@/components/checkin/StepIndicator';
 import { suggestDirectorate } from '@/lib/directorate-routing';
 import { toast } from '@/stores/toast';
 import { playCheckInChime } from '@/lib/sounds';
@@ -20,7 +21,6 @@ import {
   Search,
   UserPlus,
   ChevronLeft,
-  Check,
   Building2,
   User,
   Phone,
@@ -231,7 +231,16 @@ export function CheckInPage() {
             Back
           </button>
         )}
-        <StepIndicator current={step} />
+        {(() => {
+          const indicatorSteps = [
+            { key: 'search', label: 'Find' },
+            { key: 'photo', label: 'Photo' },
+            { key: 'check-in', label: 'Check In' },
+            { key: 'success', label: 'Done' },
+          ];
+          const idx = step === 'new-visitor' ? 0 : indicatorSteps.findIndex((s) => s.key === step);
+          return <StepIndicator steps={indicatorSteps} currentIdx={idx} />;
+        })()}
       </div>
 
       {/* STEP 1: Search visitor */}
@@ -734,38 +743,3 @@ function BadgeQRCode({ badgeCode }: { badgeCode: string }) {
   return <canvas ref={canvasRef} className="mx-auto rounded-lg" />;
 }
 
-function StepIndicator({ current }: { current: Step }) {
-  const steps: { key: Step; label: string }[] = [
-    { key: 'search', label: 'Find' },
-    { key: 'photo', label: 'Photo' },
-    { key: 'check-in', label: 'Check In' },
-    { key: 'success', label: 'Done' },
-  ];
-
-  const currentIdx = current === 'new-visitor' ? 0 : steps.findIndex((s) => s.key === current);
-
-  return (
-    <div className="flex items-center gap-1 ml-auto">
-      {steps.map((s, i) => (
-        <div key={s.key} className="flex items-center gap-1">
-          <span
-            className={cn(
-              'inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold',
-              i < currentIdx
-                ? 'bg-success text-white'
-                : i === currentIdx
-                  ? 'bg-primary text-white'
-                  : 'bg-border text-muted'
-            )}
-          >
-            {i < currentIdx ? <Check className="h-3 w-3" /> : i + 1}
-          </span>
-          <span className={cn('text-xs', i === currentIdx ? 'text-foreground font-medium' : 'text-muted')}>
-            {s.label}
-          </span>
-          {i < steps.length - 1 && <span className="text-border-strong mx-1">—</span>}
-        </div>
-      ))}
-    </div>
-  );
-}
