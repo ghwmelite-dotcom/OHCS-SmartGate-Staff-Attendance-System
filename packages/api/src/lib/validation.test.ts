@@ -28,8 +28,8 @@ describe('KioskCheckInSchema', () => {
   it('rejects missing directorate_id', () => {
     expect(KioskCheckInSchema.safeParse({ visitor_id: 'v1', host_name_manual: 'Mr X', purpose_raw: 'meeting' }).success).toBe(false);
   });
-  it('rejects missing host_name_manual', () => {
-    expect(KioskCheckInSchema.safeParse({ visitor_id: 'v1', directorate_id: 'd1', purpose_raw: 'meeting' }).success).toBe(false);
+  it('accepts a missing host_name_manual (host is optional; server derives the receiver)', () => {
+    expect(KioskCheckInSchema.safeParse({ visitor_id: 'v1', directorate_id: 'd1', purpose_raw: 'meeting' }).success).toBe(true);
   });
   it('rejects missing purpose_raw', () => {
     expect(KioskCheckInSchema.safeParse({ visitor_id: 'v1', directorate_id: 'd1', host_name_manual: 'Mr X' }).success).toBe(false);
