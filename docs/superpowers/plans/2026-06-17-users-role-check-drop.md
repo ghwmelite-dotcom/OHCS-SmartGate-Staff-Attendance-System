@@ -251,3 +251,131 @@ Confirm `migration-users-role-check-drop.sql` is the last entry in `packages/api
 - **No transaction / atomicity risk:** mitigated by local test (Task 2), backup (Task 3 Step 1), tiny table, and per-step verification with explicit STOP/Rollback.
 - **Reliability caveat baked in:** every verification uses row-data reads (`SELECT` / `UPDATE … RETURNING`), never the `changes` meta.
 - **Consistency:** the 19-column list is identical in the `CREATE TABLE`, the `INSERT … (cols)`, and the `SELECT cols` — must stay in lockstep; the index names match `schema.sql`.
+
+---
+
+## REVISED TASKS (2026-06-18 — `batch()` endpoint delivery)
+
+**Why revised:** remote D1 enforces foreign keys, so `DROP TABLE users` via
+`wrangler d1 execute --file` fails (two prod attempts auto-rolled-back; prod
+intact). `PRAGMA defer_foreign_keys=true` is only honored inside a single
+transaction — a Workers `DB.batch()`. Prod's `applied_migrations` only records
+`migration-nss-foundation.sql`, so the general `/migrations/run` runner is
+unusable. **Tasks 1–2 stand** (migration file written + locally validated). **Task 3
+(wrangler `--file` prod apply) is SUPERSEDED** by R1–R5 below.
+
+### Task R1: Commit the migration's `defer_foreign_keys` pragma
+
+The local file `migration-users-role-check-drop.sql` already has
+`PRAGMA defer_foreign_keys=TRUE;` added as its first statement (uncommitted).
+
+- [ ] Commit it:
+```bash
+git add packages/api/src/db/migration-users-role-check-drop.sql
+git commit -m "fix(db): defer foreign keys in users-role-check-drop migration (D1 enforces FKs)"
+```
+
+### Task R2: Add the focused superadmin endpoint
+
+**Files:** Modify `packages/api/src/routes/admin-migrations.ts`.
+
+- [ ] **Step 1:** Ensure the response import includes `error`. Change the import line `import { success } from '../lib/response';` to:
+```typescript
+import { success, error } from '../lib/response';
+```
+
+- [ ] **Step 2:** Append this route to `adminMigrationsRoutes` (after the existing `/run` handler):
+```typescript
+// One-time, idempotent fix: drop the legacy users.role CHECK constraint via a
+// single DB.batch() transaction (the only place PRAGMA defer_foreign_keys is
+// honored). Not handled by /run because prod's applied_migrations is out of sync.
+adminMigrationsRoutes.post('/drop-users-role-check', async (c) => {
+  const blocked = requireRole(c, 'superadmin');
+  if (blocked) return blocked;
+
+  const ddl = await c.env.DB.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+  ).first<{ sql: string }>();
+  if (!ddl) return error(c, 'NO_USERS_TABLE', 'users table not found', 500);
+
+  // Idempotent: if the role CHECK is already gone, do nothing.
+  if (!/CHECK\s*\(\s*role\s+IN/i.test(ddl.sql)) {
+    return success(c, { status: 'already-dropped' });
+  }
+
+  const migration = MIGRATIONS.find((m) => m.filename === 'migration-users-role-check-drop.sql');
+  if (!migration) return error(c, 'MIGRATION_MISSING', 'migration not registered', 500);
+
+  // Same strip-comments / split-on-`;\n` logic as the /run handler.
+  const cleaned = migration.sql
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
+  const statements = cleaned
+    .split(/;\s*\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  try {
+    // Single transaction → PRAGMA defer_foreign_keys=TRUE (first statement) holds,
+    // so DROP TABLE users is allowed and FK integrity re-checks at commit.
+    await c.env.DB.batch(statements.map((s) => c.env.DB.prepare(s)));
+    return success(c, { status: 'applied', statements: statements.length });
+  } catch (err) {
+    return error(c, 'MIGRATION_FAILED', err instanceof Error ? err.message : String(err), 500);
+  }
+});
+```
+
+- [ ] **Step 3:** Type-check: `node "node_modules/typescript/bin/tsc" --noEmit -p packages/api/tsconfig.json` → PASS.
+
+- [ ] **Step 4:** Commit:
+```bash
+git add packages/api/src/routes/admin-migrations.ts
+git commit -m "feat(api): superadmin endpoint to drop users.role CHECK via DB.batch()"
+```
+
+### Task R3: Local sanity check
+
+Local D1 has no FK enforcement and its `users` table CHECK was already dropped in
+Task 2, so the endpoint's idempotent guard is what's exercisable locally.
+
+- [ ] Type-check passes (R2 Step 3).
+- [ ] (Optional) With `wrangler dev` + a local superadmin session, `POST
+  /api/admin/migrations/drop-users-role-check` returns `{ status: 'already-dropped' }`
+  (the local CHECK is gone), confirming the guard + routing. The `batch()` rebuild
+  + FK deferral is validated against prod in R5 (atomic + backed up).
+
+### Task R4: Finish the branch → deploy
+
+- [ ] Use `superpowers:finishing-a-development-branch`: push, PR, merge to `main`.
+  CI (`deploy.yml`) auto-deploys the Worker with the new endpoint.
+- [ ] Confirm the deploy run is green.
+
+### Task R5: Trigger on prod (superadmin) + verify
+
+**The assistant cannot call this — it's superadmin-gated. The superadmin user
+triggers it once.**
+
+- [ ] **Trigger** (superadmin, against the prod API), e.g.:
+```bash
+curl -X POST https://ohcs-smartgate-api.ohcsghana-main.workers.dev/api/admin/migrations/drop-users-role-check \
+  -H "Authorization: Bearer <SUPERADMIN_SESSION_TOKEN>"
+```
+Expected: `{ "data": { "status": "applied", "statements": 9 }, "error": null }`
+(or `"already-dropped"` if re-run).
+
+- [ ] **Verify** (assistant runs these reads from `packages/api`):
+```
+node "../../node_modules/wrangler/bin/wrangler.js" d1 execute smartgate-db --remote --command "SELECT sql FROM sqlite_master WHERE type='table' AND name='users';"
+```
+Expected: `role TEXT NOT NULL DEFAULT 'staff'` with NO `CHECK(role IN ...)`.
+```
+node "../../node_modules/wrangler/bin/wrangler.js" d1 execute smartgate-db --remote --command "UPDATE users SET role=role RETURNING id, role;"
+```
+Expected: the 6 original users unchanged PLUS `user_kiosk` (role `visitor`) = 7 rows.
+
+- [ ] If the trigger returns `MIGRATION_FAILED`, the `batch()` rolled back
+  atomically (prod intact). Capture the error message and STOP — the FK-deferral
+  assumption needs re-evaluation before any further attempt; restore is not needed
+  (atomic rollback), and the backup remains available regardless.

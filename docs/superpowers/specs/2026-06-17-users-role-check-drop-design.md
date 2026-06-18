@@ -127,3 +127,56 @@ FK note: D1 does not enforce foreign keys by default, so `DROP`/`RENAME` of
   `wrangler` (tracked separately if needed).
 - Any other schema drift beyond the `role` CHECK.
 - A replacement role CHECK (decided against).
+
+## Revision 2026-06-18 — corrected delivery (remote D1 enforces foreign keys)
+
+The original plan applied the rebuild via `wrangler d1 execute --remote --file`. Two
+prod attempts **failed and auto-rolled-back** (prod left 100% intact):
+
+```
+FOREIGN KEY constraint failed: SQLITE_CONSTRAINT_FOREIGNKEY
+```
+
+**Corrected root cause:** the spec's earlier claim that "D1 does not enforce
+foreign keys" is **wrong for remote D1**. `DROP TABLE users` is blocked because
+`visits.created_by`, `clock_records.user_id`, `leave_requests`, `notifications`,
+`webauthn_credentials`, `push_subscriptions`, etc. reference `users(id)`.
+`PRAGMA foreign_key_check` shows **no** pre-existing dangling refs — the block is
+purely the live child FKs. The documented fix, `PRAGMA defer_foreign_keys = true`,
+**did not take effect via `wrangler d1 execute --file`** (that path does not run
+the file as a single deferred-FK transaction). It is only honored inside a real
+single transaction — a Workers `DB.batch()`.
+
+**Also:** prod's `applied_migrations` table records only `migration-nss-foundation.sql`
+(prod was migrated via schema.sql bootstrap + `wrangler`, not the runner). So the
+general `POST /api/admin/migrations/run` runner is **unusable** here — it would
+treat ~20 migrations as pending and fail re-applying duplicate `ALTER`s.
+
+### Corrected approach: focused, idempotent superadmin endpoint running `DB.batch()`
+
+- Add `POST /api/admin/migrations/drop-users-role-check` (superadmin-only) that:
+  1. Reads the `users` DDL; if it no longer contains `CHECK(role IN` → returns
+     `{ status: 'already-dropped' }` (idempotent — safe to call repeatedly).
+  2. Otherwise splits `migration-users-role-check-drop.sql` into statements (same
+     strip-`--`-lines / split-on-`;\n` logic as the existing runner) and runs them
+     as a single `c.env.DB.batch(stmts.map(s => c.env.DB.prepare(s)))`. The
+     migration's first statement is `PRAGMA defer_foreign_keys = TRUE;`, honored
+     within the batch transaction, so the `DROP`/rebuild succeeds and FK integrity
+     re-checks at commit (the rebuilt `users` holds the same ids → children stay
+     valid).
+- The migration file gains `PRAGMA defer_foreign_keys=TRUE;` as its first
+  statement (done). It stays registered in `migrations-index.ts` for fresh-DB /
+  record-keeping; on fresh childless DBs the sequential runner still works.
+- **Atomicity:** `batch()` is all-or-nothing — no half-migration risk. The prod
+  users backup (`docs/ops/backups/users-backup-2026-06-17.json`, 6 rows) is taken.
+- **Delivery:** merge → CI auto-deploys the Worker → a **superadmin triggers the
+  endpoint once** (the assistant cannot — it is auth-gated). Idempotent, so
+  re-triggering is harmless. Verify prod after (DDL has no role CHECK; 6 originals
+  intact; `user_kiosk` present with role `visitor`).
+- **Local testing limits:** local D1 does not enforce FKs, so the FK-deferral path
+  can't be fully reproduced locally; local validates the endpoint logic, statement
+  splitting, idempotency guard, and that the rebuild SQL is valid (already done in
+  the earlier local apply). Prod (via the superadmin trigger) is the real test,
+  made safe by `batch()` atomicity + the backup.
+- **Follow-up (optional):** the one-off endpoint may be removed in a later change;
+  being idempotent + superadmin-only, leaving it is harmless.
