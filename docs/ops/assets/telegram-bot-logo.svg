@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="OHCS SmartGate bot logo">
+  <defs>
+    <radialGradient id="navy" cx="50%" cy="36%" r="75%">
+      <stop offset="0%" stop-color="#234A70"/>
+      <stop offset="60%" stop-color="#1B3A5C"/>
+      <stop offset="100%" stop-color="#0F2740"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F6DE84"/>
+      <stop offset="50%" stop-color="#E7BE45"/>
+      <stop offset="100%" stop-color="#C89610"/>
+    </linearGradient>
+  </defs>
+
+  <!-- background -->
+  <circle cx="256" cy="256" r="256" fill="url(#navy)"/>
+  <circle cx="256" cy="256" r="236" fill="none" stroke="#D4A017" stroke-width="4" opacity="0.45"/>
+
+  <!-- portico: pediment + lintel + columns + base -->
+  <g fill="url(#gold)">
+    <polygon points="150,184 256,134 362,184"/>
+    <rect x="146" y="178" width="220" height="40" rx="12"/>
+    <rect x="170" y="218" width="42" height="146" rx="9"/>
+    <rect x="300" y="218" width="42" height="146" rx="9"/>
+    <rect x="150" y="360" width="212" height="20" rx="8"/>
+  </g>
+
+  <!-- subtle column flutes -->
+  <g stroke="#0F2740" stroke-width="3" opacity="0.30" stroke-linecap="round">
+    <line x1="184" y1="230" x2="184" y2="352"/>
+    <line x1="198" y1="230" x2="198" y2="352"/>
+    <line x1="314" y1="230" x2="314" y2="352"/>
+    <line x1="328" y1="230" x2="328" y2="352"/>
+  </g>
+
+  <!-- verified badge in the doorway -->
+  <circle cx="256" cy="300" r="40" fill="url(#gold)"/>
+  <circle cx="256" cy="300" r="40" fill="none" stroke="#0F2740" stroke-width="2" opacity="0.25"/>
+  <path d="M237 300 l13 14 l24 -29" fill="none" stroke="#0F2740" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
