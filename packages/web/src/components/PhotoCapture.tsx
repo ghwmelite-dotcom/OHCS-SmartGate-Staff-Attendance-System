@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Camera, RotateCcw, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolvePhotoUrl } from '@/lib/api';
+import { assessFrameQuality } from '@/lib/image-quality';
 
 interface PhotoCaptureProps {
   onCapture: (blob: Blob) => void;
@@ -15,6 +16,8 @@ interface PhotoCaptureProps {
   mirror?: boolean;
   /** When true, the visitor must capture — the Skip button is hidden. */
   required?: boolean;
+  /** When true, reject blank/too-dark/too-bright captures and prompt a retake. */
+  qualityGuard?: boolean;
 }
 
 export function PhotoCapture({
@@ -25,6 +28,7 @@ export function PhotoCapture({
   title,
   mirror = facingMode === 'user',
   required = false,
+  qualityGuard = false,
 }: PhotoCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -33,6 +37,7 @@ export function PhotoCapture({
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState(false);
+  const [qualityError, setQualityError] = useState<string | null>(null);
 
   const startCamera = useCallback(async () => {
     try {
@@ -83,6 +88,12 @@ export function PhotoCapture({
     }
     ctx.drawImage(video, sx, sy, size, size, 0, 0, 400, 400);
 
+    if (qualityGuard) {
+      const { ok, reason } = assessFrameQuality(ctx.getImageData(0, 0, 400, 400));
+      if (!ok) { setQualityError(reason ?? 'Please retake the photo.'); return; }
+    }
+    setQualityError(null);
+
     canvas.toBlob(
       (blob) => {
         if (blob) {
@@ -99,6 +110,7 @@ export function PhotoCapture({
   function retake() {
     setCaptured(null);
     setCapturedBlob(null);
+    setQualityError(null);
     startCamera();
   }
 
@@ -179,6 +191,7 @@ export function PhotoCapture({
       <canvas ref={canvasRef} className="hidden" />
 
       {/* Actions */}
+      {qualityError && <p className="text-[12px] text-danger">{qualityError}</p>}
       <div className="flex items-center justify-center gap-3">
         {!captured ? (
           <>
