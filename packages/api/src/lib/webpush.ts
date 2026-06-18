@@ -2,6 +2,8 @@
 // - VAPID JWT (ES256) per RFC 8292
 // - aes128gcm payload encryption per RFC 8291
 
+import { recordNotifyOutcome } from './notify-metrics';
+
 function b64urlToBytes(b64: string): Uint8Array {
   const pad = b64.length % 4 === 2 ? '==' : b64.length % 4 === 3 ? '=' : '';
   const s = b64.replace(/-/g, '+').replace(/_/g, '/') + pad;
@@ -95,15 +97,7 @@ export async function encryptPayload(payload: Uint8Array, p256dhB64: string, aut
 }
 
 async function trackPushStatus(env: { KV: KVNamespace }, status: number): Promise<void> {
-  const date = new Date().toISOString().slice(0, 10);
-  const key = `push-stat:${date}:${status}`;
-  try {
-    const raw = await env.KV.get(key);
-    const n = raw ? parseInt(raw, 10) : 0;
-    await env.KV.put(key, String(n + 1), { expirationTtl: 8 * 86400 });
-  } catch {
-    // Swallow — counters are best-effort.
-  }
+  await recordNotifyOutcome(env, 'push', status >= 200 && status < 300, String(status));
 }
 
 export interface WebPushEnv {
