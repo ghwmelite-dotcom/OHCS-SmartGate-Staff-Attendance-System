@@ -3,6 +3,11 @@
 -- Rebuilds users WITHOUT the role CHECK, preserving all columns / other CHECKs /
 -- defaults / indexes / FKs, then re-seeds the kiosk system user (role 'visitor',
 -- which the old CHECK rejected). Harmless on already-CHECK-free DBs.
+-- Remote D1 ENFORCES foreign keys, so DROP TABLE users (referenced by
+-- visits.created_by / clock_records.user_id / etc.) would fail. Defer FK checks
+-- to the transaction commit, by which point users (renamed from users_new) holds
+-- the same ids and all child references remain valid.
+PRAGMA defer_foreign_keys=TRUE;
 CREATE TABLE users_new (
     id               TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
     name             TEXT NOT NULL,
