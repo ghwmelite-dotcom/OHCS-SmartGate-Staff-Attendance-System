@@ -3,6 +3,7 @@ import { sendTelegramMessage } from './telegram';
 import { sendWebPush, type PushTarget } from '../lib/webpush';
 import { escapeHtml } from '../lib/html';
 import { devError } from '../lib/log';
+import { recordNotifyOutcome, isDeadPushStatus } from '../lib/notify-metrics';
 
 const PERSONAL_CATEGORIES = ['personal_visit'];
 
@@ -78,23 +79,28 @@ async function notifyHostStaff(data: VisitNotifyData, env: Env): Promise<void> {
 
   // Telegram to officer directly
   if (officer.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
-    await sendTelegramMessage({
+    const ok = await sendTelegramMessage({
       chatId: officer.telegram_chat_id,
       text: formatVisitorMessage(data, 'host'),
       token: env.TELEGRAM_BOT_TOKEN,
     });
+    await recordNotifyOutcome(env, 'telegram', ok);
   }
 
   // Also check if this officer has a user account with Telegram linked via KV
   const user = await findUserByOfficer(officer, env);
+  if (!officer.telegram_chat_id && !user) {
+    console.warn(JSON.stringify({ kind: 'notify', channel: 'none', ok: false, detail: 'unreachable', officer_id: officer.id, visit_id: data.visit_id }));
+  }
   if (user) {
     const kvChatId = await env.KV.get(`telegram-user:${user.id}`);
     if (kvChatId && kvChatId !== officer.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
-      await sendTelegramMessage({
+      const ok = await sendTelegramMessage({
         chatId: kvChatId,
         text: formatVisitorMessage(data, 'host'),
         token: env.TELEGRAM_BOT_TOKEN,
       });
+      await recordNotifyOutcome(env, 'telegram', ok);
     }
 
     // In-app notification
@@ -125,23 +131,28 @@ async function notifyDirectorateLeadership(data: VisitNotifyData, env: Env): Pro
 
     // Telegram notification
     if (leader.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
-      await sendTelegramMessage({
+      const ok = await sendTelegramMessage({
         chatId: leader.telegram_chat_id,
         text: formatVisitorMessage(data, 'director'),
         token: env.TELEGRAM_BOT_TOKEN,
       });
+      await recordNotifyOutcome(env, 'telegram', ok);
     }
 
     // Check KV for user-linked Telegram
     const user = await findUserByOfficer(leader, env);
+    if (!leader.telegram_chat_id && !user) {
+      console.warn(JSON.stringify({ kind: 'notify', channel: 'none', ok: false, detail: 'unreachable', officer_id: leader.id, visit_id: data.visit_id }));
+    }
     if (user) {
       const kvChatId = await env.KV.get(`telegram-user:${user.id}`);
       if (kvChatId && kvChatId !== leader.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
-        await sendTelegramMessage({
+        const ok = await sendTelegramMessage({
           chatId: kvChatId,
           text: formatVisitorMessage(data, 'director'),
           token: env.TELEGRAM_BOT_TOKEN,
         });
+        await recordNotifyOutcome(env, 'telegram', ok);
       }
 
       // In-app notification
@@ -182,11 +193,18 @@ export async function sendTypedNotification(env: Env, opts: {
     const subs = await env.DB.prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?')
       .bind(opts.userId).all<{ endpoint: string; p256dh: string; auth: string }>();
     await Promise.all(
-      (subs.results ?? []).map((s) => {
+      (subs.results ?? []).map(async (s) => {
         const target: PushTarget = { endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth };
-        return sendWebPush(target, { title: opts.title, body: opts.body, url: opts.url, type: opts.type }, env).catch((err) => {
-          devError(env, '[webpush] send failed', err);
-        });
+        try {
+          const status = await sendWebPush(target, { title: opts.title, body: opts.body, url: opts.url, type: opts.type }, env);
+          if (isDeadPushStatus(status)) {
+            await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(s.endpoint).run();
+            console.warn(JSON.stringify({ kind: 'notify', channel: 'push', ok: false, detail: `cleaned ${status}` }));
+          }
+        } catch (err) {
+          await recordNotifyOutcome(env, 'push', false, 'exception');
+          devError(env, '[webpush] send threw', err);
+        }
       }),
     );
   }

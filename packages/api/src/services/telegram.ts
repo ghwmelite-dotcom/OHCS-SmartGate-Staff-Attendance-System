@@ -18,6 +18,7 @@ export async function sendTelegramMessage({ chatId, text, token }: SendMessagePa
         parse_mode: 'HTML',
       }),
     });
+    if (!res.ok) console.warn(JSON.stringify({ kind: 'notify', channel: 'telegram', ok: false, detail: String(res.status) }));
     return res.ok;
   } catch (err) {
     console.error('[Telegram] Send failed:', err);
