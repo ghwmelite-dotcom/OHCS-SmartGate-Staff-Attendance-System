@@ -23,6 +23,7 @@ import { authWebAuthnPublicRoutes, authWebAuthnAuthedRoutes } from './routes/aut
 import { photoRoutes } from './routes/photos';
 import { bulkImportRoutes } from './routes/bulk-import';
 import { adminNssRoutes } from './routes/admin-nss';
+import { adminTelegramRoutes } from './routes/admin-telegram';
 import { clockRoutes } from './routes/clock';
 import { notificationsPushRoutes } from './routes/notifications-push';
 import { attendanceRoutes } from './routes/attendance';
@@ -100,6 +101,7 @@ app.route('/api/admin/migrations', adminMigrationsRoutes);
 app.route('/api/admin/health', adminHealthRoutes);
 app.route('/api/admin/settings', adminSettingsRoutes);
 app.route('/api/admin/eval-assistant', adminEvalAssistantRoutes);
+app.route('/api/admin/telegram', adminTelegramRoutes);
 app.route('/api/auth/webauthn', authWebAuthnAuthedRoutes);
 app.route('/api/clock', clockRoutes);
 app.route('/api/attendance', attendanceRoutes);
