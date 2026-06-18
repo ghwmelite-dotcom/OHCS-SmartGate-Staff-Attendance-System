@@ -177,6 +177,10 @@ adminDirectorateRoutes.put('/officers/:id', zValidator('json', officerUpdateSche
 // Generate a one-time Telegram deep-link for an officer (superadmin).
 adminDirectorateRoutes.post('/officers/:id/link-token', async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+  // Guard: until the real bot @username is configured, a deep link would be malformed.
+  if (!c.env.TELEGRAM_BOT_USERNAME || c.env.TELEGRAM_BOT_USERNAME === 'REPLACE_WITH_BOT_USERNAME') {
+    return error(c, 'BOT_NOT_CONFIGURED', 'Telegram bot username is not configured yet. Set TELEGRAM_BOT_USERNAME before generating deep links.', 503);
+  }
   const id = c.req.param('id');
   const officer = await c.env.DB.prepare('SELECT id FROM officers WHERE id = ?').bind(id).first();
   if (!officer) return notFound(c, 'Officer');
