@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { kioskApi, type KioskVisit, type KioskDirectorate } from '@/lib/kioskApi';
-import { API_BASE, ID_TYPES } from '@/lib/constants';
+import { API_BASE, BADGE_BASE, ID_TYPES } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
 import { CheckCircle2, LogIn, LogOut, Loader2, X } from 'lucide-react';
@@ -297,10 +297,7 @@ function KioskBadgeQr({ badgeCode }: { badgeCode: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     if (!canvasRef.current) return;
-    const apiBase = import.meta.env.PROD
-      ? 'https://ohcs-smartgate-api.ohcsghana-main.workers.dev'
-      : 'http://localhost:8787';
-    QRCode.toCanvas(canvasRef.current, `${apiBase}/badge/${badgeCode}`, {
+    QRCode.toCanvas(canvasRef.current, `${BADGE_BASE}/badge/${badgeCode}`, {
       width: 200, margin: 2, color: { dark: '#1B3A5C', light: '#FFFFFF' },
     });
   }, [badgeCode]);
