@@ -60,7 +60,7 @@ export const KioskCheckOutSchema = z.object({
 export const KioskCheckInSchema = z.object({
   visitor_id: z.string().min(1),
   directorate_id: z.string().min(1),
-  host_name_manual: z.string().min(1).max(100),
+  host_name_manual: z.string().max(100).optional(),
   purpose_raw: z.string().min(1).max(500),
   idempotency_key: z.string().min(1).max(100).optional(),
 });

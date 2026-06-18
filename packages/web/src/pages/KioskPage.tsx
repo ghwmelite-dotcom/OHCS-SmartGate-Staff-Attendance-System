@@ -19,7 +19,7 @@ const visitorSchema = z.object({
   phone: z.string().regex(/^(\+233|0)\d{9}$/, 'A valid Ghana phone is required'),
   organisation: z.string().max(200).optional(),
   directorate_id: z.string().min(1, 'Select a directorate'),
-  host_name: z.string().min(1, 'Enter who you are visiting').max(100),
+  host_name: z.string().max(100).optional(),
   id_type: z.enum(['ghana_card', 'passport', 'drivers_license', 'staff_id', 'other'], {
     errorMap: () => ({ message: 'Select an ID type' }),
   }),
@@ -202,7 +202,15 @@ export function KioskPage() {
                   ))}
                 </select>
               </FieldWrapper>
-              <FieldWrapper icon={<User className="h-4 w-4" />} label="Who are you visiting?" error={form.formState.errors.host_name?.message}>
+              {(() => {
+                const sel = directorates.find((d) => d.id === form.watch('directorate_id'));
+                return sel?.reception_officer_name ? (
+                  <p className="text-[13px] text-muted -mt-2">
+                    You'll be received by <span className="font-semibold text-foreground">{sel.reception_officer_name}</span>.
+                  </p>
+                ) : null;
+              })()}
+              <FieldWrapper icon={<User className="h-4 w-4" />} label="Who are you visiting? (optional)" error={form.formState.errors.host_name?.message}>
                 <input {...form.register('host_name')} className={fieldCls} placeholder="e.g. Mr. Mensah" />
               </FieldWrapper>
               <SmartIdFields

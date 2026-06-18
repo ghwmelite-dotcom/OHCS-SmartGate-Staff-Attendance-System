@@ -55,6 +55,7 @@ export interface KioskDirectorate {
   id: string;
   name: string;
   abbreviation: string;
+  reception_officer_name: string | null;
 }
 
 export interface IdCheckVerdict {

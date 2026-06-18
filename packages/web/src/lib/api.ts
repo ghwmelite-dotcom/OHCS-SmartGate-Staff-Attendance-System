@@ -125,6 +125,7 @@ export interface Directorate {
   floor: string | null;
   wing: string | null;
   is_active: number;
+  reception_officer_id?: string | null;
 }
 
 export interface VisitorDetail extends Visitor {

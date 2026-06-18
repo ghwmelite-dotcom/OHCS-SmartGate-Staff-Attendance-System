@@ -32,6 +32,7 @@ adminDirectorateRoutes.post('/', zValidator('json', createSchema), async (c) => 
 
 const updateSchema = createSchema.partial().extend({
   is_active: z.number().min(0).max(1).optional(),
+  reception_officer_id: z.string().nullable().optional(),
 });
 
 adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) => {
@@ -49,6 +50,20 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
   if (body.type !== undefined) { fields.push('type = ?'); values.push(body.type); }
   if (body.rooms !== undefined) { fields.push('rooms = ?'); values.push(body.rooms || null); }
   if (body.is_active !== undefined) { fields.push('is_active = ?'); values.push(body.is_active); }
+
+  if (body.reception_officer_id !== undefined) {
+    const recId = body.reception_officer_id || null;
+    if (recId !== null) {
+      const officer = await c.env.DB.prepare('SELECT directorate_id FROM officers WHERE id = ?')
+        .bind(recId).first<{ directorate_id: string }>();
+      if (!officer) return error(c, 'INVALID_OFFICER', 'Officer not found', 400);
+      if (officer.directorate_id !== id) {
+        return error(c, 'INVALID_OFFICER', 'Reception officer must belong to this directorate', 400);
+      }
+    }
+    fields.push('reception_officer_id = ?');
+    values.push(recId);
+  }
 
   if (fields.length > 0) {
     values.push(id);

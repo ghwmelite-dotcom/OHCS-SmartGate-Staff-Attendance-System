@@ -18,6 +18,7 @@ import clockinReauth from './migration-clockin-reauth.sql';
 import passiveLiveness from './migration-passive-liveness.sql';
 import kioskVisitor from './migration-kiosk-visitor.sql';
 import idPhotoCheck from './migration-id-photo-check.sql';
+import receptionOfficer from './migration-reception-officer.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -40,6 +41,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-passive-liveness.sql', sql: passiveLiveness },
   { filename: 'migration-kiosk-visitor.sql', sql: kioskVisitor },
   { filename: 'migration-id-photo-check.sql', sql: idPhotoCheck },
+  { filename: 'migration-reception-officer.sql', sql: receptionOfficer },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {

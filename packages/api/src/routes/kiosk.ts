@@ -42,7 +42,10 @@ kioskRoutes.post('/visitors', zValidator('json', KioskCreateVisitorSchema), asyn
 kioskRoutes.get('/directorates', async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
   const rows = await c.env.DB.prepare(
-    "SELECT id, name, abbreviation FROM directorates WHERE is_active = 1 ORDER BY name"
+    `SELECT d.id, d.name, d.abbreviation, o.name AS reception_officer_name
+     FROM directorates d
+     LEFT JOIN officers o ON d.reception_officer_id = o.id
+     WHERE d.is_active = 1 ORDER BY d.name`
   ).all();
   return success(c, rows.results ?? []);
 });
@@ -87,8 +90,11 @@ kioskRoutes.post('/check-in', zValidator('json', KioskCheckInSchema), async (c) 
   const body = c.req.valid('json');
   const idCheckRaw = await c.env.KV.get(`idcheck:${body.visitor_id}`);
   if (idCheckRaw !== null) await c.env.KV.delete(`idcheck:${body.visitor_id}`);
+  const dir = await c.env.DB.prepare('SELECT reception_officer_id FROM directorates WHERE id = ?')
+    .bind(body.directorate_id).first<{ reception_officer_id: string | null }>();
   const result = await performCheckIn(c.env, c.executionCtx, {
     ...body,
+    host_officer_id: dir?.reception_officer_id ?? null,
     created_by: KIOSK_USER_ID,
     check_in_source: 'kiosk',
     id_photo_check: idCheckRaw ?? JSON.stringify({ verdict: 'indeterminate' }),
