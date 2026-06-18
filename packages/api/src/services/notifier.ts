@@ -21,6 +21,18 @@ interface VisitNotifyData {
   check_in_at: string;
   directorate_id: string | null;
   directorate_abbr: string | null;
+  check_in_source?: 'staff' | 'kiosk';
+}
+
+export function selectFanoutReceivers(receivers: { officer_id: string }[], hostOfficerId: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of receivers) {
+    if (r.officer_id === hostOfficerId || seen.has(r.officer_id)) continue;
+    seen.add(r.officer_id);
+    out.push(r.officer_id);
+  }
+  return out;
 }
 
 function formatVisitorMessage(data: VisitNotifyData, recipientType: 'host' | 'director'): string {
@@ -61,17 +73,26 @@ export async function notifyOnCheckIn(data: VisitNotifyData, env: Env): Promise<
   // --- 1. ALWAYS notify the host staff member ---
   await notifyHostStaff(data, env);
 
+  // --- 1b. Kiosk only: also alert the rest of the directorate's reception team ---
+  if (data.check_in_source === 'kiosk' && data.directorate_id) {
+    const rows = await env.DB.prepare('SELECT officer_id FROM directorate_receivers WHERE directorate_id = ?')
+      .bind(data.directorate_id).all<{ officer_id: string }>();
+    for (const officerId of selectFanoutReceivers(rows.results ?? [], data.host_officer_id)) {
+      await notifyOfficerOfVisit(officerId, data, env);
+    }
+  }
+
   // --- 2. If directorate business (NOT personal), notify Director/Deputy ---
   if (!isPersonal && data.directorate_id) {
     await notifyDirectorateLeadership(data, env);
   }
 }
 
-// Notify the specific staff member being visited
-async function notifyHostStaff(data: VisitNotifyData, env: Env): Promise<void> {
+// Notify a specific officer of a visit (shared per-officer notify path)
+async function notifyOfficerOfVisit(officerId: string, data: VisitNotifyData, env: Env): Promise<void> {
   const officer = await env.DB.prepare(
     'SELECT id, name, email, telegram_chat_id FROM officers WHERE id = ?'
-  ).bind(data.host_officer_id).first<{
+  ).bind(officerId).first<{
     id: string; name: string; email: string | null; telegram_chat_id: string | null;
   }>();
 
@@ -106,6 +127,11 @@ async function notifyHostStaff(data: VisitNotifyData, env: Env): Promise<void> {
     // In-app notification
     await createInAppNotification(user.id, data, env);
   }
+}
+
+// Notify the specific staff member being visited
+async function notifyHostStaff(data: VisitNotifyData, env: Env): Promise<void> {
+  await notifyOfficerOfVisit(data.host_officer_id, data, env);
 }
 
 // Notify Director and Deputy Director of the directorate

@@ -85,6 +85,7 @@ export async function performCheckIn(
         check_in_at: String(v.check_in_at ?? ''),
         directorate_id: params.directorate_id || null,
         directorate_abbr: (v.directorate_abbr as string | null) ?? null,
+        check_in_source: params.check_in_source,
       }, env)
     );
   }
