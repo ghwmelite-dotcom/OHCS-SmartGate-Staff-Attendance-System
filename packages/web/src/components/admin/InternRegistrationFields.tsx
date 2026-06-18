@@ -33,12 +33,10 @@ interface Directorate {
   abbreviation: string;
 }
 
-// Mirrors the user shape returned by GET /users — only the fields we need here.
-interface StaffUser {
+// Active staff returned by GET /admin/interns/supervisors (already filtered server-side).
+interface Supervisor {
   id: string;
   name: string;
-  is_active: number;
-  user_type?: string | null;
 }
 
 export type InternFieldErrors = Partial<Record<keyof InternFormValues, string>>;
@@ -61,14 +59,12 @@ export function InternRegistrationFields({
   });
   const directorates = dirData?.data ?? [];
 
-  const { data: usersData } = useQuery({
-    queryKey: ['users'],
-    queryFn: () => api.get<StaffUser[]>('/users'),
+  const { data: supervisorsData } = useQuery({
+    queryKey: ['intern-supervisors'],
+    queryFn: () => api.get<Supervisor[]>('/admin/interns/supervisors'),
     staleTime: 60_000,
   });
-  const supervisors = (usersData?.data ?? [])
-    .filter((u) => u.user_type === 'staff' && u.is_active === 1)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const supervisors = supervisorsData?.data ?? [];
 
   return (
     <div className="space-y-4">

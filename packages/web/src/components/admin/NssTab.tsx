@@ -56,6 +56,14 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Type-aware copy for the header and banners.
+function typeTitle(t: TypeFilter): string {
+  return t === 'intern' ? 'Interns' : t === 'nss' ? 'NSS Personnel' : 'NSS & Interns';
+}
+function typeNoun(t: TypeFilter): string {
+  return t === 'intern' ? 'interns' : t === 'nss' ? 'NSS personnel' : 'service personnel';
+}
+
 function daysUntil(iso: string | null): number | null {
   if (!iso) return null;
   const today = new Date(todayIso() + 'T00:00:00Z').getTime();
@@ -237,7 +245,7 @@ export function NssTab() {
       <div className="flex flex-wrap items-start justify-between gap-3 animate-fade-in-up">
         <div>
           <h2 className="text-[20px] font-bold text-foreground tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
-            NSS Personnel
+            {typeTitle(typeFilter)}
           </h2>
           <p className="text-[13px] text-muted mt-0.5">
             Monitored centrally by F&amp;A Directorate
@@ -278,7 +286,7 @@ export function NssTab() {
             </div>
             <div>
               <p className="text-[14px] font-semibold text-foreground">
-                {endingIn14.length} NSS personnel ending within 14 days
+                {endingIn14.length} {typeNoun(typeFilter)} ending within 14 days
               </p>
               <p className="text-[12px] text-muted">
                 Plan handover, certificate generation, and PIN deactivation.

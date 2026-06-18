@@ -43,12 +43,10 @@ interface ActivityRow {
   is_late: number;
 }
 
-// Mirrors the user shape returned by GET /users — only the fields we need here.
-interface StaffUser {
+// Active staff returned by GET /admin/interns/supervisors (already filtered server-side).
+interface Supervisor {
   id: string;
   name: string;
-  is_active: number;
-  user_type?: string | null;
 }
 
 const editSchema = z.object({
@@ -359,15 +357,27 @@ function EditForm({ detail, directorates, onSaved }: {
     });
   }, [detail, form]);
 
-  const { data: usersData } = useQuery({
-    queryKey: ['users'],
-    queryFn: () => api.get<StaffUser[]>('/users'),
+  const { data: supervisorsData } = useQuery({
+    queryKey: ['intern-supervisors'],
+    queryFn: () => api.get<Supervisor[]>('/admin/interns/supervisors'),
     staleTime: 60_000,
     enabled: isIntern,
   });
-  const supervisors = (usersData?.data ?? [])
-    .filter((u) => u.user_type === 'staff' && u.is_active === 1)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // Ensure the intern's current supervisor is always selectable, even if they are
+  // no longer in the active-staff list (e.g. deactivated since assignment).
+  const supervisorOptions = useMemo<Supervisor[]>(() => {
+    const list = supervisorsData?.data ?? [];
+    if (
+      detail.supervisor_user_id &&
+      !list.some((s) => s.id === detail.supervisor_user_id)
+    ) {
+      return [
+        { id: detail.supervisor_user_id, name: detail.supervisor_name ?? '(current supervisor)' },
+        ...list,
+      ];
+    }
+    return list;
+  }, [supervisorsData, detail.supervisor_user_id, detail.supervisor_name]);
 
   // Backend exposes PATCH; the shared api client only has GET/POST/PUT/DELETE,
   // so we use fetch directly here to send PATCH /api/admin/nss/:id.
@@ -381,9 +391,18 @@ function EditForm({ detail, directorates, onSaved }: {
         nss_end_date: values.nss_end_date,
       };
       if (isIntern) {
-        payload.institution = values.institution || null;
-        payload.programme = values.programme || null;
-        payload.supervisor_user_id = values.supervisor_user_id || null;
+        // Only include intern fields that actually changed, so untouched fields
+        // (notably supervisor) are NOT clobbered to null by the PATCH.
+        const norm = (v: string | null | undefined) => ((v ?? '') === '' ? null : v);
+        if (norm(values.institution) !== norm(detail.institution)) {
+          payload.institution = norm(values.institution);
+        }
+        if (norm(values.programme) !== norm(detail.programme)) {
+          payload.programme = norm(values.programme);
+        }
+        if (norm(values.supervisor_user_id) !== norm(detail.supervisor_user_id)) {
+          payload.supervisor_user_id = norm(values.supervisor_user_id);
+        }
       }
       const { API_BASE } = await import('@/lib/constants');
       const { getToken } = await import('@/lib/tokenStore');
@@ -481,7 +500,7 @@ function EditForm({ detail, directorates, onSaved }: {
           <FormField label="Supervisor">
             <select {...form.register('supervisor_user_id')} className={inputCls}>
               <option value="">No supervisor</option>
-              {supervisors.map(u => (
+              {supervisorOptions.map(u => (
                 <option key={u.id} value={u.id}>{u.name}</option>
               ))}
             </select>

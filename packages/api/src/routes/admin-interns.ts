@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env, SessionData } from '../types';
-import { error, created } from '../lib/response';
+import { error, created, success } from '../lib/response';
 import { hashPin } from '../services/auth';
 import { requireRole } from '../lib/require-role';
 import { nextInternCode } from '../services/intern-code';
@@ -35,6 +35,17 @@ export async function assertValidSupervisor(db: D1Database, supervisorId: string
     .first<{ id: string }>();
   return !!sup;
 }
+
+// GET /api/admin/interns/supervisors — active staff users (id + name) for the supervisor picker.
+// Reachable by admin (the full /users list is superadmin-only), exposes only id+name.
+adminInternRoutes.get('/supervisors', async (c) => {
+  const forbidden = requireRole(c, 'superadmin', 'admin');
+  if (forbidden) return forbidden;
+  const res = await c.env.DB
+    .prepare(`SELECT id, name FROM users WHERE user_type = 'staff' AND is_active = 1 ORDER BY name ASC`)
+    .all<{ id: string; name: string }>();
+  return success(c, res.results ?? []);
+});
 
 adminInternRoutes.post('/', zValidator('json', createInternSchema), async (c) => {
   const forbidden = requireRole(c, 'superadmin', 'admin');
