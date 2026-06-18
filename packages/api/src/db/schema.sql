@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS directorates (
     wing            TEXT,
     rooms           TEXT,
     head_officer_id TEXT,
+    reception_officer_id TEXT REFERENCES officers(id),
     is_active       INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
