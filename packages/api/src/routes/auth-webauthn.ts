@@ -152,17 +152,18 @@ const identifierSchema = z
   .object({
     staff_id: z.string().min(1).max(20).trim().optional(),
     nss_number: z.string().min(1).max(32).trim().optional(),
+    intern_code: z.string().min(1).max(64).trim().optional(),
   })
   .refine(
-    (v) => (v.staff_id ? 1 : 0) + (v.nss_number ? 1 : 0) === 1,
-    { message: 'Provide exactly one of staff_id or nss_number' },
+    (v) => (v.staff_id ? 1 : 0) + (v.nss_number ? 1 : 0) + (v.intern_code ? 1 : 0) === 1,
+    { message: 'Provide exactly one of staff_id, nss_number or intern_code' },
   );
 
 const loginOptionsSchema = identifierSchema;
 
-/** Returns the column to look up by ('staff_id' | 'nss_number') and the normalized value. */
-function resolveIdentifier(input: { staff_id?: string; nss_number?: string }): {
-  column: 'staff_id' | 'nss_number';
+/** Returns the column to look up by ('staff_id' | 'nss_number' | 'intern_code') and the normalized value. */
+function resolveIdentifier(input: { staff_id?: string; nss_number?: string; intern_code?: string }): {
+  column: 'staff_id' | 'nss_number' | 'intern_code';
   value: string;
   challengeKey: string;
 } {
@@ -170,8 +171,12 @@ function resolveIdentifier(input: { staff_id?: string; nss_number?: string }): {
     const v = input.staff_id.toUpperCase();
     return { column: 'staff_id', value: v, challengeKey: `webauthn-auth:sid:${v}` };
   }
-  const v = (input.nss_number ?? '').toUpperCase();
-  return { column: 'nss_number', value: v, challengeKey: `webauthn-auth:nss:${v}` };
+  if (input.nss_number) {
+    const v = input.nss_number.toUpperCase();
+    return { column: 'nss_number', value: v, challengeKey: `webauthn-auth:nss:${v}` };
+  }
+  const v = (input.intern_code ?? '').toUpperCase();
+  return { column: 'intern_code', value: v, challengeKey: `webauthn-auth:int:${v}` };
 }
 
 authWebAuthnPublicRoutes.post('/login/options', zValidator('json', loginOptionsSchema), async (c) => {
