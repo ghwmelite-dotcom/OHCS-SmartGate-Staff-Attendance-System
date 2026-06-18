@@ -14,4 +14,4 @@ ALTER TABLE visitors ADD COLUMN id_photo_url TEXT;
 ALTER TABLE visits ADD COLUMN check_in_source TEXT NOT NULL DEFAULT 'staff';
 
 INSERT OR IGNORE INTO users (id, name, email, role)
-VALUES ('user_kiosk', 'Self-Service Kiosk', 'kiosk@ohcs.gov.gh', 'visitor');
+VALUES ('user_kiosk', 'Self-Service Kiosk', 'kiosk@ohcs.gov.gh', 'staff');
