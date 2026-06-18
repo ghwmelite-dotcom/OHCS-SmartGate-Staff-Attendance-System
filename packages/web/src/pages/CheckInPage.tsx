@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { api, type Visitor, type Visit, type Officer, type Directorate } from '@/lib/api';
 import { apiOrQueue, type ApiOrQueueResult } from '@/lib/offlineQueue';
 import { cn, getInitials, formatDate } from '@/lib/utils';
-import { ID_TYPES } from '@/lib/constants';
+import { BADGE_BASE, ID_TYPES } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { toast } from '@/stores/toast';
 import { playCheckInChime } from '@/lib/sounds';
@@ -895,10 +895,7 @@ function BadgeQRCode({ badgeCode }: { badgeCode: string }) {
 
   useEffect(() => {
     if (canvasRef.current) {
-      const apiBase = import.meta.env.PROD
-        ? 'https://ohcs-smartgate-api.ohcsghana-main.workers.dev'
-        : 'http://localhost:8787';
-      const badgeUrl = `${apiBase}/badge/${badgeCode}`;
+      const badgeUrl = `${BADGE_BASE}/badge/${badgeCode}`;
       QRCode.toCanvas(canvasRef.current, badgeUrl, {
         width: 200,
         margin: 2,

@@ -3,6 +3,18 @@ main = "src/index.ts"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Keep the *.workers.dev subdomain (the SPA calls it for the rest of the API).
+workers_dev = true
+
+# Serve the public badge page + badge photo from the branded custom domain.
+# These pattern routes overlay the Pages custom domain (smartgate.ohcsghana.org);
+# Worker routes take precedence over Pages for matching paths, so only /badge/*
+# and /api/badges/* hit the Worker — every other path stays on the Pages SPA.
+routes = [
+  { pattern = "smartgate.ohcsghana.org/badge/*", zone_name = "ohcsghana.org" },
+  { pattern = "smartgate.ohcsghana.org/api/badges/*", zone_name = "ohcsghana.org" },
+]
+
 rules = [
   { type = "Text", globs = ["**/*.sql"], fallthrough = true },
 ]
