@@ -9,7 +9,7 @@ export const analyticsRoutes = new Hono<{ Bindings: Env; Variables: { session: S
 
 // Today's summary
 analyticsRoutes.get('/today', async (c) => {
-  const blocked = requireRole(c, 'superadmin', 'admin', 'director', 'hr');
+  const blocked = requireRole(c, 'superadmin', 'admin', 'director');
   if (blocked) return blocked;
   const today = new Date().toISOString().slice(0, 10);
 
@@ -62,7 +62,7 @@ const trendsSchema = z.object({
 });
 
 analyticsRoutes.get('/trends', zValidator('query', trendsSchema), async (c) => {
-  const blocked = requireRole(c, 'superadmin', 'admin', 'director', 'hr');
+  const blocked = requireRole(c, 'superadmin', 'admin', 'director');
   if (blocked) return blocked;
   const { days } = c.req.valid('query');
   const fromDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
@@ -130,7 +130,7 @@ const topVisitorsSchema = z.object({
 });
 
 analyticsRoutes.get('/top-visitors', zValidator('query', topVisitorsSchema), async (c) => {
-  const blocked = requireRole(c, 'superadmin', 'admin', 'director', 'hr');
+  const blocked = requireRole(c, 'superadmin', 'admin', 'director');
   if (blocked) return blocked;
   const { days, limit } = c.req.valid('query');
   const fromDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
