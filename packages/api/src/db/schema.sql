@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS visits (
     status           TEXT NOT NULL DEFAULT 'checked_in' CHECK(status IN ('checked_in','checked_out','cancelled')),
     check_in_source  TEXT NOT NULL DEFAULT 'staff',
     notes            TEXT,
+    id_photo_check   TEXT,
     created_by       TEXT REFERENCES users(id),
     idempotency_key  TEXT,
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
