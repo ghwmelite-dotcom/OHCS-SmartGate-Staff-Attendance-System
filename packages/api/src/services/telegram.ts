@@ -53,6 +53,13 @@ export function formatVisitorArrivalMessage(visitor: {
   return lines.join('\n');
 }
 
+export function parseStartToken(text: string): string | null {
+  if (!text.startsWith('/start')) return null;
+  const rest = text.slice('/start'.length).trim();
+  if (!rest) return null;
+  return rest.split(/\s+/)[0] ?? null;
+}
+
 export async function generateLinkCode(chatId: string, env: Env): Promise<string> {
   const code = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
   await env.KV.put(`telegram-link:${code}`, chatId, { expirationTtl: 600 });

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Context } from 'hono';
 import type { Env, SessionData } from '../types';
-import { generateLinkCode, consumeLinkCode, sendTelegramMessage } from '../services/telegram';
+import { generateLinkCode, consumeLinkCode, sendTelegramMessage, parseStartToken } from '../services/telegram';
 import { success, error } from '../lib/response';
 
 // Public — receives updates from Telegram
@@ -27,7 +27,27 @@ export async function telegramWebhook(c: Context<{ Bindings: Env }>) {
 
   if (!chatId || !text) return c.json({ ok: true });
 
-  if (text === '/start') {
+  if (text === '/start' || text.startsWith('/start ')) {
+    const startToken = parseStartToken(text);
+    if (startToken) {
+      const officerId = await c.env.KV.get(`officer-link:${startToken}`);
+      if (officerId) {
+        await c.env.DB.prepare('UPDATE officers SET telegram_chat_id = ? WHERE id = ?')
+          .bind(String(chatId), officerId).run();
+        await c.env.KV.delete(`officer-link:${startToken}`);
+        const row = await c.env.DB.prepare(
+          `SELECT o.name, d.abbreviation AS dir FROM officers o
+           LEFT JOIN directorates d ON o.directorate_id = d.id WHERE o.id = ?`
+        ).bind(officerId).first<{ name: string; dir: string | null }>();
+        await sendTelegramMessage({
+          chatId: String(chatId),
+          text: `\u2705 <b>Linked!</b>\n\n${row?.name ?? 'You'} will now receive visitor arrival alerts${row?.dir ? ` for ${row.dir}` : ''}.`,
+          token: c.env.TELEGRAM_BOT_TOKEN,
+        });
+        return c.json({ ok: true });
+      }
+      // invalid/expired token \u2192 fall through to the greeting (no error leak)
+    }
     await sendTelegramMessage({
       chatId: String(chatId),
       text: [

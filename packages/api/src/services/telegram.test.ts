@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { sendTelegramMessage } from './telegram';
+import { sendTelegramMessage, parseStartToken } from './telegram';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -18,5 +18,21 @@ describe('sendTelegramMessage', () => {
   it('returns false when fetch throws', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('net'); }));
     expect(await sendTelegramMessage({ chatId: '1', text: 'x', token: 't' })).toBe(false);
+  });
+});
+
+describe('parseStartToken', () => {
+  it('extracts the token after /start', () => {
+    expect(parseStartToken('/start abc123')).toBe('abc123');
+  });
+  it('takes only the first whitespace-delimited token', () => {
+    expect(parseStartToken('/start abc def')).toBe('abc');
+  });
+  it('returns null for bare /start', () => {
+    expect(parseStartToken('/start')).toBeNull();
+    expect(parseStartToken('/start   ')).toBeNull();
+  });
+  it('returns null for non-start text', () => {
+    expect(parseStartToken('/link 123')).toBeNull();
   });
 });
