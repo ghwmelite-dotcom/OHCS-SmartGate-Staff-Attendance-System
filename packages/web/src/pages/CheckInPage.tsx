@@ -8,21 +8,24 @@ import { z } from 'zod';
 import { api, type Visitor, type Visit, type Officer, type Directorate } from '@/lib/api';
 import { apiOrQueue, type ApiOrQueueResult } from '@/lib/offlineQueue';
 import { cn, getInitials, formatDate } from '@/lib/utils';
-import { BADGE_BASE, ID_TYPES } from '@/lib/constants';
+import { BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
+import { FieldWrapper } from '@/components/checkin/FieldWrapper';
+import { SmartIdFields } from '@/components/checkin/SmartIdFields';
+import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
+import { StepIndicator } from '@/components/checkin/StepIndicator';
+import { suggestDirectorate } from '@/lib/directorate-routing';
 import { toast } from '@/stores/toast';
 import { playCheckInChime } from '@/lib/sounds';
 import {
   Search,
   UserPlus,
   ChevronLeft,
-  Check,
   Building2,
   User,
   Phone,
   Mail,
   Briefcase,
-  CreditCard,
   ArrowRight,
   CheckCircle2,
   X,
@@ -228,7 +231,16 @@ export function CheckInPage() {
             Back
           </button>
         )}
-        <StepIndicator current={step} />
+        {(() => {
+          const indicatorSteps = [
+            { key: 'search', label: 'Find' },
+            { key: 'photo', label: 'Photo' },
+            { key: 'check-in', label: 'Check In' },
+            { key: 'success', label: 'Done' },
+          ];
+          const idx = step === 'new-visitor' ? 0 : indicatorSteps.findIndex((s) => s.key === step);
+          return <StepIndicator steps={indicatorSteps} currentIdx={idx} />;
+        })()}
       </div>
 
       {/* STEP 1: Search visitor */}
@@ -359,7 +371,16 @@ export function CheckInPage() {
               <input {...newVisitorForm.register('organisation')} className={fieldCls} placeholder="e.g. Ministry of Finance" />
             </FieldWrapper>
 
-            <SmartIdFields form={newVisitorForm} />
+            <SmartIdFields
+              idType={newVisitorForm.watch('id_type')}
+              idNumber={newVisitorForm.watch('id_number') ?? ''}
+              onIdTypeChange={(v) => {
+                newVisitorForm.setValue('id_type', v as never);
+                if (!v) newVisitorForm.setValue('id_number', '');
+              }}
+              onIdNumberChange={(v) => newVisitorForm.setValue('id_number', v)}
+              idNumberError={newVisitorForm.formState.errors.id_number?.message}
+            />
 
             {createVisitorMutation.isError && (
               <p className="text-danger text-xs">
@@ -609,98 +630,6 @@ export function CheckInPage() {
 const fieldCls =
   'w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary';
 
-function FieldWrapper({
-  icon,
-  label,
-  error,
-  children,
-}: {
-  icon?: React.ReactNode;
-  label: string;
-  error?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="flex items-center gap-1.5 text-xs font-medium text-foreground mb-1.5">
-        {icon && <span className="text-muted">{icon}</span>}
-        {label}
-      </label>
-      {children}
-      {error && <p className="text-danger text-xs mt-1">{error}</p>}
-    </div>
-  );
-}
-
-/* ---- Smart routing based on purpose keywords ---- */
-
-const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string; room: string }> = [
-  { keywords: ['document', 'submit', 'filing', 'registry', 'confidential'], abbreviation: 'REGISTRY', room: 'Room 4, 2nd Floor' },
-  { keywords: ['salary', 'e-spar', 'espar', 'spar', 'ict', 'it system', 'computer', 'software', 'technology', 'research', 'data', 'statistics', 'survey', 'database', 'e-governance'], abbreviation: 'RSIMD', room: 'Room 19 & 21, 1st Floor' },
-  { keywords: ['recruit', 'job', 'application', 'hiring', 'training', 'workshop', 'study leave', 'scholarship', 'capacity', 'induction', 'gimpa', 'entrance exam'], abbreviation: 'RTDD', room: 'Deputy: Room 9, 2nd Floor' },
-  { keywords: ['promotion', 'posting', 'transfer', 'career', 'succession', 'welfare', 'occupational health'], abbreviation: 'CMD', room: 'Deputy: Room 34, 1st Floor' },
-  { keywords: ['budget', 'payment', 'finance', 'account', 'procurement', 'stores', 'transport', 'vehicle', 'estate', 'maintenance', 'asset', 'personnel'], abbreviation: 'F&A', room: 'Deputy: Room 35, 1st Floor' },
-  { keywords: ['performance', 'appraisal', 'monitoring', 'evaluation', 'service delivery', 'client service', 'development plan'], abbreviation: 'PBMED', room: 'Deputy: Room 31, 1st Floor' },
-  { keywords: ['complaint', 'petition', 'disciplinary', 'council', 'civil service council'], abbreviation: 'CSC', room: 'Rooms 24, 44' },
-  { keywords: ['reform', 'anti-corruption', 'nacap', 'right to information', 'rti'], abbreviation: 'RCU', room: '' },
-  { keywords: ['audit', 'fraud', 'internal audit', 'compliance', 'risk'], abbreviation: 'IAU', room: '' },
-];
-
-function suggestDirectorate(purpose: string, directorates: Directorate[]): Directorate | null {
-  if (!purpose || purpose.length < 3) return null;
-  const lower = purpose.toLowerCase();
-
-  for (const route of ROUTING_KEYWORDS) {
-    if (route.keywords.some(kw => lower.includes(kw))) {
-      return directorates.find(d => d.abbreviation === route.abbreviation) ?? null;
-    }
-  }
-  return null;
-}
-
-function PurposeRoutingHint({ purpose, directorates, currentDirectorateId, onAccept }: {
-  purpose: string;
-  directorates: Directorate[];
-  currentDirectorateId: string;
-  onAccept: (id: string) => void;
-}) {
-  const suggestion = suggestDirectorate(purpose, directorates);
-  if (!suggestion) return null;
-
-  const route = ROUTING_KEYWORDS.find(r => r.abbreviation === suggestion.abbreviation);
-  const alreadySelected = currentDirectorateId === suggestion.id;
-
-  if (alreadySelected) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-success/8 border border-success/15 rounded-xl text-[13px] animate-fade-in">
-        <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
-        <span className="text-success font-medium">
-          Routing to {suggestion.abbreviation}{route?.room ? ` — ${route.room}` : ''}
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center justify-between gap-3 px-3 py-2.5 bg-accent/8 border border-accent/15 rounded-xl animate-fade-in">
-      <div className="flex items-center gap-2 text-[13px]">
-        <Building2 className="h-4 w-4 text-accent-warm shrink-0" />
-        <span className="text-foreground">
-          Suggested: <strong>{suggestion.abbreviation}</strong> — {suggestion.name}
-          {route?.room ? <span className="text-muted"> ({route.room})</span> : ''}
-        </span>
-      </div>
-      <button
-        type="button"
-        onClick={() => onAccept(suggestion.id)}
-        className="h-7 px-3 text-[12px] font-semibold bg-accent text-white rounded-lg hover:brightness-110 transition-all shrink-0"
-      >
-        Accept
-      </button>
-    </div>
-  );
-}
-
 function HostOfficerField({ officers, onSelect, onManual }: {
   officers: Officer[];
   onSelect: (id: string) => void;
@@ -797,99 +726,6 @@ function HostOfficerField({ officers, onSelect, onManual }: {
   );
 }
 
-const ID_TYPE_CONFIG: Record<string, { label: string; placeholder: string; hint: string; format?: (v: string) => string }> = {
-  ghana_card: {
-    label: 'Ghana Card Number',
-    placeholder: 'GHA-XXXXXXXXX-X',
-    hint: 'Format: GHA-000000000-0',
-    format: (v: string) => {
-      const digits = v.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-      if (digits.length <= 3) return digits;
-      if (digits.length <= 12) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
-      return `${digits.slice(0, 3)}-${digits.slice(3, 12)}-${digits.slice(12, 13)}`;
-    },
-  },
-  passport: {
-    label: 'Passport Number',
-    placeholder: 'G0123456',
-    hint: 'Ghana passport number',
-    format: (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 9),
-  },
-  drivers_license: {
-    label: 'License Number',
-    placeholder: 'DL-00000000-00',
-    hint: 'DVLA driver\'s license number',
-    format: (v: string) => {
-      const clean = v.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-      if (clean.length <= 2) return clean;
-      if (clean.length <= 10) return `${clean.slice(0, 2)}-${clean.slice(2)}`;
-      return `${clean.slice(0, 2)}-${clean.slice(2, 10)}-${clean.slice(10, 12)}`;
-    },
-  },
-  staff_id: {
-    label: 'Staff ID Number',
-    placeholder: '12345',
-    hint: 'Government staff identification',
-  },
-  other: {
-    label: 'ID Number',
-    placeholder: 'Enter ID number',
-    hint: 'Enter the identification number',
-  },
-};
-
-function SmartIdFields({ form }: { form: ReturnType<typeof useForm<NewVisitorForm>> }) {
-  const selectedType = form.watch('id_type');
-  const config = selectedType ? ID_TYPE_CONFIG[selectedType] : null;
-
-  return (
-    <div className="space-y-4">
-      <FieldWrapper icon={<CreditCard className="h-4 w-4" />} label="ID Type">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {ID_TYPES.map((t) => {
-            const isSelected = selectedType === t.value;
-            return (
-              <button
-                key={t.value}
-                type="button"
-                onClick={() => {
-                  form.setValue('id_type', isSelected ? undefined : t.value as NewVisitorForm['id_type']);
-                  if (isSelected) form.setValue('id_number', '');
-                }}
-                className={cn(
-                  'h-10 px-3 rounded-xl text-[13px] font-medium border transition-all text-left',
-                  isSelected
-                    ? 'bg-primary/10 border-primary/30 text-primary'
-                    : 'bg-background border-border text-foreground hover:border-primary/20'
-                )}
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
-      </FieldWrapper>
-
-      {config && (
-        <div className="animate-fade-in-up">
-          <FieldWrapper icon={<CreditCard className="h-4 w-4" />} label={config.label} error={form.formState.errors.id_number?.message}>
-            <input
-              {...form.register('id_number')}
-              className={fieldCls}
-              placeholder={config.placeholder}
-              onChange={(e) => {
-                const formatted = config.format ? config.format(e.target.value) : e.target.value;
-                form.setValue('id_number', formatted);
-              }}
-            />
-            <p className="text-[11px] text-muted-foreground mt-1.5">{config.hint}</p>
-          </FieldWrapper>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function BadgeQRCode({ badgeCode }: { badgeCode: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -907,38 +743,3 @@ function BadgeQRCode({ badgeCode }: { badgeCode: string }) {
   return <canvas ref={canvasRef} className="mx-auto rounded-lg" />;
 }
 
-function StepIndicator({ current }: { current: Step }) {
-  const steps: { key: Step; label: string }[] = [
-    { key: 'search', label: 'Find' },
-    { key: 'photo', label: 'Photo' },
-    { key: 'check-in', label: 'Check In' },
-    { key: 'success', label: 'Done' },
-  ];
-
-  const currentIdx = current === 'new-visitor' ? 0 : steps.findIndex((s) => s.key === current);
-
-  return (
-    <div className="flex items-center gap-1 ml-auto">
-      {steps.map((s, i) => (
-        <div key={s.key} className="flex items-center gap-1">
-          <span
-            className={cn(
-              'inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold',
-              i < currentIdx
-                ? 'bg-success text-white'
-                : i === currentIdx
-                  ? 'bg-primary text-white'
-                  : 'bg-border text-muted'
-            )}
-          >
-            {i < currentIdx ? <Check className="h-3 w-3" /> : i + 1}
-          </span>
-          <span className={cn('text-xs', i === currentIdx ? 'text-foreground font-medium' : 'text-muted')}>
-            {s.label}
-          </span>
-          {i < steps.length - 1 && <span className="text-border-strong mx-1">—</span>}
-        </div>
-      ))}
-    </div>
-  );
-}

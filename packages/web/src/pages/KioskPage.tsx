@@ -1,14 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import type { ReactNode } from 'react';
 import QRCode from 'qrcode';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { kioskApi, type KioskVisit, type KioskDirectorate } from '@/lib/kioskApi';
-import { API_BASE, BADGE_BASE, ID_TYPES } from '@/lib/constants';
+import { API_BASE, BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
-import { CheckCircle2, LogIn, LogOut, Loader2, X } from 'lucide-react';
+import { FieldWrapper } from '@/components/checkin/FieldWrapper';
+import { SmartIdFields } from '@/components/checkin/SmartIdFields';
+import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
+import { StepIndicator } from '@/components/checkin/StepIndicator';
+import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2 } from 'lucide-react';
 
 const visitorSchema = z.object({
   first_name: z.string().min(1, 'First name is required').max(100),
@@ -27,7 +30,7 @@ type VisitorForm = z.infer<typeof visitorSchema>;
 
 type Mode = 'welcome' | 'form' | 'face' | 'id' | 'submitting' | 'success' | 'checkout-scan' | 'checkout-confirm' | 'checkout-done';
 
-const fieldCls = 'w-full h-11 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary';
+const fieldCls = 'w-full h-12 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary';
 
 export function KioskPage() {
   const [mode, setMode] = useState<Mode>('welcome');
@@ -138,6 +141,20 @@ export function KioskPage() {
       <div className="w-full max-w-md bg-surface rounded-2xl border border-border shadow-lg p-6">
         <KioskHeader />
 
+        {(mode === 'form' || mode === 'face' || mode === 'id' || mode === 'submitting' || mode === 'success') && (
+          <div className="mt-4 flex">
+            <StepIndicator
+              steps={[
+                { key: 'form', label: 'Details' },
+                { key: 'face', label: 'Photo' },
+                { key: 'id', label: 'ID' },
+                { key: 'success', label: 'Done' },
+              ]}
+              currentIdx={mode === 'form' ? 0 : mode === 'face' ? 1 : mode === 'id' || mode === 'submitting' ? 2 : 3}
+            />
+          </div>
+        )}
+
         {mode === 'welcome' && (
           <div className="space-y-3 mt-6">
             <button onClick={() => { form.reset(); setMode('form'); }} className="w-full h-14 bg-primary text-white text-base font-semibold rounded-xl inline-flex items-center justify-center gap-2 active:scale-[0.99]">
@@ -151,47 +168,63 @@ export function KioskPage() {
 
         {mode === 'form' && (
           <form onSubmit={form.handleSubmit(onSubmitForm)} className="space-y-4 mt-6">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="First Name" error={form.formState.errors.first_name?.message}>
-                <input {...form.register('first_name')} className={fieldCls} autoFocus />
-              </Field>
-              <Field label="Last Name" error={form.formState.errors.last_name?.message}>
-                <input {...form.register('last_name')} className={fieldCls} />
-              </Field>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Your Details</h2>
+              <p className="text-sm text-muted mt-0.5">Tell us who you are and who you're visiting</p>
             </div>
-            <Field label="Phone" error={form.formState.errors.phone?.message}>
-              <input {...form.register('phone')} className={fieldCls} placeholder="0241234567" />
-            </Field>
-            <Field label="Organisation (optional)">
-              <input {...form.register('organisation')} className={fieldCls} />
-            </Field>
-            <Field label="Directorate" error={form.formState.errors.directorate_id?.message}>
-              <select {...form.register('directorate_id')} className={fieldCls}>
-                <option value="">Select directorate...</option>
-                {directorates.map((d) => (
-                  <option key={d.id} value={d.id}>{d.abbreviation} — {d.name}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Who are you visiting?" error={form.formState.errors.host_name?.message}>
-              <input {...form.register('host_name')} className={fieldCls} placeholder="e.g. Mr. Mensah" />
-            </Field>
-            <Field label="ID Type" error={form.formState.errors.id_type?.message}>
-              <select {...form.register('id_type', { setValueAs: (v) => v || undefined })} className={fieldCls}>
-                <option value="">Select...</option>
-                {ID_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </Field>
-            <Field label="ID Number (optional)">
-              <input {...form.register('id_number')} className={fieldCls} />
-            </Field>
-            <Field label="Purpose of Visit" error={form.formState.errors.purpose_raw?.message}>
-              <textarea {...form.register('purpose_raw')} rows={2} className={`${fieldCls} h-auto py-2 resize-none`} />
-            </Field>
+            <div className="bg-surface rounded-xl border border-border shadow-sm p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <FieldWrapper icon={<User className="h-4 w-4" />} label="First Name" error={form.formState.errors.first_name?.message}>
+                  <input {...form.register('first_name')} className={fieldCls} autoFocus />
+                </FieldWrapper>
+                <FieldWrapper icon={<User className="h-4 w-4" />} label="Last Name" error={form.formState.errors.last_name?.message}>
+                  <input {...form.register('last_name')} className={fieldCls} />
+                </FieldWrapper>
+              </div>
+              <FieldWrapper icon={<Phone className="h-4 w-4" />} label="Phone" error={form.formState.errors.phone?.message}>
+                <input {...form.register('phone')} className={fieldCls} placeholder="0241234567" inputMode="tel" />
+              </FieldWrapper>
+              <FieldWrapper icon={<Briefcase className="h-4 w-4" />} label="Organisation (optional)">
+                <input {...form.register('organisation')} className={fieldCls} />
+              </FieldWrapper>
+              <FieldWrapper icon={<Building2 className="h-4 w-4" />} label="Directorate" error={form.formState.errors.directorate_id?.message}>
+                <select {...form.register('directorate_id')} className={fieldCls}>
+                  <option value="">Select directorate...</option>
+                  {directorates.map((d) => (
+                    <option key={d.id} value={d.id}>{d.abbreviation} — {d.name}</option>
+                  ))}
+                </select>
+              </FieldWrapper>
+              <FieldWrapper icon={<User className="h-4 w-4" />} label="Who are you visiting?" error={form.formState.errors.host_name?.message}>
+                <input {...form.register('host_name')} className={fieldCls} placeholder="e.g. Mr. Mensah" />
+              </FieldWrapper>
+              <SmartIdFields
+                idType={form.watch('id_type')}
+                idNumber={form.watch('id_number') ?? ''}
+                onIdTypeChange={(v) => {
+                  form.setValue('id_type', v as never);
+                  if (v) form.clearErrors('id_type');
+                  else form.setValue('id_number', '');
+                }}
+                onIdNumberChange={(v) => form.setValue('id_number', v)}
+                idTypeError={form.formState.errors.id_type?.message}
+                idNumberError={form.formState.errors.id_number?.message}
+                inputClassName={fieldCls}
+              />
+              <FieldWrapper label="Purpose of Visit" error={form.formState.errors.purpose_raw?.message}>
+                <textarea {...form.register('purpose_raw')} rows={2} className={`${fieldCls} h-auto py-2 resize-none`} placeholder="e.g. Submit documents, salary enquiry, training..." />
+              </FieldWrapper>
+              <PurposeRoutingHint
+                purpose={form.watch('purpose_raw') ?? ''}
+                directorates={directorates}
+                currentDirectorateId={form.watch('directorate_id') ?? ''}
+                onAccept={(id) => form.setValue('directorate_id', id)}
+              />
+            </div>
             {submitError && <p className="text-danger text-xs">{submitError}</p>}
             <div className="flex gap-3">
-              <button type="button" onClick={resetAll} className="h-11 px-4 text-sm text-muted">Cancel</button>
-              <button type="submit" disabled={form.formState.isSubmitting} className="flex-1 h-11 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
+              <button type="button" onClick={resetAll} className="h-14 px-4 text-sm text-muted">Cancel</button>
+              <button type="submit" disabled={form.formState.isSubmitting} className="flex-1 h-14 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
                 {form.formState.isSubmitting ? 'Registering…' : 'Continue to Photo'}
               </button>
             </div>
@@ -199,14 +232,26 @@ export function KioskPage() {
         )}
 
         {mode === 'face' && (
-          <div className="mt-6">
-            <PhotoCapture title="Take Your Photo" facingMode="user" required onCapture={handleFaceCapture} onSkip={() => setMode('id')} />
+          <div className="mt-6 space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Take Your Photo</h2>
+              <p className="text-sm text-muted mt-0.5">Look at the camera and capture a clear photo</p>
+            </div>
+            <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
+              <PhotoCapture title="Take Your Photo" facingMode="user" required onCapture={handleFaceCapture} onSkip={() => setMode('id')} />
+            </div>
           </div>
         )}
 
         {mode === 'id' && (
-          <div className="mt-6">
-            <PhotoCapture title="Photograph Your ID" facingMode="environment" mirror={false} required onCapture={handleIdCapture} onSkip={finishCheckIn} />
+          <div className="mt-6 space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Photograph Your ID</h2>
+              <p className="text-sm text-muted mt-0.5">Place your ID in the frame and capture it</p>
+            </div>
+            <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
+              <PhotoCapture title="Photograph Your ID" facingMode="environment" mirror={false} required onCapture={handleIdCapture} onSkip={finishCheckIn} />
+            </div>
           </div>
         )}
 
@@ -215,21 +260,26 @@ export function KioskPage() {
         )}
 
         {mode === 'success' && (
-          <div className="mt-6 text-center space-y-4">
+          <div className="mt-6">
             {createdVisit?.badge_code ? (
-              <>
-                <div className="w-12 h-12 bg-success/10 rounded-full flex items-center justify-center mx-auto">
-                  <CheckCircle2 className="h-6 w-6 text-success" />
+              <div className="bg-surface rounded-2xl border border-border shadow-sm p-8 text-center space-y-4">
+                <div className="w-14 h-14 bg-success/10 rounded-full flex items-center justify-center mx-auto">
+                  <CheckCircle2 className="h-7 w-7 text-success" />
                 </div>
-                <h2 className="text-lg font-semibold text-foreground">You're Checked In</h2>
-                <p className="text-sm text-muted">Scan this code with your phone to keep your badge.</p>
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground">You're Checked In</h2>
+                  <p className="text-sm text-muted mt-1">Scan this code with your phone to keep your badge</p>
+                </div>
                 <KioskBadgeQr badgeCode={createdVisit.badge_code} />
                 <p className="text-sm font-mono font-bold text-accent">{createdVisit.badge_code}</p>
-              </>
+                <button onClick={resetAll} className="h-12 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Done</button>
+              </div>
             ) : (
-              <p className="text-danger text-sm">{submitError ?? 'Something went wrong. Please see reception.'}</p>
+              <div className="text-center space-y-4">
+                <p className="text-danger text-sm">{submitError ?? 'Something went wrong. Please see reception.'}</p>
+                <button onClick={resetAll} className="h-12 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Done</button>
+              </div>
             )}
-            <button onClick={resetAll} className="h-11 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Done</button>
           </div>
         )}
 
@@ -279,16 +329,6 @@ function KioskHeader() {
       </div>
       <h1 className="text-base font-bold text-foreground">OHCS Visitor Check-In</h1>
       <p className="text-xs text-muted">Office of the Head of the Civil Service</p>
-    </div>
-  );
-}
-
-function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
-  return (
-    <div>
-      <label className="block text-xs font-medium text-foreground mb-1.5">{label}</label>
-      {children}
-      {error && <p className="text-danger text-xs mt-1">{error}</p>}
     </div>
   );
 }
