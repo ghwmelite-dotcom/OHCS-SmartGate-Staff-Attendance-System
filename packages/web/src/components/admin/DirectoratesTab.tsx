@@ -87,6 +87,7 @@ export function DirectoratesTab() {
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Name</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Type</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Rooms</th>
+                <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Reception</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -102,6 +103,13 @@ export function DirectoratesTab() {
                       </span>
                     </td>
                     <td className="px-6 py-3 text-[13px] text-muted">{d.rooms ?? '—'}</td>
+                    <td className="px-6 py-3">
+                      <ReceptionOfficerCell
+                        directorate={d}
+                        officers={officers}
+                        onSaved={() => queryClient.invalidateQueries({ queryKey: ['directorates-admin'] })}
+                      />
+                    </td>
                   </tr>
                 );
               })}
@@ -169,6 +177,30 @@ export function DirectoratesTab() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ReceptionOfficerCell({ directorate, officers, onSaved }: {
+  directorate: DirectorateExt;
+  officers: OfficerExt[];
+  onSaved: () => void;
+}) {
+  const mutation = useMutation({
+    mutationFn: (reception_officer_id: string) =>
+      api.put(`/admin/directorates/${directorate.id}`, { reception_officer_id }),
+    onSuccess: onSaved,
+  });
+  const own = officers.filter((o) => o.directorate_id === directorate.id);
+  return (
+    <select
+      value={directorate.reception_officer_id ?? ''}
+      onChange={(e) => mutation.mutate(e.target.value)}
+      disabled={mutation.isPending}
+      className="h-8 px-2 rounded-lg border border-border bg-background text-[13px] disabled:opacity-50"
+    >
+      <option value="">— none —</option>
+      {own.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+    </select>
   );
 }
 
