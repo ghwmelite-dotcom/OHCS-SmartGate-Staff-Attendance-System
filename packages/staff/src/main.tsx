@@ -4,11 +4,20 @@ import { App } from './App';
 import { useInstallStore } from './stores/install';
 import './tokens.css';
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>
-);
+// The API is Worker-routed first-party only on the branded domain. If opened from
+// the default *.pages.dev host (e.g. a stale bookmark), /api/* would hit the Pages
+// origin (no Worker route) and the first-party cookie wouldn't be sent — so bounce
+// to the branded domain, preserving the path/query/hash, before rendering.
+const onPagesDev = location.hostname.endsWith('.pages.dev');
+if (onPagesDev) {
+  location.replace(`https://staff-attendance.ohcsghana.org${location.pathname}${location.search}${location.hash}`);
+} else {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>
+  );
+}
 
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
