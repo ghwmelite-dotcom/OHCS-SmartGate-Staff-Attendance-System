@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS users (
     email            TEXT NOT NULL UNIQUE,
     staff_id         TEXT UNIQUE,
     pin_hash         TEXT,
+    -- NOTE: prod (migration path, migration-pin-acknowledged.sql) added this column
+    -- WITHOUT the `CHECK(pin_acknowledged IN (0,1))` constraint below — known drift.
+    -- Do NOT rebuild the table on prod to add it; fresh-init keeps the CHECK.
     pin_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(pin_acknowledged IN (0, 1)),
     role             TEXT NOT NULL DEFAULT 'staff',
     grade            TEXT,
@@ -136,7 +139,11 @@ CREATE INDEX IF NOT EXISTS idx_visits_visitor ON visits(visitor_id);
 CREATE INDEX IF NOT EXISTS idx_visits_date ON visits(check_in_at DESC);
 CREATE INDEX IF NOT EXISTS idx_visits_status ON visits(status, check_in_at DESC);
 CREATE INDEX IF NOT EXISTS idx_visits_host ON visits(host_officer_id, check_in_at DESC);
-CREATE INDEX IF NOT EXISTS idx_visits_idem ON visits(idempotency_key);
+-- Partial UNIQUE index enforces idempotency at the DB level AND serves equality
+-- lookups by idempotency_key, so the old plain `idx_visits_idem` is now redundant
+-- and removed from this fresh-init schema (migration-idempotency-unique.sql). The
+-- plain index is NOT dropped on prod by a migration — it simply stops being created.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_visits_idem_unique ON visits(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- Staff attendance: clock records, leave requests, absence notices
@@ -154,11 +161,21 @@ CREATE TABLE IF NOT EXISTS clock_records (
     idempotency_key TEXT,
     prompt_value    TEXT,
     reauth_method   TEXT CHECK (reauth_method IN ('webauthn','pin') OR reauth_method IS NULL),
+    -- Passive liveness (added by migration-passive-liveness.sql)
+    liveness_challenge TEXT
+      CHECK (liveness_challenge IN ('blink','turn_left','turn_right','smile') OR liveness_challenge IS NULL),
+    liveness_decision  TEXT
+      CHECK (liveness_decision IN ('pass','fail','manual_review','skipped') OR liveness_decision IS NULL),
+    liveness_signature TEXT,
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_clock_user_date ON clock_records(user_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_clock_date ON clock_records(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_clock_records_user_idem ON clock_records(user_id, idempotency_key);
+-- Partial UNIQUE index enforces per-user idempotency AND serves equality lookups
+-- by (user_id, idempotency_key), so the old plain `idx_clock_records_user_idem` is
+-- now redundant and removed from this fresh-init schema
+-- (migration-idempotency-unique.sql). NOT dropped on prod — just no longer created.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clock_user_idem_unique ON clock_records(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS leave_requests (
     id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
@@ -237,11 +254,20 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at                  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     clockin_reauth_enforce      INTEGER NOT NULL DEFAULT 0 CHECK(clockin_reauth_enforce IN (0,1)),
     clockin_pin_attempt_cap     INTEGER NOT NULL DEFAULT 5,
-    clockin_prompt_ttl_seconds  INTEGER NOT NULL DEFAULT 90
+    clockin_prompt_ttl_seconds  INTEGER NOT NULL DEFAULT 90,
+    -- Passive liveness (added by migration-passive-liveness.sql). On prod these
+    -- were added as nullable columns + backfilled via UPDATE (D1 can't ADD COLUMN
+    -- with a non-constant DEFAULT); fresh-init seeds the same effective values.
+    clockin_passive_liveness_enforce      INTEGER,
+    clockin_liveness_review_cap_per_week  INTEGER,
+    clockin_liveness_model_version        TEXT
 );
 
-INSERT OR IGNORE INTO app_settings (id, work_start_time, late_threshold_time, work_end_time)
-VALUES (1, '08:00', '08:30', '17:00');
+INSERT OR IGNORE INTO app_settings (
+  id, work_start_time, late_threshold_time, work_end_time,
+  clockin_passive_liveness_enforce, clockin_liveness_review_cap_per_week, clockin_liveness_model_version
+)
+VALUES (1, '08:00', '08:30', '17:00', 0, 2, 'buffalo_s_v1');
 
 -- ---------------------------------------------------------------------------
 -- Directorate reception team (join table)

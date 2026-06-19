@@ -21,6 +21,7 @@ import idPhotoCheck from './migration-id-photo-check.sql';
 import receptionOfficer from './migration-reception-officer.sql';
 import directorateReceivers from './migration-directorate-receivers.sql';
 import internFoundation from './migration-intern-foundation.sql';
+import idempotencyUnique from './migration-idempotency-unique.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -46,6 +47,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-reception-officer.sql', sql: receptionOfficer },
   { filename: 'migration-directorate-receivers.sql', sql: directorateReceivers },
   { filename: 'migration-intern-foundation.sql', sql: internFoundation },
+  { filename: 'migration-idempotency-unique.sql', sql: idempotencyUnique },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {
