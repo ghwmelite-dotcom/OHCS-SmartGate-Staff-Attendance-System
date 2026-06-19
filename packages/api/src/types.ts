@@ -24,7 +24,7 @@ export type Role =
   | 'director'
   | 'staff';
 
-export type UserType = 'staff' | 'nss' | 'intern';
+export type UserType = 'staff' | 'nss';
 
 export interface SessionData {
   userId: string;

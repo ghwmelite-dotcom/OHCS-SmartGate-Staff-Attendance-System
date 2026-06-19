@@ -20,11 +20,8 @@ import kioskVisitor from './migration-kiosk-visitor.sql';
 import idPhotoCheck from './migration-id-photo-check.sql';
 import receptionOfficer from './migration-reception-officer.sql';
 import directorateReceivers from './migration-directorate-receivers.sql';
+import internFoundation from './migration-intern-foundation.sql';
 
-// NOTE: migration-intern-foundation.sql is applied OUT-OF-BAND via `wrangler d1 execute --file`
-// (it rebuilds the users table to widen the user_type CHECK; the per-statement runner below
-// cannot do that in a transaction). It is deliberately NOT listed here. After applying it,
-// record it manually: INSERT INTO applied_migrations (filename, hash) VALUES ('migration-intern-foundation.sql', '<sha256>').
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
   { filename: 'migration-attendance.sql', sql: attendance },
@@ -48,6 +45,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-id-photo-check.sql', sql: idPhotoCheck },
   { filename: 'migration-reception-officer.sql', sql: receptionOfficer },
   { filename: 'migration-directorate-receivers.sql', sql: directorateReceivers },
+  { filename: 'migration-intern-foundation.sql', sql: internFoundation },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {

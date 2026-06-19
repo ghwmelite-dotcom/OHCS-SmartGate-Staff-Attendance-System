@@ -80,7 +80,7 @@ adminInternRoutes.post('/', zValidator('json', createInternSchema), async (c) =>
            (id, name, email, pin_hash, pin_acknowledged, role, grade, directorate_id,
             user_type, nss_start_date, nss_end_date,
             intern_code, institution, programme, supervisor_user_id, is_active)
-         VALUES (?, ?, ?, ?, 0, 'staff', ?, ?, 'intern', ?, ?, ?, ?, ?, ?, 1)`
+         VALUES (?, ?, ?, ?, 0, 'staff', ?, ?, 'nss', ?, ?, ?, ?, ?, ?, 1)`
       ).bind(
         id, body.name, body.email, pinHash, body.grade || null, body.directorate_id,
         body.nss_start_date, body.nss_end_date,

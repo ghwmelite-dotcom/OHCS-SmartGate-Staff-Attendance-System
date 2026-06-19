@@ -22,7 +22,6 @@ interface ExpiringRow {
   intern_code: string | null;
   directorate_abbr: string | null;
   nss_end_date: string;
-  user_type: string;
 }
 
 export interface NssEosResult {
@@ -60,9 +59,9 @@ function buildMessage(rows: ExpiringRow[], deactivated: number): string {
     const name = escapeHtml(r.name);
     const dir = r.directorate_abbr ? escapeHtml(r.directorate_abbr) : '—';
     const ends = formatDateGB(r.nss_end_date);
-    const typeTag = r.user_type === 'intern' ? 'Intern' : 'NSS';
-    const idLabel = r.user_type === 'intern'
-      ? (r.intern_code ? escapeHtml(r.intern_code) : '—')
+    const typeTag = r.intern_code ? 'Intern' : 'NSS';
+    const idLabel = r.intern_code
+      ? escapeHtml(r.intern_code)
       : (r.nss_number ? escapeHtml(r.nss_number) : '—');
     lines.push(`• ${name} (${idLabel}) — ${dir} — ${typeTag} — ends ${ends}`);
   }
@@ -97,7 +96,7 @@ export async function runNssEndOfServiceCheck(env: Env): Promise<NssEosResult> {
       `UPDATE users
           SET is_active = 0,
               updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        WHERE user_type IN ('nss','intern')
+        WHERE user_type = 'nss'
           AND is_active = 1
           AND nss_end_date IS NOT NULL
           AND nss_end_date < ?`,
@@ -115,11 +114,10 @@ export async function runNssEndOfServiceCheck(env: Env): Promise<NssEosResult> {
               u.nss_number,
               u.intern_code,
               d.abbreviation AS directorate_abbr,
-              u.nss_end_date,
-              u.user_type
+              u.nss_end_date
          FROM users u
          LEFT JOIN directorates d ON u.directorate_id = d.id
-        WHERE u.user_type IN ('nss','intern')
+        WHERE u.user_type = 'nss'
           AND u.is_active = 1
           AND u.nss_end_date IS NOT NULL
           AND u.nss_end_date >= ?

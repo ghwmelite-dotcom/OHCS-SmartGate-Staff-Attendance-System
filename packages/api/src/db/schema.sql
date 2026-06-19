@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
     longest_streak   INTEGER NOT NULL DEFAULT 0,
     directorate_id   TEXT REFERENCES directorates(id),
     -- NSS foundation (added by migration-nss-foundation.sql)
-    user_type        TEXT NOT NULL DEFAULT 'staff' CHECK(user_type IN ('staff','nss','intern')),
+    user_type        TEXT NOT NULL DEFAULT 'staff' CHECK(user_type IN ('staff','nss')),
     nss_number       TEXT,
     nss_start_date   TEXT,   -- reused as the posting/placement window start for interns too
     nss_end_date     TEXT,   -- reused as the posting/placement window end for interns too
@@ -47,7 +47,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_staff_id ON users(staff_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_nss_number_unique ON users(nss_number) WHERE nss_number IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_users_nss_active ON users(user_type, nss_end_date) WHERE user_type = 'nss';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_intern_code_unique ON users(intern_code) WHERE intern_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_users_intern_active ON users(user_type, nss_end_date) WHERE user_type = 'intern';
+CREATE INDEX IF NOT EXISTS idx_users_intern_active ON users(user_type, nss_end_date) WHERE intern_code IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- Directorates & officers

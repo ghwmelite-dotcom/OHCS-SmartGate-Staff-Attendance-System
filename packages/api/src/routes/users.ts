@@ -118,7 +118,7 @@ userRoutes.put('/:id', zValidator('json', updateUserSchema), async (c) => {
   if (
     body.role !== undefined &&
     body.role !== 'staff' &&
-    (existing.user_type === 'nss' || existing.user_type === 'intern')
+    existing.user_type === 'nss'
   ) {
     return error(c, 'NSS_NOT_PROMOTABLE', 'Service personnel (NSS/Intern) cannot be promoted to an admin role', 400);
   }

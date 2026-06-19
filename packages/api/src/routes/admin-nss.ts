@@ -36,9 +36,9 @@ export function isValidIsoDate(s: string): boolean {
 
 /** Resolve the optional ?type= filter into a SQL WHERE clause over service-personnel types. */
 export function personnelTypeWhere(typeParam: string | null | undefined): string {
-  if (typeParam === 'nss') return `u.user_type = 'nss'`;
-  if (typeParam === 'intern') return `u.user_type = 'intern'`;
-  return `u.user_type IN ('nss','intern')`;
+  if (typeParam === 'nss') return `u.user_type = 'nss' AND u.intern_code IS NULL`;
+  if (typeParam === 'intern') return `u.user_type = 'nss' AND u.intern_code IS NOT NULL`;
+  return `u.user_type = 'nss'`;
 }
 
 export interface NssUserRow {
@@ -224,6 +224,7 @@ interface NssTodayRow {
   user_id: string;
   name: string;
   user_type: string;
+  intern_code: string | null;
   nss_number: string | null;
   directorate_abbr: string | null;
   nss_end_date: string | null;
@@ -242,7 +243,7 @@ adminNssRoutes.get('/today', async (c) => {
   const typeClause = personnelTypeWhere(c.req.query('type'));
 
   const sql = `
-    SELECT u.id AS user_id, u.name, u.user_type, u.nss_number,
+    SELECT u.id AS user_id, u.name, u.user_type, u.intern_code, u.nss_number,
            d.abbreviation AS directorate_abbr,
            u.nss_end_date,
            ci.timestamp AS clock_in_at,
@@ -470,7 +471,7 @@ adminNssRoutes.get('/:id/activity', async (c) => {
     .first<{ id: string; user_type: string }>();
 
   if (!existing) return notFound(c, 'Personnel');
-  if (existing.user_type !== 'nss' && existing.user_type !== 'intern') {
+  if (existing.user_type !== 'nss') {
     return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
 
@@ -519,7 +520,7 @@ adminNssRoutes.get('/:id', async (c) => {
      FROM users u
      LEFT JOIN directorates d ON u.directorate_id = d.id
      LEFT JOIN users sup ON sup.id = u.supervisor_user_id
-     WHERE u.id = ? AND u.user_type IN ('nss','intern')`
+     WHERE u.id = ? AND u.user_type = 'nss'`
   )
     .bind(id)
     .first<NssUserRow>();
@@ -558,7 +559,7 @@ adminNssRoutes.patch('/:id', zValidator('json', updateNssSchema), async (c) => {
     .first<{ id: string; user_type: string; nss_start_date: string | null; nss_end_date: string | null }>();
 
   if (!existing) return notFound(c, 'Personnel');
-  if (existing.user_type !== 'nss' && existing.user_type !== 'intern') {
+  if (existing.user_type !== 'nss') {
     return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
 
@@ -632,7 +633,7 @@ adminNssRoutes.delete('/:id', async (c) => {
     .first<{ id: string; user_type: string }>();
 
   if (!existing) return notFound(c, 'Personnel');
-  if (existing.user_type !== 'nss' && existing.user_type !== 'intern') {
+  if (existing.user_type !== 'nss') {
     return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
 
@@ -661,7 +662,7 @@ adminNssRoutes.post('/:id/reset-pin', async (c) => {
     .first<{ id: string; user_type: string }>();
 
   if (!existing) return notFound(c, 'Personnel');
-  if (existing.user_type !== 'nss' && existing.user_type !== 'intern') {
+  if (existing.user_type !== 'nss') {
     return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
 
