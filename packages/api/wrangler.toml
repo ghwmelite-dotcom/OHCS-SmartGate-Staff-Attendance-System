@@ -6,13 +6,14 @@ compatibility_flags = ["nodejs_compat"]
 # Keep the *.workers.dev subdomain (the SPA calls it for the rest of the API).
 workers_dev = true
 
-# Serve the public badge page + badge photo from the branded custom domain.
-# These pattern routes overlay the Pages custom domain (smartgate.ohcsghana.org);
-# Worker routes take precedence over Pages for matching paths, so only /badge/*
-# and /api/badges/* hit the Worker — every other path stays on the Pages SPA.
+# Serve the public badge page from the branded custom domain, AND route the whole
+# API first-party on both app domains so the session cookie is first-party (not a
+# blocked third-party cookie). Worker routes take precedence over Pages for matching
+# paths: /badge/* + /api/* hit the Worker; every other path stays on each app's Pages SPA.
 routes = [
   { pattern = "smartgate.ohcsghana.org/badge/*", zone_name = "ohcsghana.org" },
-  { pattern = "smartgate.ohcsghana.org/api/badges/*", zone_name = "ohcsghana.org" },
+  { pattern = "smartgate.ohcsghana.org/api/*", zone_name = "ohcsghana.org" },
+  { pattern = "staff-attendance.ohcsghana.org/api/*", zone_name = "ohcsghana.org" },
 ]
 
 rules = [
