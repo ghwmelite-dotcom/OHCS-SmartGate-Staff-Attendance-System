@@ -7,6 +7,7 @@ import { sendLateClockAlert } from '../services/reminders';
 import { getAppSettings, hhmmToMinutes } from '../services/settings';
 import { verifyClockWebAuthnAssertion, verifyClockPin } from '../services/clock-reauth';
 import { devLog } from '../lib/log';
+import { isJpeg } from '../lib/image-magic';
 import { ALL_CHALLENGES, verifyLivenessBurst, getReviewCount, incrementReviewCount } from '../services/liveness';
 import type { LivenessChallenge, LivenessSignature } from '../services/liveness/types';
 
@@ -553,6 +554,7 @@ clockRoutes.post('/:id/photo', async (c) => {
   const body = await c.req.arrayBuffer();
   if (body.byteLength === 0) return error(c, 'EMPTY', 'No photo', 400);
   if (body.byteLength > 500_000) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
+  if (!isJpeg(new Uint8Array(body))) return error(c, 'INVALID_IMAGE', 'Photo must be a JPEG image', 400);
 
   const key = `photos/clock/${clockId}.jpg`;
   await c.env.STORAGE.put(key, body, { httpMetadata: { contentType: 'image/jpeg' } });
