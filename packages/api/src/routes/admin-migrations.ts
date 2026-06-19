@@ -39,9 +39,12 @@ adminMigrationsRoutes.post('/run', async (c) => {
       .filter((s) => s.length > 0);
 
     try {
-      for (const stmt of statements) {
-        await c.env.DB.prepare(stmt).run();
-      }
+      // Apply the whole file atomically. D1 `batch` runs all statements in an
+      // implicit transaction (and accepts DDL like CREATE INDEX / ALTER TABLE),
+      // so a partial failure rolls back the entire migration file rather than
+      // leaving it half-applied. The applied_migrations bookkeeping INSERT stays
+      // OUTSIDE the batch and runs only after it succeeds.
+      await c.env.DB.batch(statements.map((s) => c.env.DB.prepare(s)));
       const hash = await sha256Hex(m.sql);
       await c.env.DB.prepare(
         'INSERT INTO applied_migrations (filename, hash) VALUES (?, ?)'
