@@ -45,6 +45,7 @@ interface NssTodayRow {
   clock_out_at: string | null;
   is_late: number;
   user_type: string;
+  intern_code: string | null;
 }
 
 type StatusFilter = 'all' | 'active' | 'expiring' | 'ended';
@@ -471,13 +472,13 @@ export function NssTab() {
                               {user.name}
                             </button>
                             <p className="text-[12px] font-mono text-muted truncate">
-                              {user.user_type === 'intern' ? (user.intern_code ?? '—') : (user.nss_number ?? '—')}
+                              {user.intern_code != null ? (user.intern_code || '—') : (user.nss_number ?? '—')}
                             </p>
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <TypePill type={user.user_type} />
+                        <TypePill internCode={user.intern_code} />
                       </td>
                       <td className="px-6 py-4">
                         {user.directorate_abbr ? (
@@ -692,8 +693,8 @@ function TodayStatusCell({ row, active }: { row: NssTodayRow | undefined; active
   );
 }
 
-function TypePill({ type }: { type: string }) {
-  const isIntern = type === 'intern';
+function TypePill({ internCode }: { internCode: string | null }) {
+  const isIntern = internCode != null && internCode !== '';
   return (
     <span className={cn(
       'inline-flex items-center h-6 px-2 text-[10px] font-bold rounded-lg',

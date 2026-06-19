@@ -112,6 +112,9 @@ export function NssDetailModal({ userId, onClose, onChanged, onResetPin, onEndSe
             <p className="text-[14px] text-muted">Loading personnel…</p>
           </div>
         ) : (
+          (() => {
+          const isIntern = detail.intern_code != null && detail.intern_code !== '';
+          return (
           <>
             {/* Header */}
             <div className="flex items-start justify-between px-6 py-4 border-b border-border">
@@ -126,12 +129,12 @@ export function NssDetailModal({ userId, onClose, onChanged, onResetPin, onEndSe
                   <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                     <span className={cn(
                       'inline-flex items-center h-5 px-2 text-[10px] font-bold rounded-md',
-                      detail.user_type === 'intern' ? 'bg-accent/10 text-accent-warm' : 'bg-success/10 text-success',
+                      isIntern ? 'bg-accent/10 text-accent-warm' : 'bg-success/10 text-success',
                     )}>
-                      {detail.user_type === 'intern' ? 'Intern' : 'NSS'}
+                      {isIntern ? 'Intern' : 'NSS'}
                     </span>
                     <span className="text-[12px] font-mono text-muted">
-                      {detail.user_type === 'intern' ? (detail.intern_code ?? '—') : (detail.nss_number ?? '—')}
+                      {isIntern ? (detail.intern_code || '—') : (detail.nss_number ?? '—')}
                     </span>
                     {detail.directorate_abbr && (
                       <span className="inline-flex items-center h-5 px-2 text-[10px] font-bold bg-primary/8 text-primary rounded-md">
@@ -160,7 +163,7 @@ export function NssDetailModal({ userId, onClose, onChanged, onResetPin, onEndSe
               <PostingProgress
                 start={detail.nss_start_date}
                 end={detail.nss_end_date}
-                isIntern={detail.user_type === 'intern'}
+                isIntern={isIntern}
               />
 
               {/* Edit form */}
@@ -249,6 +252,8 @@ export function NssDetailModal({ userId, onClose, onChanged, onResetPin, onEndSe
               </button>
             </div>
           </>
+          );
+          })()
         )}
       </div>
     </div>
@@ -327,7 +332,7 @@ function EditForm({ detail, directorates, onSaved }: {
   directorates: Directorate[];
   onSaved: () => void;
 }) {
-  const isIntern = detail.user_type === 'intern';
+  const isIntern = detail.intern_code != null && detail.intern_code !== '';
 
   const form = useForm<EditValues>({
     resolver: zodResolver(editSchema),
