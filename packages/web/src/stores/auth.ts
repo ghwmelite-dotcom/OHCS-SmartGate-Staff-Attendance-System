@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { api } from '@/lib/api';
-import { setToken, clearToken } from '@/lib/tokenStore';
+import { clearToken } from '@/lib/tokenStore';
 
 interface User {
   id: string;
@@ -25,9 +25,8 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   loginWithPin: async (staffId: string, pin: string, remember: boolean) => {
     const res = await api.post<{ user: User & { session_token?: string } }>('/auth/pin-login', { staff_id: staffId, pin, remember });
-    if (res.data?.user?.session_token) {
-      setToken(res.data.user.session_token);
-    }
+    // Auth rides on the HttpOnly first-party session cookie; the bearer token is
+    // no longer persisted to storage (audit: no localStorage bearer).
     const u = res.data?.user;
     if (u) {
       const { session_token: _discard, ...userForStore } = u;
@@ -44,9 +43,8 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   verify: async (email: string, code: string, remember: boolean) => {
     const res = await api.post<{ user: User & { session_token?: string } }>('/auth/verify', { email, code, remember });
-    if (res.data?.user?.session_token) {
-      setToken(res.data.user.session_token);
-    }
+    // Auth rides on the HttpOnly first-party session cookie; the bearer token is
+    // no longer persisted to storage (audit: no localStorage bearer).
     const u = res.data?.user;
     if (u) {
       const { session_token: _discard, ...userForStore } = u;

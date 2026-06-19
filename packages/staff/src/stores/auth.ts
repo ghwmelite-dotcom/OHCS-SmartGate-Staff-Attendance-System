@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { api } from '@/lib/api';
-import { setToken, clearToken } from '@/lib/tokenStore';
+import { clearToken } from '@/lib/tokenStore';
 import {
   loginWithBiometric,
   rememberIdentifier,
@@ -40,9 +40,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       '/auth/pin-login',
       { ...identifierBody(identifier), pin, remember: true },
     );
-    if (res.data?.user?.session_token) {
-      setToken(res.data.user.session_token);
-    }
+    // Auth rides on the HttpOnly first-party session cookie; the bearer token is
+    // no longer persisted to storage (audit: no localStorage bearer).
     const u = res.data?.user;
     if (u) {
       const { session_token: _discard, ...userForStore } = u;
@@ -55,7 +54,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   loginWithWebAuthn: async (identifier) => {
     const u = await loginWithBiometric(identifier);
-    if (u.session_token) setToken(u.session_token);
+    // Auth rides on the HttpOnly first-party session cookie; the bearer token is
+    // no longer persisted to storage (audit: no localStorage bearer).
     const { session_token: _discard, ...userForStore } = u;
     void _discard;
     rememberIdentifier(identifier);

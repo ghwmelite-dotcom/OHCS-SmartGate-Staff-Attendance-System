@@ -121,10 +121,10 @@ export function ClockPage() {
       };
       const res = await apiOrQueue<ClockResult>('clock-queue', '/clock', clockData);
       if (!('queued' in res) && res.data && photo) {
-        const apiBase = import.meta.env.PROD ? 'https://ohcs-smartgate-api.ohcsghana-main.workers.dev' : '';
         const token = getToken();
         try {
-          const uploadRes = await fetch(`${apiBase}/api/clock/${res.data.id}/photo`, {
+          // Relative same-origin URL; the Worker routes /api/* first-party.
+          const uploadRes = await fetch(`/api/clock/${res.data.id}/photo`, {
             method: 'POST',
             credentials: 'include',
             headers: {
