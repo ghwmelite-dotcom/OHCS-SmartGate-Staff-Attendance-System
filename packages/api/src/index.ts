@@ -78,6 +78,13 @@ app.post('/api/telegram/webhook', telegramWebhook);
 app.use('/api/*', authMiddleware);
 app.get('/api/photos/clock/:id', async (c) => {
   const clockId = c.req.param('id');
+  const session = c.get('session');
+  const record = await c.env.DB.prepare('SELECT user_id FROM clock_records WHERE id = ?').bind(clockId).first<{ user_id: string }>();
+  if (!record) return c.json({ data: null, error: { code: 'NOT_FOUND', message: 'Photo not found' } }, 404);
+  const isAdmin = session.role === 'superadmin' || session.role === 'admin';
+  if (!isAdmin && session.userId !== record.user_id) {
+    return c.json({ data: null, error: { code: 'FORBIDDEN', message: 'You do not have access to this resource' } }, 403);
+  }
   const object = await c.env.STORAGE.get(`photos/clock/${clockId}.jpg`);
   if (!object) return c.json({ data: null, error: { code: 'NOT_FOUND', message: 'Photo not found' } }, 404);
   const headers = new Headers();

@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 import type { Env, SessionData } from '../types';
 import { generateLinkCode, consumeLinkCode, sendTelegramMessage, parseCommand } from '../services/telegram';
 import { success, error } from '../lib/response';
+import { escapeHtml } from '../lib/html';
 
 // Public — receives updates from Telegram
 export async function telegramWebhook(c: Context<{ Bindings: Env }>) {
@@ -16,6 +17,10 @@ export async function telegramWebhook(c: Context<{ Bindings: Env }>) {
     if (supplied !== expected) {
       return c.json({ ok: false }, 401);
     }
+  } else if (c.env.ENVIRONMENT === 'production') {
+    // In production the webhook secret is mandatory — refuse to process
+    // updates when it is unset rather than leaving the endpoint open.
+    return c.json({ ok: false }, 401);
   }
 
   const body = await c.req.json() as {
@@ -102,7 +107,7 @@ async function handleLink(c: Ctx, chatId: number, args: string): Promise<void> {
   }
   const user = await c.env.DB.prepare('SELECT id, name, email FROM users WHERE staff_id = ?').bind(staffId).first<{ id: string; name: string; email: string }>();
   if (!user) {
-    await sendTelegramMessage({ chatId: String(chatId), text: `❌ Staff ID <code>${staffId}</code> not found. Check your ID and try again.`, token: c.env.TELEGRAM_BOT_TOKEN });
+    await sendTelegramMessage({ chatId: String(chatId), text: `❌ Staff ID <code>${escapeHtml(staffId)}</code> not found. Check your ID and try again.`, token: c.env.TELEGRAM_BOT_TOKEN });
     return;
   }
   const officer = await c.env.DB.prepare('SELECT id FROM officers WHERE email = ? OR name = ?').bind(user.email, user.name).first<{ id: string }>();

@@ -4,6 +4,7 @@ import { zValidator } from '@hono/zod-validator';
 import type { Env, SessionData } from '../types';
 import { success } from '../lib/response';
 import { requireRole } from '../lib/require-role';
+import { resolveDirectorateScope } from '../lib/directorate-scope';
 
 export const analyticsRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -12,33 +13,38 @@ analyticsRoutes.get('/today', async (c) => {
   const blocked = requireRole(c, 'superadmin', 'admin', 'director');
   if (blocked) return blocked;
   const today = new Date().toISOString().slice(0, 10);
+  // Directors only see analytics for their own directorate.
+  const dir = await resolveDirectorateScope(c);
+  const bareDir = dir ? ' AND directorate_id = ?' : '';
+  const aliasDir = dir ? ' AND v.directorate_id = ?' : '';
+  const p = (extra = bareDir): unknown[] => (extra && dir ? [today, dir] : [today]);
 
   const [totalResult, activeResult, avgResult, byDirectorate, byHour] = await Promise.all([
     c.env.DB.prepare(
       `SELECT COUNT(*) as total, SUM(CASE WHEN status = 'checked_out' THEN 1 ELSE 0 END) as checked_out
-       FROM visits WHERE DATE(check_in_at) = ?`
-    ).bind(today).first<{ total: number; checked_out: number }>(),
+       FROM visits WHERE DATE(check_in_at) = ?${bareDir}`
+    ).bind(...p()).first<{ total: number; checked_out: number }>(),
 
     c.env.DB.prepare(
-      `SELECT COUNT(*) as count FROM visits WHERE status = 'checked_in' AND DATE(check_in_at) = ?`
-    ).bind(today).first<{ count: number }>(),
+      `SELECT COUNT(*) as count FROM visits WHERE status = 'checked_in' AND DATE(check_in_at) = ?${bareDir}`
+    ).bind(...p()).first<{ count: number }>(),
 
     c.env.DB.prepare(
-      `SELECT ROUND(AVG(duration_minutes)) as avg FROM visits WHERE duration_minutes IS NOT NULL AND DATE(check_in_at) = ?`
-    ).bind(today).first<{ avg: number | null }>(),
+      `SELECT ROUND(AVG(duration_minutes)) as avg FROM visits WHERE duration_minutes IS NOT NULL AND DATE(check_in_at) = ?${bareDir}`
+    ).bind(...p()).first<{ avg: number | null }>(),
 
     c.env.DB.prepare(
       `SELECT d.abbreviation, d.name, COUNT(*) as count
        FROM visits v JOIN directorates d ON v.directorate_id = d.id
-       WHERE DATE(v.check_in_at) = ?
+       WHERE DATE(v.check_in_at) = ?${aliasDir}
        GROUP BY d.id ORDER BY count DESC`
-    ).bind(today).all(),
+    ).bind(...p(aliasDir)).all(),
 
     c.env.DB.prepare(
       `SELECT CAST(strftime('%H', check_in_at) AS INTEGER) as hour, COUNT(*) as count
-       FROM visits WHERE DATE(check_in_at) = ?
+       FROM visits WHERE DATE(check_in_at) = ?${bareDir}
        GROUP BY hour ORDER BY count DESC LIMIT 1`
-    ).bind(today).first<{ hour: number; count: number }>(),
+    ).bind(...p()).first<{ hour: number; count: number }>(),
   ]);
 
   const directorates = byDirectorate.results ?? [];
@@ -66,31 +72,35 @@ analyticsRoutes.get('/trends', zValidator('query', trendsSchema), async (c) => {
   if (blocked) return blocked;
   const { days } = c.req.valid('query');
   const fromDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  // Directors only see trends for their own directorate.
+  const dir = await resolveDirectorateScope(c);
+  const dirFilter = dir ? ' AND directorate_id = ?' : '';
+  const tp = (): unknown[] => (dir ? [fromDate, dir] : [fromDate]);
 
   const [dailyVolumes, byDayOfWeek, byHour, byCategory] = await Promise.all([
     c.env.DB.prepare(
       `SELECT DATE(check_in_at) as date, COUNT(*) as count
-       FROM visits WHERE DATE(check_in_at) >= ?
+       FROM visits WHERE DATE(check_in_at) >= ?${dirFilter}
        GROUP BY date ORDER BY date ASC`
-    ).bind(fromDate).all(),
+    ).bind(...tp()).all(),
 
     c.env.DB.prepare(
       `SELECT CAST(strftime('%w', check_in_at) AS INTEGER) as day, COUNT(*) as total
-       FROM visits WHERE DATE(check_in_at) >= ?
+       FROM visits WHERE DATE(check_in_at) >= ?${dirFilter}
        GROUP BY day ORDER BY day`
-    ).bind(fromDate).all(),
+    ).bind(...tp()).all(),
 
     c.env.DB.prepare(
       `SELECT CAST(strftime('%H', check_in_at) AS INTEGER) as hour, COUNT(*) as total
-       FROM visits WHERE DATE(check_in_at) >= ?
+       FROM visits WHERE DATE(check_in_at) >= ?${dirFilter}
        GROUP BY hour ORDER BY hour`
-    ).bind(fromDate).all(),
+    ).bind(...tp()).all(),
 
     c.env.DB.prepare(
       `SELECT COALESCE(purpose_category, 'other') as category, COUNT(*) as count
-       FROM visits WHERE DATE(check_in_at) >= ?
+       FROM visits WHERE DATE(check_in_at) >= ?${dirFilter}
        GROUP BY category ORDER BY count DESC`
-    ).bind(fromDate).all(),
+    ).bind(...tp()).all(),
   ]);
 
   // Calculate weeks for averaging
@@ -134,14 +144,18 @@ analyticsRoutes.get('/top-visitors', zValidator('query', topVisitorsSchema), asy
   if (blocked) return blocked;
   const { days, limit } = c.req.valid('query');
   const fromDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  // Directors only see top visitors for their own directorate.
+  const dir = await resolveDirectorateScope(c);
+  const dirFilter = dir ? ' AND v.directorate_id = ?' : '';
+  const params: unknown[] = dir ? [fromDate, dir, limit] : [fromDate, limit];
 
   const results = await c.env.DB.prepare(
     `SELECT vis.first_name, vis.last_name, vis.organisation, COUNT(*) as visit_count,
             MAX(v.check_in_at) as last_visit_at
      FROM visits v JOIN visitors vis ON v.visitor_id = vis.id
-     WHERE DATE(v.check_in_at) >= ?
+     WHERE DATE(v.check_in_at) >= ?${dirFilter}
      GROUP BY vis.id ORDER BY visit_count DESC LIMIT ?`
-  ).bind(fromDate, limit).all();
+  ).bind(...params).all();
 
   return success(c, results.results ?? []);
 });

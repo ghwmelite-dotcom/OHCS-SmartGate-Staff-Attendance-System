@@ -4,6 +4,7 @@ import type { Env, SessionData } from '../types';
 import { CheckInSchema } from '../lib/validation';
 import { success, created, notFound, error } from '../lib/response';
 import { requireRole } from '../lib/require-role';
+import { resolveDirectorateScope } from '../lib/directorate-scope';
 import { checkOutById } from '../services/check-out';
 import { performCheckIn } from '../services/check-in';
 import { z } from 'zod';
@@ -25,7 +26,10 @@ const listSchema = z.object({
 visitRoutes.get('/', zValidator('query', listSchema), async (c) => {
   const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
   if (blocked) return blocked;
-  const { date, from, to, status, directorate_id, badge_code, q, limit, cursor } = c.req.valid('query');
+  const { date, from, to, status, badge_code, q, limit, cursor } = c.req.valid('query');
+  // Directors are isolated to their own directorate — override any incoming filter.
+  const directorScope = await resolveDirectorateScope(c);
+  const directorate_id = directorScope ?? c.req.valid('query').directorate_id;
   let sql = `SELECT v.*, vis.first_name, vis.last_name, vis.organisation, vis.phone,
              COALESCE(o.name, v.host_name_manual) as host_name, d.abbreviation as directorate_abbr
              FROM visits v
@@ -87,21 +91,29 @@ visitRoutes.get('/', zValidator('query', listSchema), async (c) => {
 visitRoutes.get('/active', async (c) => {
   const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
   if (blocked) return blocked;
-  const results = await c.env.DB.prepare(
-    `SELECT v.*, vis.first_name, vis.last_name, vis.organisation,
+  // Directors only see active visits for their own directorate.
+  const directorScope = await resolveDirectorateScope(c);
+  let sql = `SELECT v.*, vis.first_name, vis.last_name, vis.organisation,
             COALESCE(o.name, v.host_name_manual) as host_name, d.abbreviation as directorate_abbr
      FROM visits v
      JOIN visitors vis ON v.visitor_id = vis.id
      LEFT JOIN officers o ON v.host_officer_id = o.id
      LEFT JOIN directorates d ON v.directorate_id = d.id
-     WHERE v.status = 'checked_in'
-     ORDER BY v.check_in_at DESC`
-  ).all();
+     WHERE v.status = 'checked_in'`;
+  const params: unknown[] = [];
+  if (directorScope) {
+    sql += ' AND v.directorate_id = ?';
+    params.push(directorScope);
+  }
+  sql += ' ORDER BY v.check_in_at DESC';
+  const results = await c.env.DB.prepare(sql).bind(...params).all();
 
   return success(c, results.results ?? []);
 });
 
 visitRoutes.post('/check-in', zValidator('json', CheckInSchema), async (c) => {
+  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
+  if (blocked) return blocked;
   const body = c.req.valid('json');
   const session = c.get('session');
 
@@ -122,6 +134,8 @@ visitRoutes.post('/check-in', zValidator('json', CheckInSchema), async (c) => {
 });
 
 visitRoutes.post('/:id/check-out', async (c) => {
+  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
+  if (blocked) return blocked;
   const result = await checkOutById(c.env, c.req.param('id'));
   if (!result.ok) {
     if (result.code === 'NOT_FOUND') return notFound(c, 'Visit');
