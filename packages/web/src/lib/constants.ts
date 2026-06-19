@@ -12,9 +12,10 @@ export const ID_TYPES = [
   { value: 'other', label: 'Other' },
 ] as const;
 
-export const API_BASE = import.meta.env.PROD
-  ? 'https://ohcs-smartgate-api.ohcsghana-main.workers.dev/api'
-  : '/api';
+// Same-origin relative base. Each app is served from its own *.ohcsghana.org
+// domain and the Worker routes the full API first-party at that origin's /api/*,
+// so requests stay same-origin and the session cookie is a first-party cookie.
+export const API_BASE = '/api';
 
 // Public badge pages are served by the Worker. In production the Worker is
 // routed onto the custom domain (smartgate.ohcsghana.org/badge/* and

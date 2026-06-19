@@ -10,6 +10,35 @@ import { z } from 'zod';
 
 export const authRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
+// Shared session-cookie options so the set/delete sites can't drift.
+//
+// In production both apps are served from *.ohcsghana.org and call the API
+// first-party at their own origin, so the session cookie is a FIRST-PARTY cookie:
+// scope it to the parent domain (`ohcsghana.org`) so it's shared across the
+// smartgate. + staff-attendance. subdomains, and use SameSite=Lax (same-site now,
+// stricter than the old cross-site `None`). In dev it's a host-only cookie on
+// localhost (no domain, not secure).
+function sessionCookieOptions(env: Env, maxAge: number) {
+  const isProd = env.ENVIRONMENT === 'production';
+  return {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'Lax' as const,
+    path: '/',
+    maxAge,
+    ...(isProd ? { domain: 'ohcsghana.org' } : {}),
+  };
+}
+
+// Delete must mirror domain + path exactly or the cookie isn't cleared.
+function sessionCookieDeleteOptions(env: Env) {
+  const isProd = env.ENVIRONMENT === 'production';
+  return {
+    path: '/',
+    ...(isProd ? { domain: 'ohcsghana.org' } : {}),
+  };
+}
+
 // Email OTP login (request code)
 authRoutes.post('/login', zValidator('json', LoginSchema), async (c) => {
   const { email } = c.req.valid('json');
@@ -65,13 +94,7 @@ authRoutes.post('/verify', zValidator('json', verifySchema), async (c) => {
     .bind(new Date().toISOString(), user.id)
     .run();
 
-  setCookie(c, 'session_id', sessionId, {
-    httpOnly: true,
-    secure: c.env.ENVIRONMENT === 'production',
-    sameSite: c.env.ENVIRONMENT === 'production' ? 'None' : 'Lax',
-    path: '/',
-    maxAge: ttl,
-  });
+  setCookie(c, 'session_id', sessionId, sessionCookieOptions(c.env, ttl));
 
   return success(c, {
     user: {
@@ -152,13 +175,7 @@ authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
     .bind(new Date().toISOString(), user.id)
     .run();
 
-  setCookie(c, 'session_id', sessionId, {
-    httpOnly: true,
-    secure: c.env.ENVIRONMENT === 'production',
-    sameSite: c.env.ENVIRONMENT === 'production' ? 'None' : 'Lax',
-    path: '/',
-    maxAge: ttl,
-  });
+  setCookie(c, 'session_id', sessionId, sessionCookieOptions(c.env, ttl));
 
   return success(c, {
     user: {
@@ -177,7 +194,7 @@ authRoutes.post('/logout', async (c) => {
   if (sessionId) {
     await deleteSession(sessionId, c.env);
   }
-  deleteCookie(c, 'session_id', { path: '/' });
+  deleteCookie(c, 'session_id', sessionCookieDeleteOptions(c.env));
   return success(c, { message: 'Logged out' });
 });
 

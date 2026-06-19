@@ -10,7 +10,10 @@ import type {
 } from '@simplewebauthn/types';
 import { getToken } from './tokenStore';
 
-const API_BASE = import.meta.env.PROD ? 'https://ohcs-smartgate-api.ohcsghana-main.workers.dev' : '';
+// Empty base → relative same-origin URLs (`/api/auth/webauthn/...`). The PWA is
+// served from staff-attendance.ohcsghana.org and the Worker routes /api/* there,
+// so WebAuthn requests stay same-origin (first-party session cookie).
+const API_BASE = '';
 
 // Legacy key (staff_id only) — read on first run, then mirrored into the new key and cleared.
 const LEGACY_LAST_STAFF_ID_KEY = 'ohcs.last_staff_id';

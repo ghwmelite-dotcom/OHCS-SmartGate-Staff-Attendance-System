@@ -1,6 +1,7 @@
 import { getToken } from './tokenStore';
 
-const API_BASE = import.meta.env.PROD ? 'https://ohcs-smartgate-api.ohcsghana-main.workers.dev' : '';
+// Empty base → relative same-origin URLs; the Worker routes /api/* first-party.
+const API_BASE = '';
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const token = getToken();

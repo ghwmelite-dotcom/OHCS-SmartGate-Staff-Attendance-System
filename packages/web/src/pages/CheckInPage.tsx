@@ -163,7 +163,7 @@ export function CheckInPage() {
     if (!selectedVisitor) return;
     try {
       const arrayBuffer = await blob.arrayBuffer();
-      await fetch(`${import.meta.env.PROD ? 'https://ohcs-smartgate-api.ohcsghana-main.workers.dev' : ''}/api/photos/visitors/${selectedVisitor.id}/photo`, {
+      await fetch(`/api/photos/visitors/${selectedVisitor.id}/photo`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'image/jpeg' },
@@ -181,7 +181,7 @@ export function CheckInPage() {
     if (!selectedVisitor) { setStep('check-in'); return; }
     try {
       const arrayBuffer = await blob.arrayBuffer();
-      await fetch(`${import.meta.env.PROD ? 'https://ohcs-smartgate-api.ohcsghana-main.workers.dev' : ''}/api/photos/visitors/${selectedVisitor.id}/id-photo`, {
+      await fetch(`/api/photos/visitors/${selectedVisitor.id}/id-photo`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'image/jpeg' },

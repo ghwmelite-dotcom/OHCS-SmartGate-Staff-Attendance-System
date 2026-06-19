@@ -1,8 +1,9 @@
 import { getToken } from './tokenStore';
 
-const API_BASE = import.meta.env.PROD
-  ? 'https://ohcs-smartgate-api.ohcsghana-main.workers.dev/api'
-  : '/api';
+// Same-origin relative base. The staff PWA is served from
+// staff-attendance.ohcsghana.org and the Worker routes the full API first-party
+// at that origin's /api/*, so requests stay same-origin (first-party cookie).
+const API_BASE = '/api';
 
 interface ApiResponse<T> {
   data: T | null;
