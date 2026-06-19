@@ -7,6 +7,7 @@ export interface AppSettings {
   work_start_time: string;
   late_threshold_time: string;
   work_end_time: string;
+  reception_override_pin: string | null;
   updated_by: string | null;
   updated_at: string;
 }
@@ -22,16 +23,18 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
   const [start, setStart] = useState(current.work_start_time);
   const [late, setLate] = useState(current.late_threshold_time);
   const [end, setEnd] = useState(current.work_end_time);
+  const [overridePin, setOverridePin] = useState(current.reception_override_pin ?? '');
   const [localErr, setLocalErr] = useState<string | null>(null);
 
   useEffect(() => {
     setStart(current.work_start_time);
     setLate(current.late_threshold_time);
     setEnd(current.work_end_time);
+    setOverridePin(current.reception_override_pin ?? '');
   }, [current]);
 
   const mutation = useMutation({
-    mutationFn: (body: { work_start_time: string; late_threshold_time: string; work_end_time: string }) =>
+    mutationFn: (body: { work_start_time: string; late_threshold_time: string; work_end_time: string; reception_override_pin: string }) =>
       api.put<AppSettings>('/admin/settings', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['app-settings'] });
@@ -46,7 +49,12 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
       setLocalErr('Times must satisfy: start < late < end');
       return;
     }
-    mutation.mutate({ work_start_time: start, late_threshold_time: late, work_end_time: end });
+    const pin = overridePin.trim();
+    if (pin && !/^\d{4,8}$/.test(pin)) {
+      setLocalErr('Override PIN must be 4–8 digits (or blank to disable)');
+      return;
+    }
+    mutation.mutate({ work_start_time: start, late_threshold_time: late, work_end_time: end, reception_override_pin: pin });
   }
 
   const apiErr = mutation.error instanceof Error ? mutation.error.message : null;
@@ -96,6 +104,23 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
             onChange={setEnd}
             disabled={!canEdit}
           />
+
+          <div>
+            <label className="block text-[13px] font-semibold text-foreground mb-1">Reception override PIN</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              value={overridePin}
+              onChange={e => setOverridePin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+              disabled={!canEdit}
+              placeholder="4–8 digits"
+              className="w-full h-10 px-3 rounded-xl border border-border bg-background text-[14px] font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed"
+            />
+            <p className="text-[11px] text-muted mt-1">
+              Receptionists enter this at the kiosk to approve a check-in the ID-photo check flagged. Leave blank to disable overrides.
+            </p>
+          </div>
 
           {error && (
             <div className="flex items-start gap-2 p-3 bg-danger/5 border border-danger/20 rounded-xl">

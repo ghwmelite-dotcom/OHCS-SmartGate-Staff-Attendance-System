@@ -260,7 +260,11 @@ CREATE TABLE IF NOT EXISTS app_settings (
     -- with a non-constant DEFAULT); fresh-init seeds the same effective values.
     clockin_passive_liveness_enforce      INTEGER,
     clockin_liveness_review_cap_per_week  INTEGER,
-    clockin_liveness_model_version        TEXT
+    clockin_liveness_model_version        TEXT,
+    -- Superadmin-set PIN a receptionist enters at the kiosk to approve a check-in
+    -- the ID-photo AI gate flagged (added by migration-reception-override-pin.sql).
+    -- NULL/empty = overrides disabled.
+    reception_override_pin                TEXT
 );
 
 INSERT OR IGNORE INTO app_settings (

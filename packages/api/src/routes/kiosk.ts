@@ -11,11 +11,35 @@ import { isJpeg } from '../lib/image-magic';
 import { performCheckIn } from '../services/check-in';
 import { checkOutByBadgeCode } from '../services/check-out';
 import { checkIdDocument } from '../services/id-check';
+import { isBlockingVerdict, mostConservativeVerdict, type IdCheckVerdict } from '../lib/id-check';
+import { getAppSettings } from '../services/settings';
+import { timingSafeEqualStrings } from '../services/auth';
 
 export const kioskRoutes = new Hono<{ Bindings: Env }>();
 
 const KIOSK_USER_ID = 'user_kiosk';
 const MAX_PHOTO_BYTES = 500_000;
+
+// The shape persisted onto visits.id_photo_check — an IdCheckVerdict plus an
+// optional reception-override audit annotation.
+type PersistedIdCheck = IdCheckVerdict & {
+  override?: { by: 'reception'; at: string };
+};
+
+// Safely parse a KV-stashed verdict JSON into a verdict; any failure → null
+// (treated as "no verdict", which is non-blocking — never hard-block on infra error).
+function parseStashedVerdict(raw: string | null): IdCheckVerdict | null {
+  if (raw === null) return null;
+  try {
+    const obj = JSON.parse(raw) as unknown;
+    if (typeof obj === 'object' && obj !== null && 'verdict' in obj) {
+      return obj as IdCheckVerdict;
+    }
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
 
 // Per-IP rate limit for every kiosk action. Conservative: 40 writes / 60s.
 async function kioskRateLimit(c: Context<{ Bindings: Env }>): Promise<boolean> {
@@ -91,13 +115,45 @@ kioskRoutes.post('/visitors/:id/id-photo', async (c) => {
 kioskRoutes.post('/check-in', zValidator('json', KioskCheckInSchema), async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
   const body = c.req.valid('json');
-  // Prefer the verdict echoed back in the request body (survives the 900s KV
-  // TTL even when the visitor lingers); fall back to the KV-stashed copy.
-  const kvIdCheckRaw = await c.env.KV.get(`idcheck:${body.visitor_id}`);
-  if (kvIdCheckRaw !== null) await c.env.KV.delete(`idcheck:${body.visitor_id}`);
-  const idPhotoCheck = body.id_check
-    ? JSON.stringify(body.id_check)
-    : (kvIdCheckRaw ?? JSON.stringify({ verdict: 'indeterminate' }));
+  const idCheckKey = `idcheck:${body.visitor_id}`;
+
+  // The kiosk is PUBLIC — the AI document gate MUST be enforced here, server-side.
+  // Read the KV-stashed verdict (raced from the id-photo step) and the verdict
+  // echoed back in the body (survives the 900s KV TTL even if the visitor lingers).
+  const kvVerdict = parseStashedVerdict(await c.env.KV.get(idCheckKey));
+  const bodyVerdict: IdCheckVerdict | null = body.id_check ?? null;
+  // Take the more conservative of the two so a forged body `document` cannot
+  // unblock a KV `not_document`. Used for BOTH the gate decision and persistence.
+  const effective = mostConservativeVerdict(kvVerdict, bodyVerdict);
+
+  const settings = await getAppSettings(c.env);
+
+  // What gets persisted onto the visit's id_photo_check (default: indeterminate).
+  let persistedCheck: PersistedIdCheck = effective ?? { verdict: 'indeterminate' };
+
+  if (isBlockingVerdict(effective)) {
+    // Override is valid only when an override PIN is configured AND the supplied
+    // PIN matches it via constant-time compare (never `===` with early-exit).
+    // Per-IP kiosk rate limit (40/60s) bounds override brute-force on this route.
+    const pinSet = !!settings.reception_override_pin;
+    const supplied = body.reception_override_pin ?? '';
+    const overrideValid =
+      pinSet && supplied !== '' && timingSafeEqualStrings(supplied, settings.reception_override_pin!);
+
+    if (!overrideValid) {
+      // Block BEFORE creating any visit. Do NOT delete the KV verdict here, so a
+      // retake or a reception override retry still sees the stashed verdict.
+      return error(
+        c,
+        'ID_NOT_VERIFIED',
+        'The ID photo could not be verified as a valid document. Please retake or ask reception to assist.',
+        422,
+      );
+    }
+    // Override accepted — annotate the persisted verdict for the audit trail.
+    persistedCheck = { ...effective!, override: { by: 'reception', at: new Date().toISOString() } };
+  }
+
   const dir = await c.env.DB.prepare('SELECT reception_officer_id FROM directorates WHERE id = ?')
     .bind(body.directorate_id).first<{ reception_officer_id: string | null }>();
   const result = await performCheckIn(c.env, c.executionCtx, {
@@ -105,9 +161,12 @@ kioskRoutes.post('/check-in', zValidator('json', KioskCheckInSchema), async (c) 
     host_officer_id: dir?.reception_officer_id ?? null,
     created_by: KIOSK_USER_ID,
     check_in_source: 'kiosk',
-    id_photo_check: idPhotoCheck,
+    id_photo_check: JSON.stringify(persistedCheck),
   });
   if (!result.ok) return notFound(c, 'Visitor');
+
+  // Only delete the stashed verdict once the check-in has actually proceeded.
+  await c.env.KV.delete(idCheckKey);
   return created(c, result.visit);
 });
 
