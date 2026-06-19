@@ -78,4 +78,6 @@ export const KioskCheckInSchema = z.object({
   // it persists even when the KV-stashed copy has expired. Preferred over KV
   // when present; otherwise we fall back to the KV read.
   id_check: IdCheckVerdictSchema.optional(),
+  // Optional: reception staff PIN to override a blocking AI document verdict.
+  reception_override_pin: z.string().max(8).optional(),
 });

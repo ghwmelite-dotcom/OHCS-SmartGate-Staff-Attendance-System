@@ -45,3 +45,23 @@ export function parseModelVerdict(text: string): IdCheckVerdict {
   }
   return result;
 }
+
+export const ID_BLOCK_CONFIDENCE = 0.55;
+
+/** A verdict that should BLOCK check-in: a confident not_document. Low-confidence,
+ *  indeterminate, and document all PASS (never hard-block on uncertainty/infra failure). */
+export function isBlockingVerdict(v: IdCheckVerdict | null | undefined): boolean {
+  if (!v || v.verdict !== 'not_document') return false;
+  return v.confidence == null || v.confidence >= ID_BLOCK_CONFIDENCE;
+}
+
+/** Pick the more CONSERVATIVE of two verdicts for gating + persistence, so a forged
+ *  body `document` cannot unblock a KV `not_document`. A blocking verdict wins. */
+export function mostConservativeVerdict(
+  a: IdCheckVerdict | null | undefined,
+  b: IdCheckVerdict | null | undefined,
+): IdCheckVerdict | null {
+  if (isBlockingVerdict(a)) return a!;
+  if (isBlockingVerdict(b)) return b!;
+  return (a ?? b) ?? null;
+}
