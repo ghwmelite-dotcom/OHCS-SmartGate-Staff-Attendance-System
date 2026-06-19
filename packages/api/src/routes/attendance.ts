@@ -13,7 +13,7 @@ function requireAdmin(c: { get: (key: 'session') => SessionData }) {
   return role === 'superadmin' || role === 'admin';
 }
 
-type UserTypeSegment = 'staff' | 'nss' | 'all';
+type UserTypeSegment = 'staff' | 'nss' | 'intern' | 'all';
 
 /**
  * Parse the optional ?user_type query into a normalised segment.
@@ -21,7 +21,7 @@ type UserTypeSegment = 'staff' | 'nss' | 'all';
  * don't pass the param.
  */
 function parseUserTypeSegment(raw: string | undefined): UserTypeSegment {
-  if (raw === 'nss' || raw === 'all') return raw;
+  if (raw === 'nss' || raw === 'intern' || raw === 'all') return raw;
   return 'staff';
 }
 

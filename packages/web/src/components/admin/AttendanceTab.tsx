@@ -162,6 +162,7 @@ export function AttendanceTab() {
 
   function segmentFilenameSlug(): string {
     if (segment === 'nss') return 'NSS-Attendance';
+    if (segment === 'intern') return 'Interns-Attendance';
     if (segment === 'all') return 'Attendance-All';
     return 'Attendance';
   }
@@ -213,7 +214,7 @@ export function AttendanceTab() {
 
       <LivenessMetricsWidget />
 
-      {/* Staff / NSS / All segment pill */}
+      {/* Staff / NSS / Interns / All segment pill */}
       <SegmentToggle value={segment} onChange={setSegment} />
 
       {/* Date picker + export */}
@@ -652,12 +653,13 @@ function SegmentToggle({ value, onChange }: {
   const options: Array<{ key: AttendanceSegment; label: string }> = [
     { key: 'staff', label: 'Staff' },
     { key: 'nss', label: 'NSS' },
+    { key: 'intern', label: 'Interns' },
     { key: 'all', label: 'All' },
   ];
 
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<Record<AttendanceSegment, HTMLButtonElement | null>>({
-    staff: null, nss: null, all: null,
+    staff: null, nss: null, intern: null, all: null,
   });
   const [underline, setUnderline] = useState<{ left: number; width: number }>({ left: 0, width: 0 });
 

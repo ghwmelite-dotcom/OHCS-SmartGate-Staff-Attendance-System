@@ -190,10 +190,11 @@ async function fetchPhotoDataUrl(photoPath: string): Promise<string | null> {
   }
 }
 
-export type AttendanceSegment = 'staff' | 'nss' | 'all';
+export type AttendanceSegment = 'staff' | 'nss' | 'intern' | 'all';
 
 function segmentSubtitle(segment: AttendanceSegment): string {
   if (segment === 'nss') return 'Daily Report — NSS Personnel';
+  if (segment === 'intern') return 'Daily Report — Interns';
   if (segment === 'all') return 'Daily Report — All Users';
   return 'Daily Report — Staff';
 }
@@ -264,9 +265,11 @@ export async function generateAttendancePdf(
 
   const totalLabel = segment === 'nss'
     ? 'Total NSS'
-    : segment === 'all'
-      ? 'Total Users'
-      : 'Total Staff';
+    : segment === 'intern'
+      ? 'Total Interns'
+      : segment === 'all'
+        ? 'Total Users'
+        : 'Total Staff';
   const stats = [
     `${totalLabel}: ${summary.total_staff}`,
     `Clocked In: ${summary.clocked_in}`,
