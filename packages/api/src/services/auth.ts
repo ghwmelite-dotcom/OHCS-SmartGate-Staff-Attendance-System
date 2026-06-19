@@ -42,22 +42,104 @@ export async function verifyOtp(email: string, code: string, env: Env): Promise<
   return true;
 }
 
-export async function hashPin(pin: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pin);
+// ---- PIN hashing (PBKDF2 over WebCrypto) ----
+//
+// New format is self-describing:  pbkdf2$<iterations>$<saltB64>$<hashB64>
+// with a 16-byte random salt and a 256-bit derived key. Legacy hashes are
+// bare lowercase-hex single-round SHA-256 strings (no `$`); they still verify
+// via verifyPin and are upgraded lazily by callers (see needsRehash).
+
+const PBKDF2_ITERATIONS = 210000;
+const PBKDF2_SALT_BYTES = 16;
+const PBKDF2_KEY_BITS = 256;
+const PBKDF2_PREFIX = 'pbkdf2$';
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+  return btoa(binary);
+}
+
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function deriveBits(pin: string, salt: Uint8Array<ArrayBuffer>, iterations: number): Promise<Uint8Array> {
+  const pinBytes = new TextEncoder().encode(pin);
+  const key = await crypto.subtle.importKey('raw', pinBytes, 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    key,
+    PBKDF2_KEY_BITS
+  );
+  return new Uint8Array(bits);
+}
+
+/** Legacy (pre-upgrade) hash: unsalted single-round SHA-256 as lowercase hex. */
+async function legacySha256Hex(pin: string): Promise<string> {
+  const data = new TextEncoder().encode(pin);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function verifyPin(pin: string, storedHash: string): Promise<boolean> {
-  const inputHash = await hashPin(pin);
-  if (inputHash.length !== storedHash.length) return false;
+/** Constant-time comparison of two byte arrays. */
+function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
   let diff = 0;
-  for (let i = 0; i < inputHash.length; i++) {
-    diff |= inputHash.charCodeAt(i) ^ storedHash.charCodeAt(i);
-  }
+  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
   return diff === 0;
+}
+
+/** Constant-time comparison of two equal-purpose strings (legacy hex path). */
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/** Hash a PIN with PBKDF2 and a fresh per-call random salt. */
+export async function hashPin(pin: string): Promise<string> {
+  const salt: Uint8Array<ArrayBuffer> = new Uint8Array(new ArrayBuffer(PBKDF2_SALT_BYTES));
+  crypto.getRandomValues(salt);
+  const derived = await deriveBits(pin, salt, PBKDF2_ITERATIONS);
+  return `${PBKDF2_PREFIX}${PBKDF2_ITERATIONS}$${bytesToBase64(salt)}$${bytesToBase64(derived)}`;
+}
+
+/**
+ * True when `stored` is NOT in the current PBKDF2 format and should be
+ * re-hashed (lazy upgrade) after a successful verify.
+ */
+export function needsRehash(stored: string): boolean {
+  return !stored.startsWith(PBKDF2_PREFIX);
+}
+
+export async function verifyPin(pin: string, stored: string): Promise<boolean> {
+  if (stored.startsWith(PBKDF2_PREFIX)) {
+    const parts = stored.split('$');
+    // ['pbkdf2', '<iterations>', '<saltB64>', '<hashB64>']
+    if (parts.length !== 4) return false;
+    const iterations = Number(parts[1]);
+    if (!Number.isInteger(iterations) || iterations <= 0) return false;
+    let salt: Uint8Array<ArrayBuffer>;
+    let expected: Uint8Array;
+    try {
+      salt = base64ToBytes(parts[2]!);
+      expected = base64ToBytes(parts[3]!);
+    } catch {
+      return false;
+    }
+    const derived = await deriveBits(pin, salt, iterations);
+    return timingSafeEqualBytes(derived, expected);
+  }
+
+  // Legacy bare SHA-256 hex.
+  const inputHash = await legacySha256Hex(pin);
+  return timingSafeEqualStrings(inputHash, stored);
 }
 
 export async function createSession(
