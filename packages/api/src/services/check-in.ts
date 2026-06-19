@@ -21,10 +21,12 @@ export type CheckInOutcome =
   | { ok: false; code: 'VISITOR_NOT_FOUND' };
 
 // Pure, testable badge-code builder. `timestamp` is ms since epoch, `rand` is
-// at least 2 random bytes.
+// at least 2 random bytes. Codes are prefixed `OHCS-`. (Older badges issued as
+// `SG-…` remain valid — the scanner/checkout look codes up verbatim; see
+// packages/web/src/lib/badgeCode.ts which accepts both prefixes.)
 export function generateBadgeCode(timestamp: number, rand: Uint8Array): string {
   const randomSuffix = Array.from(rand).map((b) => b.toString(36)).join('').slice(0, 4).toUpperCase();
-  return `SG-${timestamp.toString(36).toUpperCase()}${randomSuffix}`;
+  return `OHCS-${timestamp.toString(36).toUpperCase()}${randomSuffix}`;
 }
 
 export async function performCheckIn(
