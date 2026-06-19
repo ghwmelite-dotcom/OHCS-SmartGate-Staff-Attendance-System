@@ -217,6 +217,24 @@ export async function serveBadgePage(c: Context<{ Bindings: Env }>) {
 </body>
 </html>`;
 
+  // Security headers for the public badge page. CSP permits exactly what the
+  // template loads: inline <style>/<script>, Google Fonts (style + font),
+  // cdn.jsdelivr.net (QR generator script), and same-origin badge photos.
+  c.header('X-Frame-Options', 'DENY');
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  c.header(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com",
+      "img-src 'self' data:",
+      "connect-src 'self'",
+      "frame-ancestors 'none'",
+    ].join('; ')
+  );
   return c.html(html);
 }
 
