@@ -4,6 +4,7 @@ import type { Env, SessionData } from '../types';
 import { CreateVisitorSchema, UpdateVisitorSchema } from '../lib/validation';
 import { success, created, notFound, error } from '../lib/response';
 import { requireRole } from '../lib/require-role';
+import { resolveDirectorateScope } from '../lib/directorate-scope';
 import { z } from 'zod';
 
 export const visitorRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
@@ -18,6 +19,7 @@ visitorRoutes.get('/', zValidator('query', searchSchema), async (c) => {
   const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
   if (blocked) return blocked;
   const { q, limit, cursor } = c.req.valid('query');
+  const dir = await resolveDirectorateScope(c);
   let sql = 'SELECT * FROM visitors';
   const params: unknown[] = [];
   const conditions: string[] = [];
@@ -26,6 +28,11 @@ visitorRoutes.get('/', zValidator('query', searchSchema), async (c) => {
     conditions.push('(first_name LIKE ? OR last_name LIKE ? OR phone LIKE ? OR organisation LIKE ?)');
     const pattern = `%${q}%`;
     params.push(pattern, pattern, pattern, pattern);
+  }
+
+  if (dir !== null) {
+    conditions.push('id IN (SELECT visitor_id FROM visits WHERE directorate_id = ?)');
+    params.push(dir);
   }
 
   if (cursor) {
@@ -53,17 +60,29 @@ visitorRoutes.get('/:id', async (c) => {
   const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
   if (blocked) return blocked;
   const id = c.req.param('id');
+  const dir = await resolveDirectorateScope(c);
   const visitor = await c.env.DB.prepare('SELECT * FROM visitors WHERE id = ?').bind(id).first();
   if (!visitor) return notFound(c, 'Visitor');
 
-  const visits = await c.env.DB.prepare(
+  // Director isolation: only surface a visitor (and their PII) when that
+  // visitor has at least one visit to the director's own directorate.
+  if (dir !== null) {
+    const inScope = await c.env.DB.prepare(
+      'SELECT 1 FROM visits WHERE visitor_id = ? AND directorate_id = ? LIMIT 1'
+    ).bind(id, dir).first();
+    if (!inScope) return notFound(c, 'Visitor');
+  }
+
+  const visitsSql =
     `SELECT v.*, o.name as host_name, d.abbreviation as directorate_abbr
      FROM visits v
      LEFT JOIN officers o ON v.host_officer_id = o.id
      LEFT JOIN directorates d ON v.directorate_id = d.id
-     WHERE v.visitor_id = ?
-     ORDER BY v.check_in_at DESC LIMIT 20`
-  ).bind(id).all();
+     WHERE v.visitor_id = ?` +
+    (dir !== null ? ' AND v.directorate_id = ?' : '') +
+    ` ORDER BY v.check_in_at DESC LIMIT 20`;
+  const visitParams: unknown[] = dir !== null ? [id, dir] : [id];
+  const visits = await c.env.DB.prepare(visitsSql).bind(...visitParams).all();
 
   return success(c, { ...visitor, visits: visits.results ?? [] });
 });
