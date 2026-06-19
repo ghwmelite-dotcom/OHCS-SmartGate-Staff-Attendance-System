@@ -5,6 +5,19 @@ interface ApiResponse<T> {
   error: { code: string; message: string } | null;
 }
 
+/** Error thrown by kiosk requests. Carries the server error code + HTTP status so
+ *  callers can distinguish specific failures (e.g. 422 ID_NOT_VERIFIED). */
+export class KioskApiError extends Error {
+  code: string | null;
+  status: number;
+  constructor(message: string, code: string | null, status: number) {
+    super(message);
+    this.name = 'KioskApiError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
 async function kioskRequest<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}/kiosk${path}`, {
     method: 'POST',
@@ -13,7 +26,11 @@ async function kioskRequest<T>(path: string, body: unknown): Promise<T> {
   });
   const json = (await res.json()) as ApiResponse<T>;
   if (!res.ok || json.error) {
-    throw new Error(json.error?.message ?? `Request failed (${res.status})`);
+    throw new KioskApiError(
+      json.error?.message ?? `Request failed (${res.status})`,
+      json.error?.code ?? null,
+      res.status,
+    );
   }
   return json.data as T;
 }
@@ -67,11 +84,22 @@ export interface IdCheckVerdict {
 }
 export interface IdPhotoResult { id_photo_url: string; id_check?: IdCheckVerdict; }
 
+export interface KioskCheckInBody {
+  visitor_id: string;
+  directorate_id?: string;
+  host_name_manual?: string;
+  purpose_raw?: string;
+  /** AI document-gate verdict captured during ID upload. */
+  id_check?: IdCheckVerdict;
+  /** Reception PIN to override a failed ID document gate. */
+  reception_override_pin?: string;
+}
+
 export const kioskApi = {
   createVisitor: (body: Record<string, unknown>) => kioskRequest<KioskVisitor>('/visitors', body),
   uploadFacePhoto: (id: string, blob: Blob) => kioskUploadPhoto<{ photo_url: string }>(id, 'photo', blob),
   uploadIdPhoto: (id: string, blob: Blob) => kioskUploadPhoto<IdPhotoResult>(id, 'id-photo', blob),
-  checkIn: (body: Record<string, unknown>) => kioskRequest<KioskVisit>('/check-in', body),
+  checkIn: (body: KioskCheckInBody) => kioskRequest<KioskVisit>('/check-in', body),
   checkOut: (badgeCode: string) => kioskRequest<KioskVisit>('/check-out', { badge_code: badgeCode }),
   getDirectorates: () => kioskGet<KioskDirectorate[]>('/directorates'),
 };
