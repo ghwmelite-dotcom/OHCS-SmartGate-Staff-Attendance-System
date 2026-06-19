@@ -9,7 +9,7 @@ import { isoBase64URL } from '@simplewebauthn/server/helpers';
 import type { Context } from 'hono';
 import type { Env } from '../types';
 import { resolveRp } from '../lib/webauthn-rp';
-import { verifyPin } from './auth';
+import { verifyPin, needsRehash, hashPin } from './auth';
 
 export type ReauthOutcome =
   | { ok: true; method: 'webauthn' | 'pin' }
@@ -109,5 +109,14 @@ export async function verifyClockPin(
 
   // Successful auth — clear the counter so a fat-finger run doesn't carry over.
   await env.KV.delete(key);
+
+  // Lazy upgrade: re-hash a legacy SHA-256 PIN to PBKDF2 on successful verify.
+  // No execution context is available here (signature takes Env, not Context),
+  // so we await it. The cost is paid only once per legacy account.
+  if (needsRehash(row.pin_hash)) {
+    const upgraded = await hashPin(pin);
+    await env.DB.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').bind(upgraded, userId).run();
+  }
+
   return { ok: true, method: 'pin' };
 }

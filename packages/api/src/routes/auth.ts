@@ -3,7 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import type { Env, SessionData } from '../types';
 import { LoginSchema, VerifyOtpSchema } from '../lib/validation';
-import { createOtp, verifyOtp, verifyPin, hashPin, createSession, deleteSession, getSession, readSessionId } from '../services/auth';
+import { createOtp, verifyOtp, verifyPin, hashPin, needsRehash, createSession, deleteSession, getSession, readSessionId } from '../services/auth';
 import { success, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
 import { z } from 'zod';
@@ -133,6 +133,17 @@ authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
   const valid = await verifyPin(pin, user.pin_hash);
   if (!valid) {
     return error(c, 'INVALID_CREDENTIALS', 'Invalid credentials', 401);
+  }
+
+  // Lazy upgrade: transparently re-hash legacy SHA-256 PINs to PBKDF2 on a
+  // successful verify. Off the response path via waitUntil so it adds no latency.
+  if (needsRehash(user.pin_hash)) {
+    const userId = user.id;
+    c.executionCtx.waitUntil(
+      hashPin(pin).then((upgraded) =>
+        c.env.DB.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').bind(upgraded, userId).run()
+      )
+    );
   }
 
   const { sessionId, ttl } = await createSession(user.id, user.email, user.role, user.name, c.env, remember);
