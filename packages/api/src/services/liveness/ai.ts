@@ -1,4 +1,5 @@
 import type { FrameAnalysis, FaceLandmarks } from './types';
+import { computeSharpness } from './sharpness';
 
 interface InsightfaceResponse {
   faces?: Array<{
@@ -28,6 +29,11 @@ async function raceWithTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function analyzeFrame(ai: Ai, frame: ArrayBuffer): Promise<FrameAnalysis> {
+  // Real, dependency-free sharpness proxy computed from the JPEG bytes. Always
+  // available even when the AI call fails or no face is found, so the decision
+  // layer can still apply its minimum-sharpness gate.
+  const sharpness = computeSharpness(frame);
+
   let raw: InsightfaceResponse;
   try {
     raw = await raceWithTimeout(
@@ -37,14 +43,14 @@ export async function analyzeFrame(ai: Ai, frame: ArrayBuffer): Promise<FrameAna
       AI_TIMEOUT_MS,
     );
   } catch {
-    return { landmarks: null, sharpness: 0, error: 'ai_failure' };
+    return { landmarks: null, sharpness, error: 'ai_failure' };
   }
 
   const faces = raw.faces ?? [];
-  if (faces.length === 0) return { landmarks: null, sharpness: 0 };
+  if (faces.length === 0) return { landmarks: null, sharpness };
 
   const best = faces.reduce((a, b) => (b.score > a.score ? b : a));
-  if (best.kps.length < 5) return { landmarks: null, sharpness: 0 };
+  if (best.kps.length < 5) return { landmarks: null, sharpness };
 
   const landmarks: FaceLandmarks = {
     leftEye:    best.kps[0]!,
@@ -55,5 +61,5 @@ export async function analyzeFrame(ai: Ai, frame: ArrayBuffer): Promise<FrameAna
     faceConfidence: best.score,
   };
 
-  return { landmarks, sharpness: 0 };
+  return { landmarks, sharpness };
 }
