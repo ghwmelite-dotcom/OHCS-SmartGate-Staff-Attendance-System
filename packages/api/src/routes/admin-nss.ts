@@ -355,6 +355,15 @@ adminNssRoutes.get('/export', async (c) => {
     params.push(directorateId);
   }
 
+  // The clock-in NUMERATOR must respect each user's posting window, exactly like
+  // the per-user working-days denominator computed below. We clamp each clock-in
+  // day to [max(from, nss_start_date), min(to, nss_end_date)] inside the CTE so a
+  // record logged outside the user's posting window (e.g. an early test clock-in
+  // before nss_start_date, or after nss_end_date) cannot inflate clock_ins past
+  // userWorkingDays — which would otherwise break the invariant
+  // clock_ins + absent_days == userWorkingDays and produce clock_ins > working_days.
+  // COALESCE handles users with NULL window bounds (treated as unbounded → the
+  // requested [from, to] range governs).
   const sql = `
     WITH nss_clock_in_days AS (
       SELECT cr.user_id, DATE(cr.timestamp) AS d, MIN(TIME(cr.timestamp)) AS first_in
@@ -362,6 +371,12 @@ adminNssRoutes.get('/export', async (c) => {
       INNER JOIN users u ON u.id = cr.user_id AND ${typeClause}
       WHERE cr.type = 'clock_in'
         AND DATE(cr.timestamp) BETWEEN ? AND ?
+        AND DATE(cr.timestamp) >= MAX(?, COALESCE(u.nss_start_date, ?))
+        AND DATE(cr.timestamp) <= MIN(?, COALESCE(u.nss_end_date, ?))
+        -- Mon..Fri only, matching the working-days denominator (workingDaysBetween).
+        -- SQLite strftime('%w') → 0=Sun .. 6=Sat; exclude weekends so the numerator
+        -- (clock_ins) stays a subset of userWorkingDays and the invariant holds.
+        AND CAST(strftime('%w', cr.timestamp) AS INTEGER) NOT IN (0, 6)
       GROUP BY cr.user_id, DATE(cr.timestamp)
     )
     SELECT u.id AS user_id, u.name, u.nss_number,
@@ -379,7 +394,10 @@ adminNssRoutes.get('/export', async (c) => {
 
   const result = await c.env.DB
     .prepare(sql)
-    .bind(from, to, lateAfter, ...params)
+    // CTE binds (in order): BETWEEN from/to, then the per-user window clamp
+    // MAX(from, COALESCE(nss_start_date, from)) and MIN(to, COALESCE(nss_end_date, to)).
+    // Then the outer SELECT binds lateAfter, followed by the directorate filter params.
+    .bind(from, to, from, from, to, to, lateAfter, ...params)
     .all<{
       user_id: string;
       name: string;
