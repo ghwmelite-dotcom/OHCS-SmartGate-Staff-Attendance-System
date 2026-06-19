@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add an "Intern" personnel category to the staff clock-in system by generalising the NSS subsystem to serve both NSS and Interns (one `user_type` discriminator), with a generated intern code, institution/programme/supervisor fields, a combined "NSS & Interns" admin tab, an Intern login tab, and end-of-service handling — all reusing the existing clock-in, auth, today-board, export and EOS machinery.
+> **DESIGN REVISION (2026-06-19, as shipped in PR #18):** This plan originally modeled interns as a new `user_type='intern'` value requiring a `users` table rebuild to widen the `CHECK`. That rebuild is **infeasible on Cloudflare D1** (D1 forces `foreign_keys` ON and ignores `PRAGMA foreign_keys=OFF`; `defer_foreign_keys` trips at COMMIT on the rows orphaned by `DROP TABLE users`, which has 8 populated FK children). We pivoted to a **discriminator model**: interns are **`user_type='nss'` with a non-null `intern_code`** (real NSS have `nss_number`); the `user_type` CHECK stays `('staff','nss')`; the migration is additive `ALTER ADD COLUMN` only. The task bodies below have been updated to the shipped model; the SQL clauses use `intern_code IS NULL/NOT NULL` rather than `user_type IN ('nss','intern')`. See memory `d1-cannot-rebuild-referenced-table`.
 
-**Architecture:** Interns are `users.user_type='intern'`, reusing `nss_start_date`/`nss_end_date` as their posting window so EOS/exports/today-board work unchanged once the type filter is widened. New `users` columns: `intern_code`, `institution`, `programme`, `supervisor_user_id` (FK→users). The read/lifecycle endpoints under `/api/admin/nss` become type-aware (`?type=nss|intern|all`); creation is a dedicated `POST /api/admin/interns`. Login adds `intern_code` as a third disjoint identifier. Reference spec: `docs/superpowers/specs/2026-06-18-interns-personnel-design.md`.
+**Goal:** Add an "Intern" personnel category to the staff clock-in system by generalising the NSS subsystem to serve both NSS and Interns (discriminated by `intern_code`), with a generated intern code, institution/programme/supervisor fields, a combined "NSS & Interns" admin tab, an Intern login tab, and end-of-service handling — all reusing the existing clock-in, auth, today-board, export and EOS machinery.
+
+**Architecture:** Interns are `users.user_type='nss'` with a non-null `intern_code` (real NSS have `nss_number`), reusing `nss_start_date`/`nss_end_date` as the posting window so EOS/exports/today-board work unchanged. The `user_type` CHECK is unchanged (`'staff','nss'`). New `users` columns (additive `ALTER ADD COLUMN`): `intern_code`, `institution`, `programme`, `supervisor_user_id` (FK→users). The read/lifecycle endpoints under `/api/admin/nss` become type-aware (`?type=nss|intern|all`, resolved via `intern_code`); creation is a dedicated `POST /api/admin/interns`. Login adds `intern_code` as a third disjoint identifier. Reference spec: `docs/superpowers/specs/2026-06-18-interns-personnel-design.md`.
 
 **Tech Stack:** Hono + D1 (Cloudflare Workers), React 18 + Vite (web admin + staff PWA), Zod, react-hook-form, vitest.
 
@@ -17,103 +19,51 @@
 - Staff type-check: from `packages/staff` → `node ../../node_modules/typescript/bin/tsc --noEmit`
 - wrangler: `node "C:\dev\Projects\OHCS SmartGate & Staff Attendance\node_modules\wrangler\bin\wrangler.js" ...` (run from `packages/api`)
 
-**Migration approach (corrects the spec's risk note):** there is **no** `users-role-check-drop` migration in the repo to mirror — that drift was prod-only. The app migration runner (`routes/admin-migrations.ts`) splits SQL on `;\n` and runs **each statement separately with no transaction**, so a `users` table rebuild can NOT go through it safely. The CHECK widening is therefore done **out-of-band via `wrangler d1 execute --file`** (single transaction, `PRAGMA defer_foreign_keys`), local first, then remote with the user's confirmation and a backup, and is **not** registered in the `MIGRATIONS` array.
+**Migration approach (as shipped):** because the `user_type` CHECK is left unchanged, the migration is purely additive `ALTER TABLE ADD COLUMN` (four columns + two indexes) — which D1 fully supports, including a nullable self-FK column. No table rebuild, no FK-disable, no data risk. It IS registered in the `MIGRATIONS` array (the per-statement runner in `routes/admin-migrations.ts` runs additive ALTERs fine), and was also applied to prod `smartgate-db` via `wrangler d1 execute --remote --file` then recorded in `applied_migrations`. (The original "out-of-band rebuild" approach was abandoned — see the DESIGN REVISION banner above.)
 
 ---
 
 ## File Structure
 
 - **Create:**
-  - `packages/api/src/db/migration-intern-foundation.sql` — canonical rebuild SQL (applied out-of-band; documented, not in MIGRATIONS).
+  - `packages/api/src/db/migration-intern-foundation.sql` — additive `ALTER ADD COLUMN` migration (registered in MIGRATIONS).
   - `packages/api/src/services/intern-code.ts` — intern-code generator.
   - `packages/api/src/services/intern-code.test.ts` — generator unit tests.
   - `packages/api/src/routes/admin-interns.ts` — `POST /api/admin/interns` create.
   - `packages/api/src/routes/admin-interns.test.ts` — create-route tests.
   - `packages/web/src/components/admin/InternRegistrationFields.tsx` — intern branch of the registration modal (keeps the modal file focused).
-- **Modify (API):** `db/schema.sql`, `db/migrations-index.ts` (comment only), `types.ts`, `routes/admin-nss.ts` (generalise + export helpers), `routes/admin-interns.ts` mount in `index.ts`, `services/nss-eos.ts`, `routes/auth.ts`, `routes/auth-webauthn.ts`, `routes/users.ts`, `routes/attendance.ts`.
+- **Modify (API):** `db/schema.sql`, `db/migrations-index.ts` (register the migration), `types.ts`, `routes/admin-nss.ts` (generalise + export helpers), `routes/admin-interns.ts` mount in `index.ts`, `services/nss-eos.ts`, `routes/auth.ts`, `routes/auth-webauthn.ts`, `routes/users.ts`, `routes/attendance.ts`.
 - **Modify (web admin):** `pages/AdminPage.tsx`, `components/layout/Sidebar.tsx`, `components/admin/NssTab.tsx`, `components/admin/NssRegistrationModal.tsx`, `components/admin/NssDetailModal.tsx`, `lib/pdf.ts`, `components/admin/AttendanceTab.tsx`.
 - **Modify (staff PWA):** `pages/LoginPage.tsx`, `stores/auth.ts`, `lib/webauthnClient.ts`.
 
 ---
 
-## Task 1: Data-model rebuild (widen `user_type` + add intern columns)
+## Task 1: Data model — additive intern columns (no rebuild)
 
 **Files:** Create `packages/api/src/db/migration-intern-foundation.sql`; modify `packages/api/src/db/schema.sql`, `packages/api/src/db/migrations-index.ts`.
 
-This task is **DB-only**; no app code depends on it compiling. It is the highest-risk task — do it first and verify hard.
+This task is **DB-only**. The `user_type` CHECK is left UNCHANGED — interns are `user_type='nss'` distinguished by a non-null `intern_code`, so we only ADD columns (D1-safe; no rebuild, no FK risk).
 
-- [ ] **Step 1: Write the canonical rebuild SQL**
+- [ ] **Step 1: Write the additive migration**
 
 Create `packages/api/src/db/migration-intern-foundation.sql`:
 ```sql
 -- migration-intern-foundation.sql
--- Adds 'intern' to users.user_type and the intern-specific columns.
---
--- APPLIED OUT-OF-BAND ONLY:
---   node "<repo>/node_modules/wrangler/bin/wrangler.js" d1 execute ohcs-smartgate \
---        --file=src/db/migration-intern-foundation.sql            (local)
---   …add --remote for production (after a backup + confirmation).
---
--- This file is intentionally NOT in the MIGRATIONS array in migrations-index.ts:
--- the per-statement app runner (routes/admin-migrations.ts) cannot run a table
--- rebuild safely (no transaction). SQLite cannot ALTER a column CHECK, so the
--- users table must be rebuilt. defer_foreign_keys defers FK validation to COMMIT;
--- all row ids are preserved through the copy, so the 8 child FKs stay valid.
-PRAGMA defer_foreign_keys=on;
-BEGIN TRANSACTION;
-
-CREATE TABLE users_new (
-    id               TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    name             TEXT NOT NULL,
-    email            TEXT NOT NULL UNIQUE,
-    staff_id         TEXT UNIQUE,
-    pin_hash         TEXT,
-    pin_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(pin_acknowledged IN (0, 1)),
-    role             TEXT NOT NULL DEFAULT 'staff',
-    grade            TEXT,
-    is_active        INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
-    last_login_at    TEXT,
-    created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    current_streak   INTEGER NOT NULL DEFAULT 0,
-    longest_streak   INTEGER NOT NULL DEFAULT 0,
-    directorate_id   TEXT REFERENCES directorates(id),
-    user_type        TEXT NOT NULL DEFAULT 'staff' CHECK(user_type IN ('staff','nss','intern')),
-    nss_number       TEXT,
-    nss_start_date   TEXT,   -- reused as the posting/placement window start for interns too
-    nss_end_date     TEXT,   -- reused as the posting/placement window end for interns too
-    intern_code         TEXT,
-    institution         TEXT,
-    programme           TEXT,
-    supervisor_user_id  TEXT REFERENCES users(id)
-);
-
-INSERT INTO users_new
-  (id, name, email, staff_id, pin_hash, pin_acknowledged, role, grade, is_active,
-   last_login_at, created_at, updated_at, current_streak, longest_streak,
-   directorate_id, user_type, nss_number, nss_start_date, nss_end_date)
-SELECT
-   id, name, email, staff_id, pin_hash, pin_acknowledged, role, grade, is_active,
-   last_login_at, created_at, updated_at, current_streak, longest_streak,
-   directorate_id, user_type, nss_number, nss_start_date, nss_end_date
-FROM users;
-
-DROP TABLE users;
-ALTER TABLE users_new RENAME TO users;
-
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_staff_id ON users(staff_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_nss_number_unique ON users(nss_number) WHERE nss_number IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_users_nss_active ON users(user_type, nss_end_date) WHERE user_type = 'nss';
+-- Interns share the NSS user_type ('nss') and are distinguished by a non-null intern_code.
+-- No CHECK change / no table rebuild — only additive ALTER ADD COLUMN, which D1 supports.
+-- Posting/placement window reuses nss_start_date / nss_end_date for both NSS and interns.
+ALTER TABLE users ADD COLUMN intern_code TEXT;
+ALTER TABLE users ADD COLUMN institution TEXT;
+ALTER TABLE users ADD COLUMN programme TEXT;
+ALTER TABLE users ADD COLUMN supervisor_user_id TEXT REFERENCES users(id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_intern_code_unique ON users(intern_code) WHERE intern_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_users_intern_active ON users(user_type, nss_end_date) WHERE user_type = 'intern';
-
-COMMIT;
+CREATE INDEX IF NOT EXISTS idx_users_intern_active ON users(user_type, nss_end_date) WHERE intern_code IS NOT NULL;
 ```
+(A nullable self-FK column adds cleanly via `ALTER ADD COLUMN` on D1. Each statement is independent — safe for the per-statement app runner.)
 
-- [ ] **Step 2: Update `schema.sql` (fresh-DB composite) to the post-rebuild state**
+- [ ] **Step 2: Update `schema.sql` (fresh-DB composite)**
 
-In `packages/api/src/db/schema.sql`: change line 35 CHECK to `CHECK(user_type IN ('staff','nss','intern'))`; add the four columns after `nss_end_date` (matching the rebuild block above, including the `nss_start_date`/`nss_end_date` reuse comments); and add the two new indexes after line 43:
+In `packages/api/src/db/schema.sql`: keep the `user_type` CHECK as `CHECK(user_type IN ('staff','nss'))` (UNCHANGED); add the four columns after `nss_end_date` (with reuse comments on nss_start_date/nss_end_date); add the two indexes (intern-active predicate is `WHERE intern_code IS NOT NULL`):
 ```sql
     nss_end_date     TEXT,
     intern_code         TEXT,
@@ -123,40 +73,29 @@ In `packages/api/src/db/schema.sql`: change line 35 CHECK to `CHECK(user_type IN
 );
 -- …existing indexes…
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_intern_code_unique ON users(intern_code) WHERE intern_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_users_intern_active ON users(user_type, nss_end_date) WHERE user_type = 'intern';
+CREATE INDEX IF NOT EXISTS idx_users_intern_active ON users(user_type, nss_end_date) WHERE intern_code IS NOT NULL;
 ```
 
-- [ ] **Step 3: Note in `migrations-index.ts` (no array entry)**
+- [ ] **Step 3: Register the migration in `migrations-index.ts`**
 
-Add a comment above the `MIGRATIONS` array:
-```ts
-// NOTE: migration-intern-foundation.sql is applied OUT-OF-BAND via `wrangler d1 execute --file`
-// (it rebuilds the users table to widen the user_type CHECK; the per-statement runner below
-// cannot do that in a transaction). It is deliberately NOT listed here. After applying it,
-// record it manually: INSERT INTO applied_migrations (filename, hash) VALUES ('migration-intern-foundation.sql', '<sha256>').
-```
+Add `import internFoundation from './migration-intern-foundation.sql';` with the other imports, and append `{ filename: 'migration-intern-foundation.sql', sql: internFoundation },` as the LAST entry of the `MIGRATIONS` array.
 
-- [ ] **Step 4: Apply locally + verify**
+- [ ] **Step 4: Apply locally + verify** (the D1 db name is `smartgate-db`)
 
-From `packages/api`:
+From `packages/api` (if the local DB predates these columns, re-init from schema.sql which now has the final shape):
 ```
-node "C:\dev\Projects\OHCS SmartGate & Staff Attendance\node_modules\wrangler\bin\wrangler.js" d1 execute ohcs-smartgate --local --file=src/db/migration-intern-foundation.sql
+node "C:\dev\Projects\OHCS SmartGate & Staff Attendance\node_modules\wrangler\bin\wrangler.js" d1 execute smartgate-db --local --file=src/db/schema.sql
+… d1 execute smartgate-db --local --command "SELECT sql FROM sqlite_master WHERE name='users';"
 ```
-(Confirm the D1 binding name — read `wrangler.toml` `[[d1_databases]]` `database_name`; use that in place of `ohcs-smartgate` if different.)
-Then verify the constraint + columns:
+Expected: the `user_type` CHECK is `('staff','nss')` (unchanged) and the four new columns are present. Prove an intern-shaped row inserts:
 ```
-… d1 execute ohcs-smartgate --local --command "SELECT sql FROM sqlite_master WHERE name='users';"
-```
-Expected: the printed `CREATE TABLE` includes `'intern'` and the four new columns. Then prove an intern row inserts and a bad type still fails:
-```
-… --command "INSERT INTO users (name,email,user_type) VALUES ('T','t@x.io','intern'); SELECT user_type FROM users WHERE email='t@x.io'; DELETE FROM users WHERE email='t@x.io';"
-… --command "INSERT INTO users (name,email,user_type) VALUES ('B','b@x.io','bogus');"   -- expect CHECK constraint failure
+… --command "INSERT INTO users (id,name,email,user_type,intern_code) VALUES ('t1','T','t@x.io','nss','OHCS-INT-2026-001'); SELECT user_type,intern_code FROM users WHERE id='t1'; DELETE FROM users WHERE id='t1';"
 ```
 
-- [ ] **Step 5: Commit** (DB + schema only — remote apply happens in the deploy task, gated on user confirmation)
+- [ ] **Step 5: Commit**
 ```
 git add packages/api/src/db/migration-intern-foundation.sql packages/api/src/db/schema.sql packages/api/src/db/migrations-index.ts
-git commit -m "feat(interns): users rebuild — widen user_type to include 'intern' + intern columns"
+git commit -m "feat(interns): additive intern columns (user_type='nss' + intern_code discriminator)"
 ```
 
 ---
@@ -167,7 +106,7 @@ git commit -m "feat(interns): users rebuild — widen user_type to include 'inte
 
 - [ ] **Step 1: Extend types**
 
-In `types.ts`: `export type UserType = 'staff' | 'nss' | 'intern';` and add to the `User` interface (after `nss_end_date`):
+In `types.ts`: keep `export type UserType = 'staff' | 'nss';` (UNCHANGED — interns are nss + intern_code, never a distinct enum value) and add to the `User` interface (after `nss_end_date`):
 ```ts
   intern_code: string | null;
   institution: string | null;
@@ -245,7 +184,7 @@ Run the tests again → expect PASS.
 - [ ] **Step 5: Commit**
 ```
 git add packages/api/src/types.ts packages/api/src/services/intern-code.ts packages/api/src/services/intern-code.test.ts
-git commit -m "feat(interns): UserType+User intern fields and OHCS-INT code generator"
+git commit -m "feat(interns): User intern fields and OHCS-INT code generator"
 ```
 
 ---
@@ -273,25 +212,26 @@ Replace every `${NSS_SELECT_COLUMNS}` usage with `${PERSONNEL_SELECT_COLUMNS}`, 
 
 Add near the top:
 ```ts
-/** Resolve the optional ?type= filter into a SQL WHERE clause over service-personnel types. */
+/** Resolve the optional ?type= filter into a SQL WHERE clause over service personnel.
+ *  Interns are user_type='nss' with a non-null intern_code; real NSS have intern_code NULL. */
 export function personnelTypeWhere(typeParam: string | null | undefined): string {
-  if (typeParam === 'nss') return `u.user_type = 'nss'`;
-  if (typeParam === 'intern') return `u.user_type = 'intern'`;
-  return `u.user_type IN ('nss','intern')`;
+  if (typeParam === 'nss') return `u.user_type = 'nss' AND u.intern_code IS NULL`;
+  if (typeParam === 'intern') return `u.user_type = 'nss' AND u.intern_code IS NOT NULL`;
+  return `u.user_type = 'nss'`;
 }
 ```
-In **list** (`GET /`): replace the seed `const where = [\`u.user_type = 'nss'\`]` with `const where = [personnelTypeWhere(c.req.query('type'))]`. In **/today** and **/export**: replace the literal `u.user_type = 'nss'` in the SQL (and in the `INNER JOIN users u ON u.id = cr.user_id AND u.user_type = 'nss'` CTE in /export) with the resolved clause — build the clause string from `personnelTypeWhere(c.req.query('type'))` and interpolate it (it contains no user input — only fixed literals — so interpolation is safe). Also widen the `idx`-friendly `WHERE u.user_type = 'nss'` in /today the same way.
+In **list** (`GET /`): replace the seed `const where = [\`u.user_type = 'nss'\`]` with `const where = [personnelTypeWhere(c.req.query('type'))]`. In **/today** and **/export**: replace the literal `u.user_type = 'nss'` in the SQL (and in the `INNER JOIN users u ON u.id = cr.user_id AND u.user_type = 'nss'` CTE in /export) with the resolved clause — build the clause string from `personnelTypeWhere(c.req.query('type'))` and interpolate it (fixed literals only — safe). Add `u.intern_code` to the `/today` SELECT (and `intern_code` to `NssTodayRow`) so the UI can render the NSS/Intern badge.
 
 - [ ] **Step 3: Loosen the per-id guards** (detail, patch, delete, reset-pin, activity)
 
-Replace each `if (existing.user_type !== 'nss')` / `WHERE u.id = ? AND u.user_type = 'nss'` with an "nss or intern" check:
+Since interns are `user_type='nss'`, the guard simply checks for the umbrella type:
 ```ts
-// guard pattern:
-if (existing.user_type !== 'nss' && existing.user_type !== 'intern') {
+// guard pattern (covers both real NSS and interns):
+if (existing.user_type !== 'nss') {
   return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
 }
 // detail query WHERE:
-WHERE u.id = ? AND u.user_type IN ('nss','intern')
+WHERE u.id = ? AND u.user_type = 'nss'
 ```
 In **PATCH /:id** also allow editing the intern fields when present: add to `updateNssSchema` `institution`, `programme` (`.max(200).optional().or(z.literal(''))`) and `supervisor_user_id` (`.string().optional().or(z.literal(''))`); and in the field-assembly block append:
 ```ts
@@ -320,7 +260,7 @@ git commit -m "feat(interns): generalise NSS admin endpoints to NSS+intern with 
 Create `packages/api/src/routes/admin-interns.test.ts` mirroring the existing route-test harness in the repo (look at `require-role.test.ts` and any `*.routes.test.ts` for the in-memory D1 / app bootstrap pattern; reuse it). Cover:
 ```ts
 // (pseudocode-level expectations — flesh out with the repo's test harness)
-// 1. superadmin creates an intern → 201; body.user.user_type === 'intern';
+// 1. superadmin creates an intern → 201; body.user.user_type === 'nss' AND body.user.intern_code is set;
 //    body.user.intern_code matches /^OHCS-INT-\d{4}-\d{3}$/; body.initial_pin is 6 digits.
 // 2. second create in same year → intern_code sequence increments (…-001 then …-002).
 // 3. supervisor_user_id pointing at a non-staff/absent user → 400 INVALID_SUPERVISOR.
@@ -406,7 +346,7 @@ adminInternRoutes.post('/', zValidator('json', createInternSchema), async (c) =>
            (id, name, email, pin_hash, pin_acknowledged, role, grade, directorate_id,
             user_type, nss_start_date, nss_end_date,
             intern_code, institution, programme, supervisor_user_id, is_active)
-         VALUES (?, ?, ?, ?, 0, 'staff', ?, ?, 'intern', ?, ?, ?, ?, ?, ?, 1)`
+         VALUES (?, ?, ?, ?, 0, 'staff', ?, ?, 'nss', ?, ?, ?, ?, ?, ?, 1)`  -- interns are user_type='nss' + intern_code
       ).bind(
         id, body.name, body.email, pinHash, body.grade || null, body.directorate_id,
         body.nss_start_date, body.nss_end_date,
@@ -464,7 +404,7 @@ git commit -m "feat(interns): POST /api/admin/interns create endpoint"
 
 - [ ] **Step 1: Widen the queries + label rows by type**
 
-In `runNssEndOfServiceCheck`: change both `WHERE user_type = 'nss'` / `WHERE u.user_type = 'nss'` to `… user_type IN ('nss','intern')`. Add `user_type` to the expiring SELECT and to `interface ExpiringRow` (`user_type: string`). In `buildMessage`, change the header to `⏰ <b>Service Personnel End-of-Date — This Week</b>`, the count line to `… National Service Personnel & Interns finish in the next 7 days.`, and append the type to each row: `• ${name} (${nssNumber || internLabel}) — ${dir} — ${typeTag} — ends ${ends}` where `typeTag = r.user_type === 'intern' ? 'Intern' : 'NSS'` and for interns show `intern_code` instead of `nss_number` (SELECT `u.intern_code` too and prefer it when type is intern).
+In `runNssEndOfServiceCheck`: keep both queries filtered to `user_type = 'nss'` (the umbrella already covers interns — no change needed there). Add `intern_code` to the expiring SELECT and to `interface ExpiringRow` (`intern_code: string | null`). In `buildMessage`, change the header to `⏰ <b>Service Personnel End-of-Date — This Week</b>`, the count line to `… National Service Personnel & Interns finish in the next 7 days.`, and append the type to each row, labelling by `intern_code` presence: `const typeTag = r.intern_code ? 'Intern' : 'NSS';` and show `intern_code` instead of `nss_number` for interns.
 
 - [ ] **Step 2: Type-check** → 0 errors. (No behavioural test here; covered by the runtime `/run-eos` check in Task 10.)
 
@@ -512,9 +452,9 @@ function resolveIdentifier(input: { staff_id?: string; nss_number?: string; inte
 
 - [ ] **Step 3: Promote guard (`users.ts`)**
 
-At `users.ts:112`, widen the NSS-not-promotable guard to interns:
+At `users.ts:112`, the NSS-not-promotable guard already covers interns (they are `user_type='nss'`); just update the message to name interns:
 ```ts
-if (body.role !== 'staff' && (existing.user_type === 'nss' || existing.user_type === 'intern')) {
+if (body.role !== 'staff' && existing.user_type === 'nss') {
   return error(c, 'NSS_NOT_PROMOTABLE', 'Service personnel (NSS/Intern) cannot be promoted to an admin role', 400);
 }
 ```
@@ -586,18 +526,18 @@ In `AdminPage.tsx` and `Sidebar.tsx`, change the NSS tab's display label from "N
 - Add state `const [typeFilter, setTypeFilter] = useState<'all' | 'nss' | 'intern'>('all');`.
 - Add `type` to the list/today query keys and pass `?type=${typeFilter}` (when not `'all'`) to `/admin/nss` and `/admin/nss/today` requests. Default `all` sends no `type` param (server defaults to both).
 - Add a **Type filter** control next to the existing status/directorate filters: a 3-way segmented toggle (All · NSS · Interns).
-- Add a **Type** column/badge to the today board: render `row.user_type === 'intern' ? 'Intern' : 'NSS'` as a small pill (gold for intern, green for NSS, using existing token classes). The today endpoint must return `user_type` — add `u.user_type` to the `/today` SELECT + `NssTodayRow` in `admin-nss.ts` (Task 3 follow-up: include it in Step 2 there).
+- Add a **Type** column/badge to the today board: render **intern when `row.intern_code != null`, else NSS** as a small pill (gold for intern, green for NSS, using existing token classes). The today endpoint must return `intern_code` — add `u.intern_code` to the `/today` SELECT + `NssTodayRow` in `admin-nss.ts` (Task 3 Step 2).
 - Replace the single "Register NSS" button with a **"Register"** button that opens `NssRegistrationModal` (now type-aware); pass an initial type if desired.
 
 - [ ] **Step 3: `InternRegistrationFields.tsx` (new) + wire into `NssRegistrationModal.tsx`**
 
-Create `InternRegistrationFields.tsx` — a controlled fieldset for the intern branch: name, email, **institution**, **programme**, **supervisor** (a searchable `<select>`/combobox of active staff users fetched from the existing users list endpoint — reuse however `UsersTab`/`UserRoleToggle` fetches users; filter to `user_type==='staff'` & `is_active`), directorate (reuse the directorate select already in the NSS modal), start date, end date, grade. No code field.
+Create `InternRegistrationFields.tsx` — a controlled fieldset for the intern branch: name, email, **institution**, **programme**, **supervisor** (a `<select>` of active staff users from the admin-reachable `GET /api/admin/interns/supervisors` lookup — NOT the superadmin-only `/users` list), directorate (reuse the directorate select already in the NSS modal), start date, end date, grade. No code field. (Add the `GET /supervisors` route to `admin-interns.ts` in Task 4 — gated `requireRole(superadmin, admin)`, returns active staff `{id, name}`.)
 
 In `NssRegistrationModal.tsx`: add a **Type toggle (NSS / Intern)** at the top of the single-registration form. When `Intern`, render `<InternRegistrationFields/>` and submit to `POST /api/admin/interns`; when `NSS`, render the current fields and submit to `POST /api/admin/nss`. Both paths feed the existing `PinResultModal`; for interns it shows the returned `intern_code` **and** the `initial_pin` (label the code "Intern code — give this to the intern to log in"). Leave the **bulk-import** section NSS-only (out of scope for interns).
 
 - [ ] **Step 4: `NssDetailModal.tsx` — show/edit intern fields**
 
-When the loaded record's `user_type === 'intern'`: show a Type badge; render `institution`, `programme`, and `supervisor_name` in the info panel; in edit mode expose `institution`, `programme`, and a `supervisor_user_id` select (same staff-user source as Step 3). PATCH sends those fields (the API accepts them per Task 3 Step 3). Labels: show "Placement window" instead of "Posting window" when intern (cosmetic). Everything else (activity grid, reset PIN, end service) is unchanged.
+When the loaded record is an intern (`detail.intern_code != null`): show a Type badge; render `institution`, `programme`, and `supervisor_name` in the info panel; in edit mode expose `institution`, `programme`, and a `supervisor_user_id` select (sourced from the admin-reachable `/api/admin/interns/supervisors` lookup — the full `/users` list is superadmin-only). The PATCH must send only **changed** fields (so it never nulls a supervisor it didn't touch), and inject the current supervisor as an option if it's not in the active-staff list. Labels: "Placement window" instead of "Posting window" when intern. Everything else (activity grid, reset PIN, end service) is unchanged.
 
 - [ ] **Step 5: Web type-check + build** — from `packages/web`: `node ../../node_modules/typescript/bin/tsc --noEmit` → 0 errors; `node ../../node_modules/typescript/bin/tsc -b && node ../../node_modules/vite/bin/vite.js build` → `✓ built`. Add/extend the list/detail row TS types in the web NSS API client with `user_type`, `intern_code`, `institution`, `programme`, `supervisor_user_id`, `supervisor_name`.
 
@@ -613,7 +553,7 @@ git commit -m "feat(interns): NSS & Interns admin tab — type filter, intern re
 
 **Files:** Modify `packages/api/src/routes/attendance.ts`, `packages/web/src/components/admin/AttendanceTab.tsx`, `packages/web/src/lib/pdf.ts`.
 
-- [ ] **Step 1: API segment** — in `attendance.ts`, extend `UserTypeSegment` to `'staff' | 'nss' | 'intern' | 'all'`; the existing `?user_type=` parsing + `AND u.user_type = ?` injection then handles `intern` with no further change (verify the parser accepts the new value and rejects unknown ones).
+- [ ] **Step 1: API segment** — in `attendance.ts`, extend `UserTypeSegment` to `'staff' | 'nss' | 'intern' | 'all'`. Because interns are `user_type='nss'`+intern_code, the segment can no longer bind the raw value to `user_type = ?`; replace the filter mechanism with a fixed-clause helper: `staff`→`<alias>.user_type='staff'`, `nss`→`<alias>.user_type='nss' AND <alias>.intern_code IS NULL`, `intern`→`<alias>.user_type='nss' AND <alias>.intern_code IS NOT NULL`, `all`→`''` (no filter). Apply at every SQL site (today, records, by-directorate). Parser still rejects unknown values.
 
 - [ ] **Step 2: Web segment** — in `AttendanceTab.tsx`, add `'intern'` to the segment type + the segment dropdown options (label "Interns"); the `?user_type=intern` param already flows. In `pdf.ts`, add an intern title/slug branch (reuse the NSS range-report layout/columns; the `/admin/nss/export?type=intern` endpoint already serves intern rows).
 
@@ -633,12 +573,11 @@ git commit -m "feat(interns): intern segment in attendance reports/exports"
 
 - [ ] **Step 1: Static gates** — API: `tsc --noEmit` 0 errors + `vitest run` all green (intern-code + admin-interns + existing). Web: `tsc --noEmit` + build `✓`. Staff: `tsc --noEmit`.
 
-- [ ] **Step 2: Remote migration (gated)** — **Confirm with the user before any prod DB write.** The D1 database name is **`smartgate-db`** (confirmed from `wrangler.toml` in Task 1 — NOT `ohcs-smartgate`). The migration file uses `PRAGMA defer_foreign_keys = true` with **no** explicit `BEGIN/COMMIT` (D1 runs the `--file` as one implicit transaction and forbids explicit transaction statements; this was corrected after Task 1). Steps:
-  1. Back up `users`: `node "…/wrangler.js" d1 execute smartgate-db --remote --command "SELECT * FROM users;" --json > docs/ops/backups/users-pre-intern-<date>.json`.
-  2. Read the current prod constraint: `… --remote --command "SELECT sql FROM sqlite_master WHERE name='users';"` — per [[prod-users-role-check-drift]], do **not** assume it matches the repo; if it already lacks the user_type CHECK, the rebuild still applies cleanly (it sets the canonical post-state). (If prod's real column set differs from the migration's `CREATE TABLE users_new`, STOP and reconcile before applying.)
-  3. Apply: `… --remote --file=src/db/migration-intern-foundation.sql`.
-  4. Re-read the constraint and assert it now contains `'intern'` + the four columns; spot-check `SELECT COUNT(*) FROM users;` matches the pre-count.
-  5. Record it: `… --remote --command "INSERT INTO applied_migrations (filename, hash) VALUES ('migration-intern-foundation.sql', '<sha256 of the file>');"`.
+- [ ] **Step 2: Remote migration (gated)** — **Confirm with the user before any prod DB write.** The D1 database name is **`smartgate-db`**. The migration is additive `ALTER ADD COLUMN` (no rebuild, no FK risk). Steps:
+  1. Back up `users`: `node "…/wrangler.js" d1 execute smartgate-db --remote --command "SELECT * FROM users;" --json > docs/ops/backups/users-pre-intern-<date>.json` (untracked — contains PIN hashes; do NOT commit).
+  2. Apply: `… --remote --file=src/db/migration-intern-foundation.sql`.
+  3. Verify: `… --remote --command "SELECT sql FROM sqlite_master WHERE name='users';"` — assert the `user_type` CHECK is still `('staff','nss')` (unchanged) and the four new columns are present; spot-check `SELECT COUNT(*) FROM users;` is unchanged.
+  4. Record it: `… --remote --command "INSERT INTO applied_migrations (filename, hash) VALUES ('migration-intern-foundation.sql', '<sha256 of the file>');"` (so the deployed runner skips it).
 
 - [ ] **Step 3: Deploy** — merge to `main`, poll `deploy.yml` to `success` (per the standard flow).
 
@@ -657,20 +596,20 @@ git commit -m "feat(interns): intern segment in attendance reports/exports"
 ## Self-Review
 
 **Spec coverage:**
-- Widen `user_type` + intern columns, reuse posting-window cols → Task 1. ✓
+- Additive intern columns (discriminator), CHECK unchanged, reuse posting-window cols → Task 1. ✓
 - Intern code `OHCS-INT-YYYY-NNN` + generator → Task 2. ✓
-- Combined "NSS & Interns" tab, type filter/badge → Task 8 + the generalised read endpoints (Task 3). ✓
-- Dedicated `POST /api/admin/interns`, supervisor=staff-FK validation, institution/programme → Task 4. ✓
+- Combined "NSS & Interns" tab, type filter/badge (by intern_code) → Task 8 + the generalised read endpoints (Task 3). ✓
+- Dedicated `POST /api/admin/interns` (writes user_type='nss'+intern_code), supervisor=staff-FK validation, institution/programme → Task 4. ✓
 - Login via intern_code (PIN + WebAuthn) + Intern tab → Tasks 6–7. ✓
-- EOS covers interns → Task 5. ✓
+- EOS covers interns (umbrella user_type='nss') → Task 5. ✓
 - Reporting intern segment → Task 9. ✓
-- Migration risk handled out-of-band with prod verification → Tasks 1 + 10 Step 2. ✓
+- Migration applied additively (no rebuild) + prod verification → Tasks 1 + 10 Step 2. ✓
 - Out of scope (bulk import, certificates) honoured — not in any task. ✓
 
 **Placeholder scan:** Test bodies in Task 4 Step 1 are expectation-level because the repo's route-test harness must be reused verbatim — the implementer is pointed at the existing pattern (`require-role.test.ts`); the assertions are concrete. Frontend modal tasks give the field list + data sources + submit targets rather than full JSX because they mirror existing components in the same files; every new behaviour (type toggle, submit target, PIN+code result) is specified. No TBDs.
 
-**Type consistency:** `PERSONNEL_SELECT_COLUMNS` + extended `NssUserRow` (Task 3) are consumed by `admin-interns.ts` (Task 4) and the web row types (Task 8 Step 5). `UserType`/`User` (Task 2) align with the DB columns (Task 1). `IdentifierKind` (Task 7) matches the API's three identifier columns (Task 6). `personnelTypeWhere` is defined once (Task 3) and reused.
+**Type consistency:** `PERSONNEL_SELECT_COLUMNS` + extended `NssUserRow` (Task 3) are consumed by `admin-interns.ts` (Task 4) and the web row types (Task 8 Step 5). `User` (Task 2) gains the four intern fields; `UserType` stays `'staff' | 'nss'` (interns are nss + intern_code, never a distinct enum value). `IdentifierKind` (Task 7) matches the API's three identifier columns (Task 6). `personnelTypeWhere` is defined once (Task 3) and reused.
 
 ## Deployment
 
-API Worker + both Pages via `deploy.yml` on merge to `main`. The **one manual prod step** is the out-of-band `users` rebuild (Task 10 Step 2), gated on user confirmation, backed up first, and verified before/after — run it **before** the code that inserts `user_type='intern'` goes live (i.e. apply the remote migration, then merge/deploy).
+API Worker + both Pages via `deploy.yml` on merge to `main`. The **one manual prod step** is the additive `ALTER ADD COLUMN` migration (Task 10 Step 2), gated on user confirmation, backed up first, and verified after — run it **before** the code that writes interns goes live (apply the remote migration, then merge/deploy). No table rebuild / no FK-disable (that approach was infeasible on D1 — see the DESIGN REVISION banner at the top).
