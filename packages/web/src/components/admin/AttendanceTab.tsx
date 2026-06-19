@@ -33,9 +33,7 @@ interface AttendanceRecord {
   clock_in_time: string | null;
   clock_out_time: string | null;
   clock_in_photo: string | null;
-  clock_in_prompt: string | null;
   clock_in_reauth_method: 'webauthn' | 'pin' | null;
-  clock_out_prompt: string | null;
   clock_out_reauth_method: 'webauthn' | 'pin' | null;
   liveness_decision: 'pass' | 'fail' | 'manual_review' | 'skipped' | null;
   liveness_signature: string | null;

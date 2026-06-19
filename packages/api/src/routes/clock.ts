@@ -431,8 +431,11 @@ clockRoutes.post('/', async (c) => {
     throw e;
   }
 
-  // Write canonical frame to R2 (only when verification produced one and decision isn't skipped/manual_review)
-  if (canonicalFrame && livenessDecision && livenessDecision !== 'skipped' && livenessDecision !== 'manual_review') {
+  // Write canonical frame to R2 when verification produced one. We persist for
+  // both confident passes AND manual_review decisions so HR has an image to
+  // adjudicate; only `skipped` (AI unavailable — frame is not a verified
+  // capture) is excluded.
+  if (canonicalFrame && livenessDecision && livenessDecision !== 'skipped') {
     const r2Key = `photos/clock/${id}.jpg`;
     await c.env.STORAGE.put(r2Key, canonicalFrame, { httpMetadata: { contentType: 'image/jpeg' } });
     await c.env.DB.prepare('UPDATE clock_records SET photo_url = ? WHERE id = ?')
@@ -462,7 +465,9 @@ clockRoutes.post('/', async (c) => {
           JSON.stringify(verification.signature),
           id,
         ).run();
-        if (verification.decision !== 'skipped' && verification.decision !== 'manual_review') {
+        // Persist the canonical frame for passes AND manual_review (HR needs an
+        // image to adjudicate review cases); only skip when AI was unavailable.
+        if (verification.decision !== 'skipped') {
           const r2Key = `photos/clock/${id}.jpg`;
           await c.env.STORAGE.put(r2Key, verification.canonicalFrame, {
             httpMetadata: { contentType: 'image/jpeg' },
