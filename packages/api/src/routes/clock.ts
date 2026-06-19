@@ -384,24 +384,52 @@ clockRoutes.post('/', async (c) => {
 
   const id = crypto.randomUUID().replace(/-/g, '');
 
-  await c.env.DB.prepare(
-    `INSERT INTO clock_records
-      (id, user_id, type, latitude, longitude, within_geofence, idempotency_key,
-       reauth_method, liveness_challenge, liveness_decision, liveness_signature)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    id,
-    session.userId,
-    type,
-    latitude,
-    longitude,
-    withinGeofence ? 1 : 0,
-    idempotency_key ?? null,
-    reauthMethod,
-    challengeAction,
-    livenessDecision,
-    livenessSignature ? JSON.stringify(livenessSignature) : null,
-  ).run();
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO clock_records
+        (id, user_id, type, latitude, longitude, within_geofence, idempotency_key,
+         reauth_method, liveness_challenge, liveness_decision, liveness_signature)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      session.userId,
+      type,
+      latitude,
+      longitude,
+      withinGeofence ? 1 : 0,
+      idempotency_key ?? null,
+      reauthMethod,
+      challengeAction,
+      livenessDecision,
+      livenessSignature ? JSON.stringify(livenessSignature) : null,
+    ).run();
+  } catch (e) {
+    // Idempotency-key race: a concurrent clock request with the same
+    // (user_id, idempotency_key) won the insert. Re-read and return the
+    // existing record instead of surfacing a 500 — same shape as the
+    // dedup-hit path above.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (idempotency_key && /UNIQUE/i.test(msg) && /idempotency_key/i.test(msg)) {
+      const existing = await c.env.DB.prepare(
+        "SELECT id, type, timestamp FROM clock_records WHERE user_id = ? AND idempotency_key = ? LIMIT 1"
+      ).bind(session.userId, idempotency_key).first<{ id: string; type: string; timestamp: string }>();
+      if (existing) {
+        return success(c, {
+          id: existing.id,
+          type: existing.type,
+          timestamp: existing.timestamp,
+          user_name: session.name,
+          staff_id: '',
+          within_geofence: true,
+          distance_meters: 0,
+          streak: 0,
+          longest_streak: 0,
+          deduplicated: true,
+        });
+      }
+    }
+    throw e;
+  }
 
   // Write canonical frame to R2 (only when verification produced one and decision isn't skipped/manual_review)
   if (canonicalFrame && livenessDecision && livenessDecision !== 'skipped' && livenessDecision !== 'manual_review') {
