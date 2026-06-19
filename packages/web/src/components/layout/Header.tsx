@@ -66,12 +66,14 @@ export function Header() {
               key={opt.value}
               onClick={() => setTheme(opt.value)}
               className={cn(
-                'h-7 w-7 rounded-md flex items-center justify-center transition-all',
+                'h-11 w-11 rounded-md flex items-center justify-center transition-all',
                 theme === opt.value
                   ? 'bg-primary text-white shadow-sm'
                   : 'text-muted hover:text-foreground'
               )}
               title={opt.label}
+              aria-label={opt.label}
+              aria-pressed={theme === opt.value}
             >
               <opt.icon className="h-3.5 w-3.5" />
             </button>

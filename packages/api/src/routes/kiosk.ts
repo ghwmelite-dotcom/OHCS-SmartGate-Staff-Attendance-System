@@ -7,6 +7,7 @@ import { rateLimit } from '../lib/rate-limit';
 import { KioskCreateVisitorSchema, KioskCheckInSchema, KioskCheckOutSchema } from '../lib/validation';
 import { visitorPhotoKey, visitorIdPhotoKey } from '../lib/photo-key';
 import { uploadVisitorPhoto } from '../lib/photo-upload';
+import { isJpeg } from '../lib/image-magic';
 import { performCheckIn } from '../services/check-in';
 import { checkOutByBadgeCode } from '../services/check-out';
 import { checkIdDocument } from '../services/id-check';
@@ -59,6 +60,7 @@ kioskRoutes.post('/visitors/:id/photo', async (c) => {
   const buf = await c.req.arrayBuffer();
   if (buf.byteLength === 0) return error(c, 'EMPTY_BODY', 'No photo data', 400);
   if (buf.byteLength > MAX_PHOTO_BYTES) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
+  if (!isJpeg(new Uint8Array(buf))) return error(c, 'INVALID_IMAGE', 'Photo must be a JPEG image', 400);
   const photoUrl = `/api/photos/visitors/${visitorId}`;
   await uploadVisitorPhoto(c.env, visitorId, buf, visitorPhotoKey(visitorId), 'photo_url', photoUrl);
   return success(c, { photo_url: photoUrl });
@@ -73,6 +75,7 @@ kioskRoutes.post('/visitors/:id/id-photo', async (c) => {
   const buf = await c.req.arrayBuffer();
   if (buf.byteLength === 0) return error(c, 'EMPTY_BODY', 'No photo data', 400);
   if (buf.byteLength > MAX_PHOTO_BYTES) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
+  if (!isJpeg(new Uint8Array(buf))) return error(c, 'INVALID_IMAGE', 'Photo must be a JPEG image', 400);
   const idPhotoUrl = `/api/photos/visitors/${visitorId}/id`;
   await uploadVisitorPhoto(c.env, visitorId, buf, visitorIdPhotoKey(visitorId), 'id_photo_url', idPhotoUrl);
 
@@ -88,8 +91,13 @@ kioskRoutes.post('/visitors/:id/id-photo', async (c) => {
 kioskRoutes.post('/check-in', zValidator('json', KioskCheckInSchema), async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
   const body = c.req.valid('json');
-  const idCheckRaw = await c.env.KV.get(`idcheck:${body.visitor_id}`);
-  if (idCheckRaw !== null) await c.env.KV.delete(`idcheck:${body.visitor_id}`);
+  // Prefer the verdict echoed back in the request body (survives the 900s KV
+  // TTL even when the visitor lingers); fall back to the KV-stashed copy.
+  const kvIdCheckRaw = await c.env.KV.get(`idcheck:${body.visitor_id}`);
+  if (kvIdCheckRaw !== null) await c.env.KV.delete(`idcheck:${body.visitor_id}`);
+  const idPhotoCheck = body.id_check
+    ? JSON.stringify(body.id_check)
+    : (kvIdCheckRaw ?? JSON.stringify({ verdict: 'indeterminate' }));
   const dir = await c.env.DB.prepare('SELECT reception_officer_id FROM directorates WHERE id = ?')
     .bind(body.directorate_id).first<{ reception_officer_id: string | null }>();
   const result = await performCheckIn(c.env, c.executionCtx, {
@@ -97,7 +105,7 @@ kioskRoutes.post('/check-in', zValidator('json', KioskCheckInSchema), async (c) 
     host_officer_id: dir?.reception_officer_id ?? null,
     created_by: KIOSK_USER_ID,
     check_in_source: 'kiosk',
-    id_photo_check: idCheckRaw ?? JSON.stringify({ verdict: 'indeterminate' }),
+    id_photo_check: idPhotoCheck,
   });
   if (!result.ok) return notFound(c, 'Visitor');
   return created(c, result.visit);

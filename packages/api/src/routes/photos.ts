@@ -4,6 +4,7 @@ import { success, error, notFound } from '../lib/response';
 import { requireRole } from '../lib/require-role';
 import { visitorPhotoKey, visitorIdPhotoKey } from '../lib/photo-key';
 import { uploadVisitorPhoto } from '../lib/photo-upload';
+import { isJpeg } from '../lib/image-magic';
 
 export const photoRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -20,6 +21,7 @@ photoRoutes.post('/visitors/:id/photo', async (c) => {
   const body = await c.req.arrayBuffer();
   if (body.byteLength === 0) return error(c, 'EMPTY_BODY', 'No photo data', 400);
   if (body.byteLength > MAX_PHOTO_BYTES) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
+  if (!isJpeg(new Uint8Array(body))) return error(c, 'INVALID_IMAGE', 'Photo must be a JPEG image', 400);
 
   const photoUrl = `/api/photos/visitors/${visitorId}`;
   await uploadVisitorPhoto(c.env, visitorId, body, visitorPhotoKey(visitorId), 'photo_url', photoUrl);
@@ -37,6 +39,7 @@ photoRoutes.post('/visitors/:id/id-photo', async (c) => {
   const body = await c.req.arrayBuffer();
   if (body.byteLength === 0) return error(c, 'EMPTY_BODY', 'No photo data', 400);
   if (body.byteLength > MAX_PHOTO_BYTES) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
+  if (!isJpeg(new Uint8Array(body))) return error(c, 'INVALID_IMAGE', 'Photo must be a JPEG image', 400);
 
   const idPhotoUrl = `/api/photos/visitors/${visitorId}/id`;
   await uploadVisitorPhoto(c.env, visitorId, body, visitorIdPhotoKey(visitorId), 'id_photo_url', idPhotoUrl);

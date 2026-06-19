@@ -16,6 +16,7 @@ import { ReportsPage } from './pages/ReportsPage';
 import { AppLayout } from './components/layout/AppLayout';
 import { useAuthStore } from './stores/auth';
 import { OfflineBanner } from './components/OfflineBanner';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -147,10 +148,11 @@ export function App() {
   }
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <OfflineBanner />
-      <BrowserRouter>
-        <Routes>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <OfflineBanner />
+        <BrowserRouter>
+          <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/kiosk" element={<KioskPage />} />
           <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
@@ -166,8 +168,9 @@ export function App() {
             <Route path="reports" element={<ReportsPage />} />
             <Route path="admin" element={<AdminPage />} />
           </Route>
-        </Routes>
-      </BrowserRouter>
-    </QueryClientProvider>
+          </Routes>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

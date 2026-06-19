@@ -57,10 +57,25 @@ export const KioskCheckOutSchema = z.object({
   badge_code: z.string().min(1).max(40),
 });
 
+// Mirrors IdCheckVerdict (lib/id-check.ts). Echoed back from the id-photo
+// response so the verdict survives even if the visitor lingers past the
+// idcheck:* KV TTL (900s). Non-blocking and best-effort — fields are loose.
+export const IdCheckVerdictSchema = z.object({
+  verdict: z.enum(['document', 'not_document', 'indeterminate']),
+  detected_type: z.enum(['ghana_card', 'passport', 'drivers_license', 'staff_id', 'other', 'none']).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  model: z.string().max(120).optional(),
+  checked_at: z.string().max(40).optional(),
+});
+
 export const KioskCheckInSchema = z.object({
   visitor_id: z.string().min(1),
   directorate_id: z.string().min(1),
   host_name_manual: z.string().max(100).optional(),
   purpose_raw: z.string().min(1).max(500),
   idempotency_key: z.string().min(1).max(100).optional(),
+  // Optional: the AI ID-document verdict echoed back from the id-photo step so
+  // it persists even when the KV-stashed copy has expired. Preferred over KV
+  // when present; otherwise we fall back to the KV read.
+  id_check: IdCheckVerdictSchema.optional(),
 });

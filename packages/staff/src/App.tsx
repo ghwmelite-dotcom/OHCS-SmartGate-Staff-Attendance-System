@@ -6,6 +6,7 @@ import { ClockPage } from './pages/ClockPage';
 import { useAuthStore } from './stores/auth';
 import { OfflineBanner } from './components/OfflineBanner';
 import { InstallPrompt } from './components/InstallPrompt';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, retry: 1 } },
@@ -139,15 +140,17 @@ export function App() {
   }
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <OfflineBanner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<ProtectedRoute><ClockPage /></ProtectedRoute>} />
-        </Routes>
-      </BrowserRouter>
-      <InstallPrompt />
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <OfflineBanner />
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/" element={<ProtectedRoute><ClockPage /></ProtectedRoute>} />
+          </Routes>
+        </BrowserRouter>
+        <InstallPrompt />
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

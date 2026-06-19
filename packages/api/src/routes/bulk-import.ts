@@ -81,10 +81,10 @@ bulkImportRoutes.post('/users', async (c) => {
 
 // Bulk import directorates
 const dirRowSchema = z.object({
-  name: z.string().min(1),
-  abbreviation: z.string().min(1),
+  name: z.string().min(1).max(255),
+  abbreviation: z.string().min(1).max(255),
   type: z.enum(['directorate', 'secretariat', 'unit']),
-  rooms: z.string().optional(),
+  rooms: z.string().max(255).optional(),
 });
 
 bulkImportRoutes.post('/directorates', async (c) => {
@@ -93,6 +93,9 @@ bulkImportRoutes.post('/directorates', async (c) => {
   const body = await c.req.json() as { rows: unknown[] };
   if (!Array.isArray(body.rows) || body.rows.length === 0) {
     return error(c, 'EMPTY', 'No rows to import', 400);
+  }
+  if (body.rows.length > 200) {
+    return error(c, 'TOO_MANY', 'Maximum 200 rows per import', 400);
   }
 
   let imported = 0;
@@ -133,12 +136,12 @@ bulkImportRoutes.post('/directorates', async (c) => {
 
 // Bulk import officers
 const officerRowSchema = z.object({
-  name: z.string().min(1),
-  title: z.string().optional(),
-  directorate_code: z.string().min(1),
-  email: z.string().email().optional().or(z.literal('')),
-  phone: z.string().optional(),
-  office_number: z.string().optional(),
+  name: z.string().min(1).max(255),
+  title: z.string().max(255).optional(),
+  directorate_code: z.string().min(1).max(255),
+  email: z.string().email().max(255).optional().or(z.literal('')),
+  phone: z.string().max(255).optional(),
+  office_number: z.string().max(255).optional(),
 });
 
 bulkImportRoutes.post('/officers', async (c) => {
@@ -147,6 +150,9 @@ bulkImportRoutes.post('/officers', async (c) => {
   const body = await c.req.json() as { rows: unknown[] };
   if (!Array.isArray(body.rows) || body.rows.length === 0) {
     return error(c, 'EMPTY', 'No rows to import', 400);
+  }
+  if (body.rows.length > 200) {
+    return error(c, 'TOO_MANY', 'Maximum 200 rows per import', 400);
   }
 
   let imported = 0;
