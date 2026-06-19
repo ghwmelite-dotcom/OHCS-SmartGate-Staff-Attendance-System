@@ -69,6 +69,8 @@ visitorRoutes.get('/:id', async (c) => {
 });
 
 visitorRoutes.post('/', zValidator('json', CreateVisitorSchema), async (c) => {
+  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist');
+  if (blocked) return blocked;
   const body = c.req.valid('json');
   const id = crypto.randomUUID().replace(/-/g, '');
 
@@ -82,6 +84,8 @@ visitorRoutes.post('/', zValidator('json', CreateVisitorSchema), async (c) => {
 });
 
 visitorRoutes.put('/:id', zValidator('json', UpdateVisitorSchema), async (c) => {
+  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist');
+  if (blocked) return blocked;
   const id = c.req.param('id');
   const body = c.req.valid('json');
 
