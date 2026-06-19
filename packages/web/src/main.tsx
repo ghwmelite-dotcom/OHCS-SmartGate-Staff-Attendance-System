@@ -4,11 +4,20 @@ import { App } from './App';
 import './styles/tokens.css';
 import { useInstallStore } from './stores/install';
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>
-);
+// The API is Worker-routed first-party only on the branded domain. If this app is
+// opened from the default *.pages.dev host (e.g. a stale bookmark), /api/* would hit
+// the Pages origin (no Worker route) and silently fail — so bounce to the branded
+// domain, preserving the path/query/hash. Skip render to avoid a flash of broken UI.
+const onPagesDev = location.hostname.endsWith('.pages.dev');
+if (onPagesDev) {
+  location.replace(`https://smartgate.ohcsghana.org${location.pathname}${location.search}${location.hash}`);
+} else {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>
+  );
+}
 
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
