@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import type { Env, SessionData } from '../types';
@@ -125,8 +125,8 @@ attendanceRoutes.get('/records', async (c) => {
                     d.abbreviation as directorate_abbr,
                     ci.timestamp as clock_in_time, co.timestamp as clock_out_time,
                     ci.photo_url as clock_in_photo,
-                    ci.prompt_value as clock_in_prompt, ci.reauth_method as clock_in_reauth_method,
-                    co.prompt_value as clock_out_prompt, co.reauth_method as clock_out_reauth_method,
+                    ci.reauth_method as clock_in_reauth_method,
+                    co.reauth_method as clock_out_reauth_method,
                     ci.liveness_decision as liveness_decision,
                     ci.liveness_signature as liveness_signature,
                     CASE WHEN TIME(ci.timestamp) > ? THEN 1 ELSE 0 END as is_late,
@@ -269,14 +269,51 @@ attendanceRoutes.get('/leave', async (c) => {
   return success(c, results.results ?? []);
 });
 
+/**
+ * Shared decision guard for leave approve/reject:
+ *  - existence: 404 if no such request
+ *  - self-approval: 403 if the approver is the request owner
+ *  - state: 409 if the request is no longer pending (already decided)
+ * The UPDATE is scoped `WHERE id = ? AND status = 'pending'` and we re-check
+ * meta.changes so two concurrent decisions can't both succeed.
+ * leave_requests has `approved_by` (per schema) but NO decided_at column, so we
+ * only record approved_by. Returns a Response on rejection, or null to proceed.
+ */
+async function guardLeaveDecision(
+  c: Context<{ Bindings: Env; Variables: { session: SessionData } }>,
+  id: string,
+  approverId: string,
+): Promise<Response | null> {
+  const existing = await c.env.DB.prepare(
+    'SELECT id, user_id, status FROM leave_requests WHERE id = ?'
+  ).bind(id).first<{ id: string; user_id: string; status: string }>();
+
+  if (!existing) return error(c, 'NOT_FOUND', 'Leave request not found', 404);
+  if (existing.user_id === approverId) {
+    return error(c, 'SELF_APPROVAL', 'You cannot decide on your own leave request', 403);
+  }
+  if (existing.status !== 'pending') {
+    return error(c, 'ALREADY_DECIDED', `Leave request is already ${existing.status}`, 409);
+  }
+  return null;
+}
+
 attendanceRoutes.post('/leave/:id/approve', async (c) => {
   if (!requireAdmin(c)) return error(c, 'FORBIDDEN', 'Admin access required', 403);
   const id = c.req.param('id');
   const session = c.get('session');
 
-  await c.env.DB.prepare(
-    "UPDATE leave_requests SET status = 'approved', approved_by = ? WHERE id = ?"
+  const guard = await guardLeaveDecision(c, id, session.userId);
+  if (guard) return guard;
+
+  const result = await c.env.DB.prepare(
+    "UPDATE leave_requests SET status = 'approved', approved_by = ? WHERE id = ? AND status = 'pending'"
   ).bind(session.userId, id).run();
+
+  // Lost the race to a concurrent decision between the guard read and this write.
+  if ((result.meta?.changes ?? 0) === 0) {
+    return error(c, 'ALREADY_DECIDED', 'Leave request has already been decided', 409);
+  }
 
   return success(c, { message: 'Leave approved' });
 });
@@ -286,9 +323,16 @@ attendanceRoutes.post('/leave/:id/reject', async (c) => {
   const id = c.req.param('id');
   const session = c.get('session');
 
-  await c.env.DB.prepare(
-    "UPDATE leave_requests SET status = 'rejected', approved_by = ? WHERE id = ?"
+  const guard = await guardLeaveDecision(c, id, session.userId);
+  if (guard) return guard;
+
+  const result = await c.env.DB.prepare(
+    "UPDATE leave_requests SET status = 'rejected', approved_by = ? WHERE id = ? AND status = 'pending'"
   ).bind(session.userId, id).run();
+
+  if ((result.meta?.changes ?? 0) === 0) {
+    return error(c, 'ALREADY_DECIDED', 'Leave request has already been decided', 409);
+  }
 
   return success(c, { message: 'Leave rejected' });
 });
