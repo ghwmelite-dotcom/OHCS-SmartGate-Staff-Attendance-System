@@ -113,14 +113,14 @@ userRoutes.put('/:id', zValidator('json', updateUserSchema), async (c) => {
   ).bind(id).first<{ id: string; user_type: string }>();
   if (!existing) return notFound(c, 'User');
 
-  // NSS personnel are not eligible for admin roles. Block any role change on
-  // NSS users that would land outside of plain 'staff'.
+  // Service personnel (NSS/Intern) are not eligible for admin roles. Block any role
+  // change on those users that would land outside of plain 'staff'.
   if (
     body.role !== undefined &&
     body.role !== 'staff' &&
     existing.user_type === 'nss'
   ) {
-    return error(c, 'NSS_NOT_PROMOTABLE', 'NSS personnel cannot be promoted to admin roles', 400);
+    return error(c, 'NSS_NOT_PROMOTABLE', 'Service personnel (NSS/Intern) cannot be promoted to an admin role', 400);
   }
 
   const fields: string[] = [];

@@ -27,7 +27,9 @@ interface AuthState {
 
 function identifierBody(identifier: Identifier): Record<string, string> {
   const value = identifier.value.toUpperCase();
-  return identifier.kind === 'staff_id' ? { staff_id: value } : { nss_number: value };
+  if (identifier.kind === 'staff_id') return { staff_id: value };
+  if (identifier.kind === 'nss_number') return { nss_number: value };
+  return { intern_code: value };
 }
 
 export const useAuthStore = create<AuthState>((set) => ({

@@ -13,7 +13,7 @@ function requireAdmin(c: { get: (key: 'session') => SessionData }) {
   return role === 'superadmin' || role === 'admin';
 }
 
-type UserTypeSegment = 'staff' | 'nss' | 'all';
+type UserTypeSegment = 'staff' | 'nss' | 'intern' | 'all';
 
 /**
  * Parse the optional ?user_type query into a normalised segment.
@@ -21,17 +21,32 @@ type UserTypeSegment = 'staff' | 'nss' | 'all';
  * don't pass the param.
  */
 function parseUserTypeSegment(raw: string | undefined): UserTypeSegment {
-  if (raw === 'nss' || raw === 'all') return raw;
+  if (raw === 'nss' || raw === 'intern' || raw === 'all') return raw;
   return 'staff';
 }
 
 /**
- * Append a user_type filter clause to existing SQL conditions.
- * Returns the SQL fragment (already prefixed with AND when needed) and the bind value (if any).
+ * Build the user_type filter for a population query over the `users` table,
+ * for a given table alias. Interns share user_type='nss' and are distinguished
+ * by a non-null intern_code:
+ *   staff  → user_type = 'staff'
+ *   nss    → real NSS only   → user_type = 'nss' AND intern_code IS NULL
+ *   intern → interns only    → user_type = 'nss' AND intern_code IS NOT NULL
+ *   all    → no filter
+ * Returns a fixed clause string (no user input interpolated) — the caller binds NO params.
  */
-function userTypeWhereClause(segment: UserTypeSegment): { clause: string; param?: string } {
-  if (segment === 'all') return { clause: '' };
-  return { clause: 'AND u.user_type = ?', param: segment };
+function userTypeClause(segment: UserTypeSegment, alias: string): string {
+  switch (segment) {
+    case 'staff':
+      return `${alias}.user_type = 'staff'`;
+    case 'nss':
+      return `${alias}.user_type = 'nss' AND ${alias}.intern_code IS NULL`;
+    case 'intern':
+      return `${alias}.user_type = 'nss' AND ${alias}.intern_code IS NOT NULL`;
+    case 'all':
+    default:
+      return '';
+  }
 }
 
 // Today's attendance overview
@@ -44,41 +59,41 @@ attendanceRoutes.get('/today', async (c) => {
   const endAt = toSqlTime(settings.work_end_time);
 
   // user_type filter on the population (total_staff) and on the joined users for clock counts.
-  const userTypeUserSql = segment === 'all' ? '' : 'AND user_type = ?';
-  const totalStaffParams = segment === 'all' ? [] : [segment];
+  // Fixed clause strings only — no user input is interpolated/bound.
+  const populationClause = userTypeClause(segment, 'users');
+  const userTypeUserSql = populationClause ? `AND ${populationClause}` : '';
 
   // For clock counts we must join clock_records to users to filter by user_type.
-  const userTypeJoinSql = segment === 'all'
-    ? ''
-    : `AND EXISTS (SELECT 1 FROM users u WHERE u.id = cr.user_id AND u.user_type = ?)`;
-  const userTypeJoinParams = segment === 'all' ? [] : [segment];
+  const existsClause = userTypeClause(segment, 'u');
+  const userTypeJoinSql = existsClause
+    ? `AND EXISTS (SELECT 1 FROM users u WHERE u.id = cr.user_id AND ${existsClause})`
+    : '';
 
   const [totalStaff, clockedIn, clockedOut, lateArrivals, earlyDepartures] = await Promise.all([
     c.env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE is_active = 1 ${userTypeUserSql}`)
-      .bind(...totalStaffParams)
       .first<{ count: number }>(),
 
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
        WHERE cr.type = 'clock_in' AND DATE(cr.timestamp) = ? ${userTypeJoinSql}`
-    ).bind(today, ...userTypeJoinParams).first<{ count: number }>(),
+    ).bind(today).first<{ count: number }>(),
 
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
        WHERE cr.type = 'clock_out' AND DATE(cr.timestamp) = ? ${userTypeJoinSql}`
-    ).bind(today, ...userTypeJoinParams).first<{ count: number }>(),
+    ).bind(today).first<{ count: number }>(),
 
     // Late = clocked in after configured late threshold
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
        WHERE cr.type = 'clock_in' AND DATE(cr.timestamp) = ? AND TIME(cr.timestamp) > ? ${userTypeJoinSql}`
-    ).bind(today, lateAfter, ...userTypeJoinParams).first<{ count: number }>(),
+    ).bind(today, lateAfter).first<{ count: number }>(),
 
     // Early departure = clocked out before work_end_time
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
        WHERE cr.type = 'clock_out' AND DATE(cr.timestamp) = ? AND TIME(cr.timestamp) < ? ${userTypeJoinSql}`
-    ).bind(today, endAt, ...userTypeJoinParams).first<{ count: number }>(),
+    ).bind(today, endAt).first<{ count: number }>(),
   ]);
 
   const total = totalStaff?.count ?? 0;
@@ -124,10 +139,9 @@ attendanceRoutes.get('/records', async (c) => {
              WHERE u.is_active = 1`;
   const params: unknown[] = [lateAfter, endAt, date, date];
 
-  const userTypeWhere = userTypeWhereClause(segment);
-  if (userTypeWhere.clause) {
-    sql += ` ${userTypeWhere.clause}`;
-    params.push(userTypeWhere.param!);
+  const recordsClause = userTypeClause(segment, 'u');
+  if (recordsClause) {
+    sql += ` AND ${recordsClause}`;
   }
 
   if (directorateId) {
@@ -151,9 +165,10 @@ attendanceRoutes.get('/by-directorate', async (c) => {
   const lateAfter = toSqlTime(settings.late_threshold_time);
 
   // Filter the user join itself by user_type so directorate counts match the segment.
-  const userTypeJoin = segment === 'all' ? '' : 'AND u.user_type = ?';
+  // Fixed clause string only — no user input is bound.
+  const byDirClause = userTypeClause(segment, 'u');
+  const userTypeJoin = byDirClause ? `AND ${byDirClause}` : '';
   const params: unknown[] = [lateAfter];
-  if (segment !== 'all') params.push(segment);
   params.push(date);
 
   const results = await c.env.DB.prepare(

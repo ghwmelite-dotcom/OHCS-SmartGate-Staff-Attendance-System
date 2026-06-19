@@ -7,6 +7,12 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { toast } from '@/stores/toast';
 import {
+  InternRegistrationFields,
+  emptyInternForm,
+  type InternFormValues,
+  type InternFieldErrors,
+} from './InternRegistrationFields';
+import {
   X, GraduationCap, FileSpreadsheet, Download, Upload, CheckCircle2,
   AlertCircle, Copy, KeyRound, Loader2,
 } from 'lucide-react';
@@ -33,6 +39,26 @@ interface NssUserResponse {
 
 interface CreateResponse {
   user: NssUserResponse;
+  initial_pin: string;
+}
+
+interface InternUserResponse {
+  id: string;
+  name: string;
+  email: string;
+  intern_code: string;
+  nss_start_date: string;
+  nss_end_date: string;
+  directorate_id: string;
+  directorate_abbr: string | null;
+  institution: string | null;
+  programme: string | null;
+  supervisor_user_id: string | null;
+  grade: string | null;
+}
+
+interface InternCreateResponse {
+  user: InternUserResponse;
   initial_pin: string;
 }
 
@@ -110,6 +136,7 @@ interface Props {
 
 export function NssRegistrationModal({ onClose }: Props) {
   const [tab, setTab] = useState<'single' | 'bulk'>('single');
+  const [regType, setRegType] = useState<'nss' | 'intern'>('nss');
 
   return (
     <div
@@ -131,9 +158,11 @@ export function NssRegistrationModal({ onClose }: Props) {
             </div>
             <div>
               <h3 className="text-lg font-bold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
-                Register NSS Personnel
+                {regType === 'intern' ? 'Register Intern' : 'Register NSS Personnel'}
               </h3>
-              <p className="text-[12px] text-muted">National Service onboarding</p>
+              <p className="text-[12px] text-muted">
+                {regType === 'intern' ? 'Internship placement onboarding' : 'National Service onboarding'}
+              </p>
             </div>
           </div>
           <button
@@ -145,18 +174,51 @@ export function NssRegistrationModal({ onClose }: Props) {
           </button>
         </div>
 
+        {/* Type toggle */}
+        <div className="flex items-center gap-1 px-6 pt-4">
+          <span className="text-[11px] font-semibold text-muted uppercase tracking-wide mr-1">Type</span>
+          <div className="flex items-center gap-1 bg-background rounded-lg border border-border p-1">
+            {(['nss', 'intern'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => {
+                  setRegType(t);
+                  if (t === 'intern') setTab('single');
+                }}
+                className={cn(
+                  'h-8 px-3.5 rounded-md text-[12px] font-medium transition-all',
+                  regType === t
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-muted hover:text-foreground',
+                )}
+              >
+                {t === 'nss' ? 'NSS' : 'Intern'}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Tabs */}
-        <div className="flex gap-1 px-6 pt-4">
+        <div className="flex gap-1 px-6 pt-3">
           <TabButton active={tab === 'single'} onClick={() => setTab('single')}>
             Register One
           </TabButton>
-          <TabButton active={tab === 'bulk'} onClick={() => setTab('bulk')}>
-            Bulk Import (CSV)
-          </TabButton>
+          {regType === 'nss' && (
+            <TabButton active={tab === 'bulk'} onClick={() => setTab('bulk')}>
+              Bulk Import (CSV)
+            </TabButton>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {tab === 'single' ? <SingleTab onDone={onClose} /> : <BulkTab />}
+          {tab === 'single' ? (
+            regType === 'intern'
+              ? <InternSingleTab onDone={onClose} />
+              : <SingleTab onDone={onClose} />
+          ) : (
+            <BulkTab />
+          )}
         </div>
       </div>
     </div>
@@ -349,6 +411,142 @@ function SingleTab({ onDone }: { onDone: () => void }) {
             <GraduationCap className="h-4 w-4" />
           )}
           {mutation.isPending ? 'Registering…' : 'Register NSS'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/* ---- Single intern registration ---- */
+
+function validateInternForm(v: InternFormValues): InternFieldErrors {
+  const errors: InternFieldErrors = {};
+  if (!v.name.trim()) errors.name = 'Name is required';
+  if (!v.email.trim()) errors.email = 'Email is required';
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email)) errors.email = 'Invalid email';
+  if (!v.directorate_id) errors.directorate_id = 'Select a directorate';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v.nss_start_date)) errors.nss_start_date = 'Start date is required';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v.nss_end_date)) errors.nss_end_date = 'End date is required';
+  else if (
+    /^\d{4}-\d{2}-\d{2}$/.test(v.nss_start_date) &&
+    v.nss_end_date <= v.nss_start_date
+  ) {
+    errors.nss_end_date = 'End date must be after start date';
+  }
+  return errors;
+}
+
+function InternSingleTab({ onDone }: { onDone: () => void }) {
+  const qc = useQueryClient();
+  const [values, setValues] = useState<InternFormValues>(emptyInternForm);
+  const [errors, setErrors] = useState<InternFieldErrors>({});
+  const [pinResult, setPinResult] = useState<InternCreateResponse | null>(null);
+
+  function setField<K extends keyof InternFormValues>(field: K, value: InternFormValues[K]) {
+    setValues((prev) => ({ ...prev, [field]: value }));
+    setErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
+  }
+
+  const mutation = useMutation({
+    mutationFn: (v: InternFormValues) => {
+      const payload = {
+        name: v.name.trim(),
+        email: v.email.trim(),
+        institution: v.institution.trim() || undefined,
+        programme: v.programme.trim() || undefined,
+        supervisor_user_id: v.supervisor_user_id || undefined,
+        directorate_id: v.directorate_id,
+        nss_start_date: v.nss_start_date,
+        nss_end_date: v.nss_end_date,
+        grade: v.grade.trim() || undefined,
+      };
+      return api.post<InternCreateResponse>('/admin/interns', payload);
+    },
+    onSuccess: (res) => {
+      if (res.data) {
+        setPinResult(res.data);
+        toast.success('Intern registered');
+        qc.invalidateQueries({ queryKey: ['users'] });
+        qc.invalidateQueries({ queryKey: ['nss-users'] });
+      }
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Registration failed');
+    },
+  });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const v = validateInternForm(values);
+    setErrors(v);
+    if (Object.keys(v).some((k) => v[k as keyof InternFieldErrors])) return;
+    mutation.mutate(values);
+  }
+
+  if (pinResult) {
+    return (
+      <div className="p-6 space-y-5">
+        <PinSuccessCard
+          title={pinResult.user.name}
+          subtitle={pinResult.user.email}
+          pin={pinResult.initial_pin}
+          internCode={pinResult.user.intern_code}
+        />
+        <div className="flex items-center justify-end gap-3">
+          <button
+            onClick={() => {
+              setPinResult(null);
+              setValues(emptyInternForm);
+              setErrors({});
+            }}
+            className="h-10 px-5 text-[13px] font-medium text-muted hover:text-foreground transition-colors"
+          >
+            Register Another
+          </button>
+          <button
+            onClick={onDone}
+            className="inline-flex items-center gap-2 h-10 px-5 bg-primary text-white text-[13px] font-semibold rounded-xl hover:bg-primary-light transition-all shadow-sm"
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            I've recorded this — close
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="p-6 space-y-4">
+      <InternRegistrationFields values={values} errors={errors} onChange={setField} />
+
+      {mutation.isError && (
+        <div className="flex items-start gap-2 p-3 bg-danger/5 border border-danger/20 rounded-xl">
+          <AlertCircle className="h-4 w-4 text-danger shrink-0 mt-0.5" />
+          <p className="text-[13px] text-danger">
+            {mutation.error instanceof Error ? mutation.error.message : 'Registration failed'}
+          </p>
+        </div>
+      )}
+
+      <div className="flex items-center justify-end gap-3 pt-2">
+        <button
+          type="button"
+          onClick={onDone}
+          className="h-11 px-5 text-[14px] text-muted hover:text-foreground transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={mutation.isPending}
+          className="inline-flex items-center gap-2 h-11 px-6 bg-primary text-white text-[14px] font-semibold rounded-xl hover:bg-primary-light transition-all disabled:opacity-50 shadow-lg shadow-primary/15"
+        >
+          {mutation.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <GraduationCap className="h-4 w-4" />
+          )}
+          {mutation.isPending ? 'Registering…' : 'Register Intern'}
         </button>
       </div>
     </form>
@@ -569,7 +767,9 @@ function BulkTab() {
 
 /* ---- Reusable bits ---- */
 
-function PinSuccessCard({ title, subtitle, pin }: { title: string; subtitle: string; pin: string }) {
+function PinSuccessCard({ title, subtitle, pin, internCode }: {
+  title: string; subtitle: string; pin: string; internCode?: string;
+}) {
   return (
     <div className="bg-surface rounded-2xl border border-success/30 overflow-hidden">
       <div className="h-[2px]" style={{ background: 'linear-gradient(90deg, #2E7D5B, #5BA77B 50%, #2E7D5B)' }} />
@@ -585,6 +785,24 @@ function PinSuccessCard({ title, subtitle, pin }: { title: string; subtitle: str
             <p className="text-[12px] font-mono text-muted">{subtitle}</p>
           </div>
         </div>
+        {internCode && (
+          <div className="rounded-xl bg-accent/5 border border-accent/30 p-4">
+            <p className="text-[11px] font-semibold text-accent-warm uppercase tracking-wide mb-2">
+              Intern code — the intern uses this to sign in
+            </p>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[20px] font-mono font-bold tracking-wide text-foreground">{internCode}</span>
+              <button
+                type="button"
+                onClick={() => copy(internCode)}
+                className="inline-flex items-center gap-1.5 h-9 px-3 text-[12px] font-semibold rounded-lg bg-accent/10 text-accent-warm hover:bg-accent/15 transition-all"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </button>
+            </div>
+          </div>
+        )}
         <div className="rounded-xl bg-background border border-border p-4">
           <p className="text-[11px] font-semibold text-muted uppercase tracking-wide mb-2">
             Initial PIN — shown once

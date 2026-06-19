@@ -27,6 +27,12 @@ interface NssListRow {
   directorate_abbr: string | null;
   grade: string | null;
   is_active: number;
+  user_type: string;
+  intern_code: string | null;
+  institution: string | null;
+  programme: string | null;
+  supervisor_user_id: string | null;
+  supervisor_name: string | null;
 }
 
 interface NssTodayRow {
@@ -38,14 +44,25 @@ interface NssTodayRow {
   clock_in_at: string | null;
   clock_out_at: string | null;
   is_late: number;
+  user_type: string;
+  intern_code: string | null;
 }
 
 type StatusFilter = 'all' | 'active' | 'expiring' | 'ended';
+type TypeFilter = 'all' | 'nss' | 'intern';
 
 /* ---- Helpers ---- */
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+// Type-aware copy for the header and banners.
+function typeTitle(t: TypeFilter): string {
+  return t === 'intern' ? 'Interns' : t === 'nss' ? 'NSS Personnel' : 'NSS & Interns';
+}
+function typeNoun(t: TypeFilter): string {
+  return t === 'intern' ? 'interns' : t === 'nss' ? 'NSS personnel' : 'service personnel';
 }
 
 function daysUntil(iso: string | null): number | null {
@@ -63,6 +80,7 @@ export function NssTab() {
   const currentUser = useAuthStore(s => s.user);
   const canRunEos = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
   const [status, setStatus] = useState<StatusFilter>('active');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [directorateId, setDirectorateId] = useState('');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -98,8 +116,8 @@ export function NssTab() {
   });
   const directorates = dirsData?.data ?? [];
 
-  // Filtered list (status + search + directorate)
-  const listQueryKey = ['nss-users', status, directorateId, debouncedSearch] as const;
+  // Filtered list (status + search + directorate + type)
+  const listQueryKey = ['nss-users', status, directorateId, debouncedSearch, typeFilter] as const;
   const { data: listData, isLoading: listLoading } = useQuery({
     queryKey: listQueryKey,
     queryFn: () => {
@@ -107,15 +125,21 @@ export function NssTab() {
       params.set('status', status);
       if (directorateId) params.set('directorate_id', directorateId);
       if (debouncedSearch) params.set('q', debouncedSearch);
+      if (typeFilter !== 'all') params.set('type', typeFilter);
       return api.get<NssListRow[]>(`/admin/nss?${params.toString()}`);
     },
   });
   const list = listData?.data ?? [];
 
-  // Today board (always returns active NSS)
+  // Today board (always returns active NSS & interns)
   const { data: todayData } = useQuery({
-    queryKey: ['nss-today'],
-    queryFn: () => api.get<NssTodayRow[]>('/admin/nss/today'),
+    queryKey: ['nss-today', typeFilter],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (typeFilter !== 'all') params.set('type', typeFilter);
+      const qs = params.toString();
+      return api.get<NssTodayRow[]>(`/admin/nss/today${qs ? `?${qs}` : ''}`);
+    },
     refetchInterval: 60_000,
   });
   const todayRows = todayData?.data ?? [];
@@ -222,7 +246,7 @@ export function NssTab() {
       <div className="flex flex-wrap items-start justify-between gap-3 animate-fade-in-up">
         <div>
           <h2 className="text-[20px] font-bold text-foreground tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
-            NSS Personnel
+            {typeTitle(typeFilter)}
           </h2>
           <p className="text-[13px] text-muted mt-0.5">
             Monitored centrally by F&amp;A Directorate
@@ -241,7 +265,7 @@ export function NssTab() {
             className="inline-flex items-center gap-2 h-11 px-5 bg-primary text-white text-[14px] font-semibold rounded-xl hover:bg-primary-light transition-all shadow-lg shadow-primary/15 active:scale-[0.98]"
           >
             <GraduationCap className="h-4.5 w-4.5" />
-            Register NSS
+            Register
           </button>
         </div>
       </div>
@@ -263,7 +287,7 @@ export function NssTab() {
             </div>
             <div>
               <p className="text-[14px] font-semibold text-foreground">
-                {endingIn14.length} NSS personnel ending within 14 days
+                {endingIn14.length} {typeNoun(typeFilter)} ending within 14 days
               </p>
               <p className="text-[12px] text-muted">
                 Plan handover, certificate generation, and PIN deactivation.
@@ -309,21 +333,43 @@ export function NssTab() {
 
       {/* Filter row */}
       <div className="flex flex-wrap items-center justify-between gap-3 animate-fade-in-up stagger-2">
-        <div className="flex items-center gap-1 bg-surface rounded-xl border border-border p-1">
-          {(['all', 'active', 'expiring', 'ended'] as StatusFilter[]).map(s => (
-            <button
-              key={s}
-              onClick={() => setStatus(s)}
-              className={cn(
-                'h-9 px-4 rounded-lg text-[13px] font-medium transition-all capitalize',
-                status === s
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-muted hover:text-foreground'
-              )}
-            >
-              {s}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1 bg-surface rounded-xl border border-border p-1">
+            {(['all', 'active', 'expiring', 'ended'] as StatusFilter[]).map(s => (
+              <button
+                key={s}
+                onClick={() => setStatus(s)}
+                className={cn(
+                  'h-9 px-4 rounded-lg text-[13px] font-medium transition-all capitalize',
+                  status === s
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-muted hover:text-foreground'
+                )}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 bg-surface rounded-xl border border-border p-1">
+            {([
+              { value: 'all', label: 'All' },
+              { value: 'nss', label: 'NSS' },
+              { value: 'intern', label: 'Interns' },
+            ] as { value: TypeFilter; label: string }[]).map(t => (
+              <button
+                key={t.value}
+                onClick={() => setTypeFilter(t.value)}
+                className={cn(
+                  'h-9 px-4 rounded-lg text-[13px] font-medium transition-all',
+                  typeFilter === t.value
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-muted hover:text-foreground'
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -376,7 +422,7 @@ export function NssTab() {
               Today&apos;s board
             </h3>
             <p className="text-[13px] text-muted">
-              {list.length} NSS personnel · {status} filter
+              {list.length} {typeFilter === 'intern' ? 'interns' : typeFilter === 'nss' ? 'NSS personnel' : 'personnel'} · {status} filter
             </p>
           </div>
         </div>
@@ -399,6 +445,7 @@ export function NssTab() {
               <thead>
                 <tr className="border-b border-border bg-background/50">
                   <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Personnel</th>
+                  <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Type</th>
                   <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Dir</th>
                   <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Service end</th>
                   <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Today</th>
@@ -424,9 +471,14 @@ export function NssTab() {
                             >
                               {user.name}
                             </button>
-                            <p className="text-[12px] font-mono text-muted truncate">{user.nss_number ?? '—'}</p>
+                            <p className="text-[12px] font-mono text-muted truncate">
+                              {user.intern_code != null ? (user.intern_code || '—') : (user.nss_number ?? '—')}
+                            </p>
                           </div>
                         </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <TypePill internCode={user.intern_code} />
                       </td>
                       <td className="px-6 py-4">
                         {user.directorate_abbr ? (
@@ -637,6 +689,18 @@ function TodayStatusCell({ row, active }: { row: NssTodayRow | undefined; active
   return (
     <span className="inline-flex items-center h-6 px-2.5 text-[11px] font-bold rounded-full bg-success/10 text-success">
       Clocked in {inTime}
+    </span>
+  );
+}
+
+function TypePill({ internCode }: { internCode: string | null }) {
+  const isIntern = internCode != null && internCode !== '';
+  return (
+    <span className={cn(
+      'inline-flex items-center h-6 px-2 text-[10px] font-bold rounded-lg',
+      isIntern ? 'bg-accent/10 text-accent-warm' : 'bg-success/10 text-success',
+    )}>
+      {isIntern ? 'Intern' : 'NSS'}
     </span>
   );
 }

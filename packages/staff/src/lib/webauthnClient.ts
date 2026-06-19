@@ -17,7 +17,7 @@ const LEGACY_LAST_STAFF_ID_KEY = 'ohcs.last_staff_id';
 // New key persists both the identifier kind and value so NSS users land back on the NSS tab.
 const LAST_IDENTIFIER_KEY = 'ohcs-staff-pwa.last-identifier';
 
-export type IdentifierKind = 'staff_id' | 'nss_number';
+export type IdentifierKind = 'staff_id' | 'nss_number' | 'intern_code';
 export interface Identifier { kind: IdentifierKind; value: string }
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
@@ -46,7 +46,7 @@ export function getLastIdentifier(): Identifier | null {
     if (raw) {
       const parsed = JSON.parse(raw) as { kind?: string; value?: string };
       if (
-        (parsed.kind === 'staff_id' || parsed.kind === 'nss_number') &&
+        (parsed.kind === 'staff_id' || parsed.kind === 'nss_number' || parsed.kind === 'intern_code') &&
         typeof parsed.value === 'string' &&
         parsed.value.length > 0
       ) {
@@ -165,7 +165,10 @@ export interface WebAuthnUser {
 export async function loginWithBiometric(identifier: Identifier): Promise<WebAuthnUser> {
   if (!browserSupportsWebAuthn()) throw new Error('Biometrics not supported on this browser');
   const value = identifier.value.toUpperCase();
-  const idBody = identifier.kind === 'staff_id' ? { staff_id: value } : { nss_number: value };
+  const idBody =
+    identifier.kind === 'staff_id'   ? { staff_id: value } :
+    identifier.kind === 'nss_number' ? { nss_number: value } :
+                                       { intern_code: value };
 
   const optsRes = await fetch(`${API_BASE}/api/auth/webauthn/login/options`, {
     method: 'POST', credentials: 'include', headers: authHeaders(),

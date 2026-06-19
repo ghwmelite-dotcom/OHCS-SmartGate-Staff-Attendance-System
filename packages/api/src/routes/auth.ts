@@ -90,23 +90,23 @@ const pinLoginSchema = z
   .object({
     staff_id: z.string().min(1).max(20).trim().optional(),
     nss_number: z.string().min(1).max(32).trim().optional(),
+    intern_code: z.string().min(1).max(64).trim().optional(),
     pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4–6 digits'),
     remember: z.boolean().optional(),
   })
   .refine(
-    (v) => (v.staff_id ? 1 : 0) + (v.nss_number ? 1 : 0) === 1,
-    { message: 'Provide exactly one of staff_id or nss_number' },
+    (v) => (v.staff_id ? 1 : 0) + (v.nss_number ? 1 : 0) + (v.intern_code ? 1 : 0) === 1,
+    { message: 'Provide exactly one of staff_id, nss_number or intern_code' },
   );
 
 authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
-  const { staff_id, nss_number, pin, remember } = c.req.valid('json');
+  const { staff_id, nss_number, intern_code, pin, remember } = c.req.valid('json');
   const ip = c.req.header('cf-connecting-ip') ?? 'unknown';
 
   // Normalize the supplied identifier and choose the lookup column. Disjoint queries —
   // never OR them so a malicious caller can't cross identifier types.
-  const isStaff = !!staff_id;
-  const rawId = (staff_id ?? nss_number ?? '').toUpperCase();
-  const lookupColumn = isStaff ? 'staff_id' : 'nss_number';
+  const rawId = (staff_id ?? nss_number ?? intern_code ?? '').toUpperCase();
+  const lookupColumn = staff_id ? 'staff_id' : nss_number ? 'nss_number' : 'intern_code';
 
   const rlId = await rateLimit(c.env, `pin:${rawId}`, 10, 300);
   const rlIp = await rateLimit(c.env, `pin-ip:${ip}`, 30, 300);

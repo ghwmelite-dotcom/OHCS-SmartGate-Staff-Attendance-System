@@ -21,20 +21,27 @@ const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
  * Generate a 6-digit numeric initial PIN using the Web Crypto RNG.
  * Range [100000, 999999] inclusive.
  */
-function generateInitialPin(): string {
+export function generateInitialPin(): string {
   const buf = new Uint32Array(1);
   crypto.getRandomValues(buf);
   const n = 100000 + (buf[0]! % 900000);
   return n.toString();
 }
 
-function isValidIsoDate(s: string): boolean {
+export function isValidIsoDate(s: string): boolean {
   if (!ISO_DATE_REGEX.test(s)) return false;
   const d = new Date(`${s}T00:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 
-interface NssUserRow {
+/** Resolve the optional ?type= filter into a SQL WHERE clause over service-personnel types. */
+export function personnelTypeWhere(typeParam: string | null | undefined): string {
+  if (typeParam === 'nss') return `u.user_type = 'nss' AND u.intern_code IS NULL`;
+  if (typeParam === 'intern') return `u.user_type = 'nss' AND u.intern_code IS NOT NULL`;
+  return `u.user_type = 'nss'`;
+}
+
+export interface NssUserRow {
   id: string;
   name: string;
   email: string;
@@ -46,6 +53,11 @@ interface NssUserRow {
   nss_number: string | null;
   nss_start_date: string | null;
   nss_end_date: string | null;
+  intern_code: string | null;
+  institution: string | null;
+  programme: string | null;
+  supervisor_user_id: string | null;
+  supervisor_name: string | null;
   directorate_id: string | null;
   directorate_abbr: string | null;
   pin_acknowledged: number;
@@ -54,9 +66,11 @@ interface NssUserRow {
   updated_at: string;
 }
 
-const NSS_SELECT_COLUMNS = `
+export const PERSONNEL_SELECT_COLUMNS = `
   u.id, u.name, u.email, u.staff_id, u.role, u.grade, u.is_active,
   u.user_type, u.nss_number, u.nss_start_date, u.nss_end_date,
+  u.intern_code, u.institution, u.programme, u.supervisor_user_id,
+  sup.name AS supervisor_name,
   u.directorate_id, d.abbreviation AS directorate_abbr,
   u.pin_acknowledged, u.last_login_at, u.created_at, u.updated_at
 `;
@@ -130,8 +144,10 @@ adminNssRoutes.post('/', zValidator('json', createNssSchema), async (c) => {
     .run();
 
   const user = await c.env.DB.prepare(
-    `SELECT ${NSS_SELECT_COLUMNS}
-     FROM users u LEFT JOIN directorates d ON u.directorate_id = d.id
+    `SELECT ${PERSONNEL_SELECT_COLUMNS}
+     FROM users u
+     LEFT JOIN directorates d ON u.directorate_id = d.id
+     LEFT JOIN users sup ON sup.id = u.supervisor_user_id
      WHERE u.id = ?`
   )
     .bind(id)
@@ -157,7 +173,7 @@ adminNssRoutes.get('/', async (c) => {
   const today = new Date().toISOString().slice(0, 10);
   const in30 = new Date(Date.now() + 30 * 86400 * 1000).toISOString().slice(0, 10);
 
-  const where: string[] = [`u.user_type = 'nss'`];
+  const where: string[] = [personnelTypeWhere(c.req.query('type'))];
   const params: unknown[] = [];
 
   if (directorateId) { where.push('u.directorate_id = ?'); params.push(directorateId); }
@@ -183,9 +199,10 @@ adminNssRoutes.get('/', async (c) => {
   }
 
   const sql = `
-    SELECT ${NSS_SELECT_COLUMNS}
+    SELECT ${PERSONNEL_SELECT_COLUMNS}
     FROM users u
     LEFT JOIN directorates d ON u.directorate_id = d.id
+    LEFT JOIN users sup ON sup.id = u.supervisor_user_id
     WHERE ${where.join(' AND ')}
     ORDER BY u.created_at DESC
     LIMIT ? OFFSET ?
@@ -206,6 +223,8 @@ adminNssRoutes.get('/', async (c) => {
 interface NssTodayRow {
   user_id: string;
   name: string;
+  user_type: string;
+  intern_code: string | null;
   nss_number: string | null;
   directorate_abbr: string | null;
   nss_end_date: string | null;
@@ -221,9 +240,10 @@ adminNssRoutes.get('/today', async (c) => {
   const today = new Date().toISOString().slice(0, 10);
   const settings = await getAppSettings(c.env);
   const lateAfter = toSqlTime(settings.late_threshold_time);
+  const typeClause = personnelTypeWhere(c.req.query('type'));
 
   const sql = `
-    SELECT u.id AS user_id, u.name, u.nss_number,
+    SELECT u.id AS user_id, u.name, u.user_type, u.intern_code, u.nss_number,
            d.abbreviation AS directorate_abbr,
            u.nss_end_date,
            ci.timestamp AS clock_in_at,
@@ -235,7 +255,7 @@ adminNssRoutes.get('/today', async (c) => {
       ON ci.user_id = u.id AND ci.type = 'clock_in' AND DATE(ci.timestamp) = ?
     LEFT JOIN clock_records co
       ON co.user_id = u.id AND co.type = 'clock_out' AND DATE(co.timestamp) = ?
-    WHERE u.user_type = 'nss'
+    WHERE ${typeClause}
       AND u.is_active = 1
       AND (u.nss_end_date IS NULL OR u.nss_end_date >= ?)
     ORDER BY u.name ASC
@@ -326,7 +346,8 @@ adminNssRoutes.get('/export', async (c) => {
 
   // Aggregate per-user clock activity inside the range.
   // We only count one clock-in per (user, day) for the totals.
-  const where: string[] = [`u.user_type = 'nss'`];
+  const typeClause = personnelTypeWhere(c.req.query('type'));
+  const where: string[] = [typeClause];
   const params: unknown[] = [];
 
   if (directorateId) {
@@ -338,7 +359,7 @@ adminNssRoutes.get('/export', async (c) => {
     WITH nss_clock_in_days AS (
       SELECT cr.user_id, DATE(cr.timestamp) AS d, MIN(TIME(cr.timestamp)) AS first_in
       FROM clock_records cr
-      INNER JOIN users u ON u.id = cr.user_id AND u.user_type = 'nss'
+      INNER JOIN users u ON u.id = cr.user_id AND ${typeClause}
       WHERE cr.type = 'clock_in'
         AND DATE(cr.timestamp) BETWEEN ? AND ?
       GROUP BY cr.user_id, DATE(cr.timestamp)
@@ -449,9 +470,9 @@ adminNssRoutes.get('/:id/activity', async (c) => {
     .bind(id)
     .first<{ id: string; user_type: string }>();
 
-  if (!existing) return notFound(c, 'NSS user');
+  if (!existing) return notFound(c, 'Personnel');
   if (existing.user_type !== 'nss') {
-    return error(c, 'NOT_NSS', 'Target user is not an NSS personnel', 400);
+    return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
 
   const settings = await getAppSettings(c.env);
@@ -495,14 +516,16 @@ adminNssRoutes.get('/:id', async (c) => {
 
   const id = c.req.param('id');
   const row = await c.env.DB.prepare(
-    `SELECT ${NSS_SELECT_COLUMNS}
-     FROM users u LEFT JOIN directorates d ON u.directorate_id = d.id
+    `SELECT ${PERSONNEL_SELECT_COLUMNS}
+     FROM users u
+     LEFT JOIN directorates d ON u.directorate_id = d.id
+     LEFT JOIN users sup ON sup.id = u.supervisor_user_id
      WHERE u.id = ? AND u.user_type = 'nss'`
   )
     .bind(id)
     .first<NssUserRow>();
 
-  if (!row) return notFound(c, 'NSS user');
+  if (!row) return notFound(c, 'Personnel');
   return success(c, row);
 });
 
@@ -517,6 +540,9 @@ const updateNssSchema = z.object({
   nss_start_date: z.string().refine(isValidIsoDate, 'nss_start_date must be ISO YYYY-MM-DD').optional(),
   nss_end_date: z.string().refine(isValidIsoDate, 'nss_end_date must be ISO YYYY-MM-DD').optional(),
   is_active: z.number().min(0).max(1).optional(),
+  institution: z.string().max(200).optional().or(z.literal('')),
+  programme: z.string().max(200).optional().or(z.literal('')),
+  supervisor_user_id: z.string().max(64).optional().or(z.literal('')),
 });
 
 adminNssRoutes.patch('/:id', zValidator('json', updateNssSchema), async (c) => {
@@ -532,9 +558,9 @@ adminNssRoutes.patch('/:id', zValidator('json', updateNssSchema), async (c) => {
     .bind(id)
     .first<{ id: string; user_type: string; nss_start_date: string | null; nss_end_date: string | null }>();
 
-  if (!existing) return notFound(c, 'NSS user');
+  if (!existing) return notFound(c, 'Personnel');
   if (existing.user_type !== 'nss') {
-    return error(c, 'NOT_NSS', 'Target user is not an NSS personnel', 400);
+    return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
 
   // Resolved final dates (after edits) — used to validate ordering.
@@ -551,6 +577,13 @@ adminNssRoutes.patch('/:id', zValidator('json', updateNssSchema), async (c) => {
     if (!dir) return error(c, 'INVALID_DIRECTORATE', 'directorate_id does not reference an existing directorate', 400);
   }
 
+  if (body.supervisor_user_id !== undefined && body.supervisor_user_id) {
+    const sup = await c.env.DB.prepare(`SELECT id FROM users WHERE id = ? AND user_type = 'staff'`)
+      .bind(body.supervisor_user_id)
+      .first();
+    if (!sup) return error(c, 'INVALID_SUPERVISOR', 'supervisor_user_id must reference an existing staff user', 400);
+  }
+
   const fields: string[] = [];
   const values: unknown[] = [];
 
@@ -560,6 +593,9 @@ adminNssRoutes.patch('/:id', zValidator('json', updateNssSchema), async (c) => {
   if (body.nss_start_date !== undefined) { fields.push('nss_start_date = ?'); values.push(body.nss_start_date); }
   if (body.nss_end_date !== undefined) { fields.push('nss_end_date = ?'); values.push(body.nss_end_date); }
   if (body.is_active !== undefined) { fields.push('is_active = ?'); values.push(body.is_active); }
+  if (body.institution !== undefined) { fields.push('institution = ?'); values.push(body.institution || null); }
+  if (body.programme !== undefined) { fields.push('programme = ?'); values.push(body.programme || null); }
+  if (body.supervisor_user_id !== undefined) { fields.push('supervisor_user_id = ?'); values.push(body.supervisor_user_id || null); }
 
   fields.push("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')");
 
@@ -569,8 +605,10 @@ adminNssRoutes.patch('/:id', zValidator('json', updateNssSchema), async (c) => {
   }
 
   const row = await c.env.DB.prepare(
-    `SELECT ${NSS_SELECT_COLUMNS}
-     FROM users u LEFT JOIN directorates d ON u.directorate_id = d.id
+    `SELECT ${PERSONNEL_SELECT_COLUMNS}
+     FROM users u
+     LEFT JOIN directorates d ON u.directorate_id = d.id
+     LEFT JOIN users sup ON sup.id = u.supervisor_user_id
      WHERE u.id = ?`
   )
     .bind(id)
@@ -594,9 +632,9 @@ adminNssRoutes.delete('/:id', async (c) => {
     .bind(id)
     .first<{ id: string; user_type: string }>();
 
-  if (!existing) return notFound(c, 'NSS user');
+  if (!existing) return notFound(c, 'Personnel');
   if (existing.user_type !== 'nss') {
-    return error(c, 'NOT_NSS', 'Target user is not an NSS personnel', 400);
+    return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
 
   await c.env.DB.prepare(
@@ -605,7 +643,7 @@ adminNssRoutes.delete('/:id', async (c) => {
     .bind(id)
     .run();
 
-  return success(c, { message: 'NSS user deactivated' });
+  return success(c, { message: 'Personnel deactivated' });
 });
 
 /* ------------------------------------------------------------------ */
@@ -623,9 +661,9 @@ adminNssRoutes.post('/:id/reset-pin', async (c) => {
     .bind(id)
     .first<{ id: string; user_type: string }>();
 
-  if (!existing) return notFound(c, 'NSS user');
+  if (!existing) return notFound(c, 'Personnel');
   if (existing.user_type !== 'nss') {
-    return error(c, 'NOT_NSS', 'Target user is not an NSS personnel', 400);
+    return error(c, 'NOT_PERSONNEL', 'Target user is not service personnel', 400);
   }
 
   const initialPin = generateInitialPin();

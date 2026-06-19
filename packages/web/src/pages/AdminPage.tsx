@@ -82,11 +82,11 @@ export function AdminPage() {
         { value: 'users', label: 'Users' },
         { value: 'org', label: 'Org Entities' },
         { value: 'attendance', label: 'Attendance' },
-        { value: 'nss', label: 'NSS' },
+        { value: 'nss', label: 'NSS & Interns' },
         { value: 'import', label: 'Bulk Import' },
       ];
     }
-    return [{ value: 'nss', label: 'NSS' }];
+    return [{ value: 'nss', label: 'NSS & Interns' }];
   }, [isSuperadmin]);
 
   // Admin defaults to NSS; superadmin defaults to ?tab= or 'users'.

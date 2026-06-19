@@ -18,7 +18,7 @@ const ADMIN_NAV_SUPER = [
 ];
 
 const ADMIN_NAV_ADMIN = [
-  { to: '/admin?tab=nss', icon: Settings, label: 'NSS Admin' },
+  { to: '/admin?tab=nss', icon: Settings, label: 'NSS & Interns' },
 ];
 
 interface SidebarProps {

@@ -25,6 +25,11 @@ interface NssDetail {
   staff_id: string | null;
   role: string;
   user_type: string;
+  intern_code: string | null;
+  institution: string | null;
+  programme: string | null;
+  supervisor_user_id: string | null;
+  supervisor_name: string | null;
   pin_acknowledged: number;
   last_login_at: string | null;
   created_at: string;
@@ -38,12 +43,21 @@ interface ActivityRow {
   is_late: number;
 }
 
+// Active staff returned by GET /admin/interns/supervisors (already filtered server-side).
+interface Supervisor {
+  id: string;
+  name: string;
+}
+
 const editSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   grade: z.string().max(100).optional().or(z.literal('')),
   directorate_id: z.string().min(1, 'Directorate is required'),
   nss_start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
   nss_end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
+  institution: z.string().max(150).optional().or(z.literal('')),
+  programme: z.string().max(150).optional().or(z.literal('')),
+  supervisor_user_id: z.string().optional().or(z.literal('')),
 }).refine(s => s.nss_end_date > s.nss_start_date, {
   message: 'End date must be after start date',
   path: ['nss_end_date'],
@@ -98,6 +112,9 @@ export function NssDetailModal({ userId, onClose, onChanged, onResetPin, onEndSe
             <p className="text-[14px] text-muted">Loading personnel…</p>
           </div>
         ) : (
+          (() => {
+          const isIntern = detail.intern_code != null && detail.intern_code !== '';
+          return (
           <>
             {/* Header */}
             <div className="flex items-start justify-between px-6 py-4 border-b border-border">
@@ -110,7 +127,15 @@ export function NssDetailModal({ userId, onClose, onChanged, onResetPin, onEndSe
                     {detail.name}
                   </h3>
                   <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                    <span className="text-[12px] font-mono text-muted">{detail.nss_number ?? '—'}</span>
+                    <span className={cn(
+                      'inline-flex items-center h-5 px-2 text-[10px] font-bold rounded-md',
+                      isIntern ? 'bg-accent/10 text-accent-warm' : 'bg-success/10 text-success',
+                    )}>
+                      {isIntern ? 'Intern' : 'NSS'}
+                    </span>
+                    <span className="text-[12px] font-mono text-muted">
+                      {isIntern ? (detail.intern_code || '—') : (detail.nss_number ?? '—')}
+                    </span>
                     {detail.directorate_abbr && (
                       <span className="inline-flex items-center h-5 px-2 text-[10px] font-bold bg-primary/8 text-primary rounded-md">
                         {detail.directorate_abbr}
@@ -138,6 +163,7 @@ export function NssDetailModal({ userId, onClose, onChanged, onResetPin, onEndSe
               <PostingProgress
                 start={detail.nss_start_date}
                 end={detail.nss_end_date}
+                isIntern={isIntern}
               />
 
               {/* Edit form */}
@@ -226,6 +252,8 @@ export function NssDetailModal({ userId, onClose, onChanged, onResetPin, onEndSe
               </button>
             </div>
           </>
+          );
+          })()
         )}
       </div>
     </div>
@@ -234,7 +262,7 @@ export function NssDetailModal({ userId, onClose, onChanged, onResetPin, onEndSe
 
 /* ---- Posting progress bar ---- */
 
-function PostingProgress({ start, end }: { start: string | null; end: string | null }) {
+function PostingProgress({ start, end, isIntern }: { start: string | null; end: string | null; isIntern?: boolean }) {
   const today = new Date().toISOString().slice(0, 10);
   const ts = (s: string) => new Date(s + 'T00:00:00Z').getTime();
 
@@ -262,7 +290,7 @@ function PostingProgress({ start, end }: { start: string | null; end: string | n
       <div className="flex items-center gap-2 mb-2">
         <Calendar className="h-4 w-4 text-primary" />
         <h4 className="text-[13px] font-bold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
-          Posting window
+          {isIntern ? 'Placement window' : 'Posting window'}
         </h4>
         <span className="text-[12px] text-muted">
           · {data.totalDays} days total
@@ -304,6 +332,8 @@ function EditForm({ detail, directorates, onSaved }: {
   directorates: Directorate[];
   onSaved: () => void;
 }) {
+  const isIntern = detail.intern_code != null && detail.intern_code !== '';
+
   const form = useForm<EditValues>({
     resolver: zodResolver(editSchema),
     defaultValues: {
@@ -312,6 +342,9 @@ function EditForm({ detail, directorates, onSaved }: {
       directorate_id: detail.directorate_id ?? '',
       nss_start_date: detail.nss_start_date ?? '',
       nss_end_date: detail.nss_end_date ?? '',
+      institution: detail.institution ?? '',
+      programme: detail.programme ?? '',
+      supervisor_user_id: detail.supervisor_user_id ?? '',
     },
   });
 
@@ -323,14 +356,59 @@ function EditForm({ detail, directorates, onSaved }: {
       directorate_id: detail.directorate_id ?? '',
       nss_start_date: detail.nss_start_date ?? '',
       nss_end_date: detail.nss_end_date ?? '',
+      institution: detail.institution ?? '',
+      programme: detail.programme ?? '',
+      supervisor_user_id: detail.supervisor_user_id ?? '',
     });
   }, [detail, form]);
+
+  const { data: supervisorsData } = useQuery({
+    queryKey: ['intern-supervisors'],
+    queryFn: () => api.get<Supervisor[]>('/admin/interns/supervisors'),
+    staleTime: 60_000,
+    enabled: isIntern,
+  });
+  // Ensure the intern's current supervisor is always selectable, even if they are
+  // no longer in the active-staff list (e.g. deactivated since assignment).
+  const supervisorOptions = useMemo<Supervisor[]>(() => {
+    const list = supervisorsData?.data ?? [];
+    if (
+      detail.supervisor_user_id &&
+      !list.some((s) => s.id === detail.supervisor_user_id)
+    ) {
+      return [
+        { id: detail.supervisor_user_id, name: detail.supervisor_name ?? '(current supervisor)' },
+        ...list,
+      ];
+    }
+    return list;
+  }, [supervisorsData, detail.supervisor_user_id, detail.supervisor_name]);
 
   // Backend exposes PATCH; the shared api client only has GET/POST/PUT/DELETE,
   // so we use fetch directly here to send PATCH /api/admin/nss/:id.
   const patchMutation = useMutation({
     mutationFn: async (values: EditValues) => {
-      const payload = { ...values, grade: values.grade || undefined };
+      const payload: Record<string, unknown> = {
+        name: values.name,
+        grade: values.grade || undefined,
+        directorate_id: values.directorate_id,
+        nss_start_date: values.nss_start_date,
+        nss_end_date: values.nss_end_date,
+      };
+      if (isIntern) {
+        // Only include intern fields that actually changed, so untouched fields
+        // (notably supervisor) are NOT clobbered to null by the PATCH.
+        const norm = (v: string | null | undefined) => ((v ?? '') === '' ? null : v);
+        if (norm(values.institution) !== norm(detail.institution)) {
+          payload.institution = norm(values.institution);
+        }
+        if (norm(values.programme) !== norm(detail.programme)) {
+          payload.programme = norm(values.programme);
+        }
+        if (norm(values.supervisor_user_id) !== norm(detail.supervisor_user_id)) {
+          payload.supervisor_user_id = norm(values.supervisor_user_id);
+        }
+      }
       const { API_BASE } = await import('@/lib/constants');
       const { getToken } = await import('@/lib/tokenStore');
       const token = getToken();
@@ -350,7 +428,7 @@ function EditForm({ detail, directorates, onSaved }: {
       return json.data;
     },
     onSuccess: () => {
-      toast.success('NSS personnel updated');
+      toast.success(isIntern ? 'Intern updated' : 'NSS personnel updated');
       onSaved();
     },
     onError: (err) => {
@@ -374,13 +452,13 @@ function EditForm({ detail, directorates, onSaved }: {
         <FormField label="Full Name" error={form.formState.errors.name?.message}>
           <input {...form.register('name')} className={inputCls} />
         </FormField>
-        <FormField label="NSS Number">
+        <FormField label={isIntern ? 'Intern Code' : 'NSS Number'}>
           <input
-            value={detail.nss_number ?? ''}
+            value={(isIntern ? detail.intern_code : detail.nss_number) ?? ''}
             readOnly
             className={cn(inputCls, 'bg-background-warm font-mono cursor-not-allowed')}
             aria-readonly="true"
-            title="NSS number cannot be changed"
+            title={isIntern ? 'Intern code cannot be changed' : 'NSS number cannot be changed'}
           />
         </FormField>
       </div>
@@ -408,13 +486,32 @@ function EditForm({ detail, directorates, onSaved }: {
             ))}
           </select>
         </FormField>
-        <FormField label="Service start" error={form.formState.errors.nss_start_date?.message}>
+        <FormField label={isIntern ? 'Placement start' : 'Service start'} error={form.formState.errors.nss_start_date?.message}>
           <input {...form.register('nss_start_date')} type="date" className={inputCls} />
         </FormField>
-        <FormField label="Service end" error={form.formState.errors.nss_end_date?.message}>
+        <FormField label={isIntern ? 'Placement end' : 'Service end'} error={form.formState.errors.nss_end_date?.message}>
           <input {...form.register('nss_end_date')} type="date" className={inputCls} />
         </FormField>
       </div>
+
+      {isIntern && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+          <FormField label="Institution" error={form.formState.errors.institution?.message}>
+            <input {...form.register('institution')} className={inputCls} placeholder="e.g. University of Ghana" />
+          </FormField>
+          <FormField label="Programme" error={form.formState.errors.programme?.message}>
+            <input {...form.register('programme')} className={inputCls} placeholder="e.g. BSc Computer Science" />
+          </FormField>
+          <FormField label="Supervisor">
+            <select {...form.register('supervisor_user_id')} className={inputCls}>
+              <option value="">No supervisor</option>
+              {supervisorOptions.map(u => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+          </FormField>
+        </div>
+      )}
 
       {patchMutation.isError && (
         <div className="flex items-start gap-2 p-3 mt-4 bg-danger/5 border border-danger/20 rounded-xl">

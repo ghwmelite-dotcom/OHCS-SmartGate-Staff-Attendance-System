@@ -50,6 +50,10 @@ export interface User {
   nss_number: string | null;
   nss_start_date: string | null;
   nss_end_date: string | null;
+  intern_code: string | null;
+  institution: string | null;
+  programme: string | null;
+  supervisor_user_id: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth';
-import { KeyRound, Fingerprint, Briefcase, GraduationCap } from 'lucide-react';
+import { KeyRound, Fingerprint, Briefcase, GraduationCap, BookUser } from 'lucide-react';
 import {
   getLastIdentifier,
   supportsPlatformAuthenticator,
@@ -10,11 +10,12 @@ import {
 
 const TAB_STORAGE_KEY = 'ohcs-staff-pwa.login-tab';
 
-type Tab = 'staff' | 'nss';
+type Tab = 'staff' | 'nss' | 'intern';
 
 const TAB_KIND: Record<Tab, IdentifierKind> = {
   staff: 'staff_id',
   nss: 'nss_number',
+  intern: 'intern_code',
 };
 
 const TAB_COPY: Record<Tab, { label: string; placeholder: string; helper: string }> = {
@@ -28,6 +29,11 @@ const TAB_COPY: Record<Tab, { label: string; placeholder: string; helper: string
     placeholder: 'e.g. NSSGUE8364724',
     helper: 'From your NSS posting letter',
   },
+  intern: {
+    label: 'Intern Code',
+    placeholder: 'e.g. OHCS-INT-2026-001',
+    helper: 'Issued by HR / F&A',
+  },
 };
 
 function readInitialTab(): Tab {
@@ -37,8 +43,9 @@ function readInitialTab(): Tab {
     const id = getLastIdentifier();
     if (id?.kind === 'nss_number') return 'nss';
     if (id?.kind === 'staff_id') return 'staff';
+    if (id?.kind === 'intern_code') return 'intern';
     const stored = localStorage.getItem(TAB_STORAGE_KEY);
-    if (stored === 'staff' || stored === 'nss') return stored;
+    if (stored === 'staff' || stored === 'nss' || stored === 'intern') return stored;
   } catch { /* ignore */ }
   return 'staff';
 }
@@ -49,6 +56,7 @@ export function LoginPage() {
   // Two independent inputs so swapping tabs doesn't lose what the user typed in the other.
   const [staffValue, setStaffValue] = useState(() => (last?.kind === 'staff_id' ? last.value : ''));
   const [nssValue, setNssValue] = useState(() => (last?.kind === 'nss_number' ? last.value : ''));
+  const [internValue, setInternValue] = useState(() => (last?.kind === 'intern_code' ? last.value : ''));
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -70,10 +78,11 @@ export function LoginPage() {
   }, [tab]);
 
   const copy = TAB_COPY[tab];
-  const value = tab === 'staff' ? staffValue : nssValue;
-  const setValue = tab === 'staff' ? setStaffValue : setNssValue;
+  const value = tab === 'staff' ? staffValue : tab === 'nss' ? nssValue : internValue;
+  const setValue = tab === 'staff' ? setStaffValue : tab === 'nss' ? setNssValue : setInternValue;
   const trimmed = value.trim();
   const showNssWelcome = tab === 'nss' && !last;
+  const tabIdx = tab === 'staff' ? 0 : tab === 'nss' ? 1 : 2;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -138,24 +147,24 @@ export function LoginPage() {
           <div
             role="tablist"
             aria-label="Choose account type"
-            className="relative grid grid-cols-2 mb-5 rounded-xl bg-white/5 border border-white/10 p-1"
+            className="relative grid grid-cols-3 mb-5 rounded-xl bg-white/5 border border-white/10 p-1"
           >
             {/* Sliding indicator */}
             <span
               aria-hidden
-              className="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-lg bg-white/[0.07] ring-1 ring-[#D4A017]/30 transition-transform duration-[250ms] ease-out motion-reduce:transition-none"
-              style={{ transform: tab === 'staff' ? 'translateX(0%)' : 'translateX(100%)' }}
+              className="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc(33.333%-4px)] rounded-lg bg-white/[0.07] ring-1 ring-[#D4A017]/30 transition-transform duration-[250ms] ease-out motion-reduce:transition-none"
+              style={{ transform: `translateX(${tabIdx * 100}%)` }}
             />
             {/* Gold underline bar */}
             <span
               aria-hidden
-              className="pointer-events-none absolute -bottom-px left-1 h-[2px] w-[calc(50%-4px)] rounded-full bg-[#D4A017] transition-transform duration-[250ms] ease-out motion-reduce:transition-none"
-              style={{ transform: tab === 'staff' ? 'translateX(0%)' : 'translateX(100%)' }}
+              className="pointer-events-none absolute -bottom-px left-1 h-[2px] w-[calc(33.333%-4px)] rounded-full bg-[#D4A017] transition-transform duration-[250ms] ease-out motion-reduce:transition-none"
+              style={{ transform: `translateX(${tabIdx * 100}%)` }}
             />
-            {(['staff', 'nss'] as const).map((t) => {
+            {(['staff', 'nss', 'intern'] as const).map((t) => {
               const isActive = tab === t;
-              const Icon = t === 'staff' ? Briefcase : GraduationCap;
-              const labelText = t === 'staff' ? 'Staff' : 'NSS';
+              const Icon = t === 'staff' ? Briefcase : t === 'nss' ? GraduationCap : BookUser;
+              const labelText = t === 'staff' ? 'Staff' : t === 'nss' ? 'NSS' : 'Intern';
               return (
                 <button
                   key={t}
