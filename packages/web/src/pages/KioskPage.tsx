@@ -196,7 +196,7 @@ export function KioskPage() {
         aria-hidden="true"
         className="pointer-events-none select-none fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(72vw,124vh,1040px)] max-w-none opacity-[0.09] grayscale mix-blend-multiply"
       />
-      <div className="relative z-10 w-full max-w-lg bg-surface rounded-2xl border border-border shadow-xl ring-1 ring-accent/10 overflow-hidden p-6">
+      <div className="relative z-10 w-full max-w-lg bg-white/80 backdrop-blur-sm rounded-2xl border border-border shadow-xl ring-1 ring-accent/10 overflow-hidden p-6">
         <div className="ghana-flag-bar -mt-6 -mx-6 mb-5" />
         <KioskHeader />
 
