@@ -24,8 +24,9 @@ rules = [
 # Clock reminder: every 15 min 7-9 Mon-Fri (self-gates on admin-configurable late threshold)
 # Daily summary: 9 AM Mon-Fri | Weekly: 4 PM Friday | Monthly: 9 AM 1st | Yearly: 9 AM Jan 1
 # NSS end-of-service: 00:30 daily — auto-deactivate ended postings, alert on next 7 days
+# Maintenance: 02:00 daily — purge expired visitor ID/face photos (+ backup, later)
 [triggers]
-crons = ["*/15 7-9 * * 1-5", "0 9 * * 1-5", "0 16 * * 5", "0 9 1 * *", "0 9 1 1 *", "30 0 * * *"]
+crons = ["*/15 7-9 * * 1-5", "0 9 * * 1-5", "0 16 * * 5", "0 9 1 * *", "0 9 1 1 *", "30 0 * * *", "0 2 * * *"]
 
 [vars]
 ENVIRONMENT = "production"

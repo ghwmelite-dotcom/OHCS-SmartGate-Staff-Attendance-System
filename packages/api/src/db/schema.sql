@@ -264,7 +264,11 @@ CREATE TABLE IF NOT EXISTS app_settings (
     -- Superadmin-set PIN a receptionist enters at the kiosk to approve a check-in
     -- the ID-photo AI gate flagged (added by migration-reception-override-pin.sql).
     -- NULL/empty = overrides disabled.
-    reception_override_pin                TEXT
+    reception_override_pin                TEXT,
+    -- Days after a visitor's last checkout before their ID-document + face photos
+    -- are auto-purged from R2 (audit record is kept). Added by
+    -- migration-visitor-photo-retention.sql.
+    visitor_photo_retention_days          INTEGER NOT NULL DEFAULT 30
 );
 
 INSERT OR IGNORE INTO app_settings (

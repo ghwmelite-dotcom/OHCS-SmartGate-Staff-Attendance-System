@@ -23,6 +23,7 @@ import directorateReceivers from './migration-directorate-receivers.sql';
 import internFoundation from './migration-intern-foundation.sql';
 import idempotencyUnique from './migration-idempotency-unique.sql';
 import receptionOverridePin from './migration-reception-override-pin.sql';
+import visitorPhotoRetention from './migration-visitor-photo-retention.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -50,6 +51,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-intern-foundation.sql', sql: internFoundation },
   { filename: 'migration-idempotency-unique.sql', sql: idempotencyUnique },
   { filename: 'migration-reception-override-pin.sql', sql: receptionOverridePin },
+  { filename: 'migration-visitor-photo-retention.sql', sql: visitorPhotoRetention },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {

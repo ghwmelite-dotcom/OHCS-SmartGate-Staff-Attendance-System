@@ -16,6 +16,8 @@ export interface AppSettings {
   clockin_liveness_model_version: string;          // 'buffalo_s_v1' etc — surfaced into signature
   // Reception override PIN (added by migration-reception-override-pin.sql)
   reception_override_pin: string | null;           // NULL/empty = overrides disabled
+  // Visitor photo retention (added by migration-visitor-photo-retention.sql)
+  visitor_photo_retention_days: number;            // days after last checkout before ID/face photos are purged
 }
 
 const KV_KEY = 'app-settings:v2';
@@ -35,6 +37,7 @@ const DEFAULTS: AppSettings = {
   clockin_liveness_review_cap_per_week: 2,
   clockin_liveness_model_version: 'buffalo_s_v1',
   reception_override_pin: null,
+  visitor_photo_retention_days: 30,
 };
 
 let memo: { value: AppSettings; ts: number } | null = null;
@@ -53,7 +56,8 @@ export async function getAppSettings(env: Env): Promise<AppSettings> {
     `SELECT work_start_time, late_threshold_time, work_end_time, updated_by, updated_at,
             clockin_reauth_enforce, clockin_pin_attempt_cap, clockin_prompt_ttl_seconds,
             clockin_passive_liveness_enforce, clockin_liveness_review_cap_per_week,
-            clockin_liveness_model_version, reception_override_pin
+            clockin_liveness_model_version, reception_override_pin,
+            visitor_photo_retention_days
      FROM app_settings WHERE id = 1`
   ).first<AppSettings>();
 

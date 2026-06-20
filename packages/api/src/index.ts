@@ -19,6 +19,7 @@ import { adminMigrationsRoutes } from './routes/admin-migrations';
 import { adminHealthRoutes } from './routes/admin-health';
 import { adminSettingsRoutes } from './routes/admin-settings';
 import { adminEvalAssistantRoutes } from './routes/admin-eval-assistant';
+import { adminMaintenanceRoutes } from './routes/admin-maintenance';
 import { authWebAuthnPublicRoutes, authWebAuthnAuthedRoutes } from './routes/auth-webauthn';
 import { photoRoutes } from './routes/photos';
 import { bulkImportRoutes } from './routes/bulk-import';
@@ -31,6 +32,7 @@ import { attendanceRoutes } from './routes/attendance';
 import { sendDailySummary as sendDailySummaryFn } from './services/daily-summary';
 import { sendClockReminders, sendMonthlyReportReady } from './services/reminders';
 import { runNssEndOfServiceCheck } from './services/nss-eos';
+import { purgeExpiredVisitorPhotos } from './services/photo-purge';
 import { authMiddleware } from './middleware/auth';
 import { errorHandler } from './middleware/error-handler';
 
@@ -110,6 +112,7 @@ app.route('/api/admin/migrations', adminMigrationsRoutes);
 app.route('/api/admin/health', adminHealthRoutes);
 app.route('/api/admin/settings', adminSettingsRoutes);
 app.route('/api/admin/eval-assistant', adminEvalAssistantRoutes);
+app.route('/api/admin/maintenance', adminMaintenanceRoutes);
 app.route('/api/admin/telegram', adminTelegramRoutes);
 app.route('/api/auth/webauthn', authWebAuthnAuthedRoutes);
 app.route('/api/clock', clockRoutes);
@@ -153,6 +156,15 @@ export default {
           break;
         case '30 0 * * *':
           await runNssEndOfServiceCheck(env);
+          break;
+        case '0 2 * * *':
+          // Daily maintenance window. Purge expired visitor ID/face photos from R2.
+          // TODO(ops): the D1/R2 backup job will also be added to this case.
+          try {
+            await purgeExpiredVisitorPhotos(env);
+          } catch (err) {
+            console.error(`[scheduled] photo-purge failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
           break;
         default:
           console.warn(`[scheduled] unknown cron: ${event.cron}`);
