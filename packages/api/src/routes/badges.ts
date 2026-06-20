@@ -137,6 +137,13 @@ export async function serveBadgePage(c: Context<{ Bindings: Env }>) {
     }
     .header h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.5px; }
     .header .subtitle { font-size: 11px; opacity: 0.7; margin-top: 2px; }
+    .header .crest {
+      width: 60px; height: 60px; margin: 0 auto 12px;
+      background: #fff; border-radius: 50%; padding: 5px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .header .crest img { width: 100%; height: 100%; object-fit: contain; border-radius: 50%; display: block; }
     .status {
       padding: 12px 24px;
       text-align: center;
@@ -180,6 +187,7 @@ export async function serveBadgePage(c: Context<{ Bindings: Env }>) {
 <body>
   <div class="badge">
     <div class="header">
+      <div class="crest"><img src="/ohcs-logo.jpg" alt="Ghana Civil Service crest"></div>
       <h1>OHCS VMS</h1>
       <div class="subtitle">Office of the Head of the Civil Service, Ghana</div>
     </div>
