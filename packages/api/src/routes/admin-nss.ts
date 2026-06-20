@@ -290,6 +290,60 @@ interface NssExportRow {
   absent_days: number;
 }
 
+/**
+ * Build the NSS/intern range-export SQL.
+ *
+ * Extracted so the exact CTE + SELECT can be exercised by a regression test
+ * (admin-nss-export.test.ts) against a real SQLite DB without booting the
+ * Worker. The route below is the ONLY caller — keep the bind() order in the
+ * route in sync with the `?` placeholders here:
+ *
+ *   1. from              (CTE: DATE BETWEEN ? ...)
+ *   2. to                (CTE: ... AND ?)
+ *   3. from              (CTE: >= MAX(?, COALESCE(nss_start_date, ?)) — clamp lower)
+ *   4. from              (CTE: ... COALESCE(nss_start_date, ?))
+ *   5. to                (CTE: <= MIN(?, COALESCE(nss_end_date, ?)) — clamp upper)
+ *   6. to                (CTE: ... COALESCE(nss_end_date, ?))
+ *   7. lateAfter         (outer SELECT: SUM(CASE WHEN first_in > ? ...))
+ *   8..n directorate etc (outer WHERE: ...whereClause params)
+ *
+ * The clamp on lines 3–6 is the audit fix: a clock-in logged outside the
+ * user's posting window cannot inflate `clock_ins` past userWorkingDays, which
+ * preserves the invariant clock_ins + absent_days == userWorkingDays.
+ *
+ * @param typeClause  fixed (non-user-bound) personnel-type WHERE fragment, e.g. `u.user_type = 'nss'`
+ * @param whereClause the full outer WHERE expression (already AND-joined; includes typeClause first)
+ */
+export function buildNssExportQuery(typeClause: string, whereClause: string): string {
+  return `
+    WITH nss_clock_in_days AS (
+      SELECT cr.user_id, DATE(cr.timestamp) AS d, MIN(TIME(cr.timestamp)) AS first_in
+      FROM clock_records cr
+      INNER JOIN users u ON u.id = cr.user_id AND ${typeClause}
+      WHERE cr.type = 'clock_in'
+        AND DATE(cr.timestamp) BETWEEN ? AND ?
+        AND DATE(cr.timestamp) >= MAX(?, COALESCE(u.nss_start_date, ?))
+        AND DATE(cr.timestamp) <= MIN(?, COALESCE(u.nss_end_date, ?))
+        -- Mon..Fri only, matching the working-days denominator (workingDaysBetween).
+        -- SQLite strftime('%w') → 0=Sun .. 6=Sat; exclude weekends so the numerator
+        -- (clock_ins) stays a subset of userWorkingDays and the invariant holds.
+        AND CAST(strftime('%w', cr.timestamp) AS INTEGER) NOT IN (0, 6)
+      GROUP BY cr.user_id, DATE(cr.timestamp)
+    )
+    SELECT u.id AS user_id, u.name, u.nss_number,
+           d.abbreviation AS directorate_abbr,
+           u.nss_start_date, u.nss_end_date, u.current_streak,
+           COALESCE(COUNT(ci.d), 0) AS clock_ins,
+           COALESCE(SUM(CASE WHEN ci.first_in > ? THEN 1 ELSE 0 END), 0) AS late_count
+    FROM users u
+    LEFT JOIN directorates d ON u.directorate_id = d.id
+    LEFT JOIN nss_clock_in_days ci ON ci.user_id = u.id
+    WHERE ${whereClause}
+    GROUP BY u.id
+    ORDER BY d.abbreviation ASC, u.name ASC
+  `;
+}
+
 adminNssRoutes.get('/export', async (c) => {
   const forbidden = requireRole(c, 'superadmin', 'admin');
   if (forbidden) return forbidden;
@@ -363,34 +417,9 @@ adminNssRoutes.get('/export', async (c) => {
   // userWorkingDays — which would otherwise break the invariant
   // clock_ins + absent_days == userWorkingDays and produce clock_ins > working_days.
   // COALESCE handles users with NULL window bounds (treated as unbounded → the
-  // requested [from, to] range governs).
-  const sql = `
-    WITH nss_clock_in_days AS (
-      SELECT cr.user_id, DATE(cr.timestamp) AS d, MIN(TIME(cr.timestamp)) AS first_in
-      FROM clock_records cr
-      INNER JOIN users u ON u.id = cr.user_id AND ${typeClause}
-      WHERE cr.type = 'clock_in'
-        AND DATE(cr.timestamp) BETWEEN ? AND ?
-        AND DATE(cr.timestamp) >= MAX(?, COALESCE(u.nss_start_date, ?))
-        AND DATE(cr.timestamp) <= MIN(?, COALESCE(u.nss_end_date, ?))
-        -- Mon..Fri only, matching the working-days denominator (workingDaysBetween).
-        -- SQLite strftime('%w') → 0=Sun .. 6=Sat; exclude weekends so the numerator
-        -- (clock_ins) stays a subset of userWorkingDays and the invariant holds.
-        AND CAST(strftime('%w', cr.timestamp) AS INTEGER) NOT IN (0, 6)
-      GROUP BY cr.user_id, DATE(cr.timestamp)
-    )
-    SELECT u.id AS user_id, u.name, u.nss_number,
-           d.abbreviation AS directorate_abbr,
-           u.nss_start_date, u.nss_end_date, u.current_streak,
-           COALESCE(COUNT(ci.d), 0) AS clock_ins,
-           COALESCE(SUM(CASE WHEN ci.first_in > ? THEN 1 ELSE 0 END), 0) AS late_count
-    FROM users u
-    LEFT JOIN directorates d ON u.directorate_id = d.id
-    LEFT JOIN nss_clock_in_days ci ON ci.user_id = u.id
-    WHERE ${where.join(' AND ')}
-    GROUP BY u.id
-    ORDER BY d.abbreviation ASC, u.name ASC
-  `;
+  // requested [from, to] range governs). The SQL itself lives in
+  // buildNssExportQuery() so the exact query is unit-testable (admin-nss-export.test.ts).
+  const sql = buildNssExportQuery(typeClause, where.join(' AND '));
 
   const result = await c.env.DB
     .prepare(sql)

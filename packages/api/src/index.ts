@@ -19,6 +19,7 @@ import { adminMigrationsRoutes } from './routes/admin-migrations';
 import { adminHealthRoutes } from './routes/admin-health';
 import { adminSettingsRoutes } from './routes/admin-settings';
 import { adminEvalAssistantRoutes } from './routes/admin-eval-assistant';
+import { adminMaintenanceRoutes } from './routes/admin-maintenance';
 import { authWebAuthnPublicRoutes, authWebAuthnAuthedRoutes } from './routes/auth-webauthn';
 import { photoRoutes } from './routes/photos';
 import { bulkImportRoutes } from './routes/bulk-import';
@@ -31,6 +32,9 @@ import { attendanceRoutes } from './routes/attendance';
 import { sendDailySummary as sendDailySummaryFn } from './services/daily-summary';
 import { sendClockReminders, sendMonthlyReportReady } from './services/reminders';
 import { runNssEndOfServiceCheck } from './services/nss-eos';
+import { purgeExpiredVisitorPhotos } from './services/photo-purge';
+import { exportBackupToR2 } from './services/backup';
+import { alertAdminError } from './lib/error-alert';
 import { authMiddleware } from './middleware/auth';
 import { errorHandler } from './middleware/error-handler';
 
@@ -110,6 +114,7 @@ app.route('/api/admin/migrations', adminMigrationsRoutes);
 app.route('/api/admin/health', adminHealthRoutes);
 app.route('/api/admin/settings', adminSettingsRoutes);
 app.route('/api/admin/eval-assistant', adminEvalAssistantRoutes);
+app.route('/api/admin/maintenance', adminMaintenanceRoutes);
 app.route('/api/admin/telegram', adminTelegramRoutes);
 app.route('/api/auth/webauthn', authWebAuthnAuthedRoutes);
 app.route('/api/clock', clockRoutes);
@@ -140,19 +145,57 @@ export default {
     ctx.waitUntil((async () => {
       switch (event.cron) {
         case '*/15 7-9 * * 1-5':
-          await sendClockReminders(env);
+          try {
+            await sendClockReminders(env);
+          } catch (err) {
+            console.error(`[scheduled] clock-reminders failed: ${err instanceof Error ? err.message : String(err)}`);
+            await alertAdminError(env, 'cron:clock-reminders', err);
+          }
           break;
         case '0 9 1 * *':
-          await sendDailySummaryFn(env);
-          await sendMonthlyReportReady(env);
+          try {
+            await sendDailySummaryFn(env);
+            await sendMonthlyReportReady(env);
+          } catch (err) {
+            console.error(`[scheduled] monthly-summary failed: ${err instanceof Error ? err.message : String(err)}`);
+            await alertAdminError(env, 'cron:monthly-summary', err);
+          }
           break;
         case '0 9 * * 1-5':
         case '0 16 * * 5':
         case '0 9 1 1 *':
-          await sendDailySummaryFn(env);
+          try {
+            await sendDailySummaryFn(env);
+          } catch (err) {
+            console.error(`[scheduled] daily-summary failed: ${err instanceof Error ? err.message : String(err)}`);
+            await alertAdminError(env, 'cron:daily-summary', err);
+          }
           break;
         case '30 0 * * *':
-          await runNssEndOfServiceCheck(env);
+          try {
+            await runNssEndOfServiceCheck(env);
+          } catch (err) {
+            console.error(`[scheduled] nss-eos failed: ${err instanceof Error ? err.message : String(err)}`);
+            await alertAdminError(env, 'cron:nss-eos', err);
+          }
+          break;
+        case '0 2 * * *':
+          // Daily maintenance window. Purge expired visitor photos, then run the
+          // D1 -> R2 table backup. Each job has its own try/catch so a failure in
+          // one does not skip the other, and each failure surfaces to admins via
+          // a throttled Telegram alert (so silent cron failures don't go unseen).
+          try {
+            await purgeExpiredVisitorPhotos(env);
+          } catch (err) {
+            console.error(`[scheduled] photo-purge failed: ${err instanceof Error ? err.message : String(err)}`);
+            await alertAdminError(env, 'cron:photo-purge', err);
+          }
+          try {
+            await exportBackupToR2(env);
+          } catch (err) {
+            console.error(`[scheduled] backup failed: ${err instanceof Error ? err.message : String(err)}`);
+            await alertAdminError(env, 'cron:backup', err);
+          }
           break;
         default:
           console.warn(`[scheduled] unknown cron: ${event.cron}`);
