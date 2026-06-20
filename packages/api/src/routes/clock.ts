@@ -14,19 +14,23 @@ import type { LivenessChallenge, LivenessSignature } from '../services/liveness/
 export const clockRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
 // OHCS building footprint (Office of The Head of the Civil Service, Accra).
-// Single precision-retraced polygon as of 2026-05-08, replacing the earlier
-// 3-building approximation. Order within the polygon is the perimeter walk;
-// winding direction is irrelevant for the ray-casting test. The
-// accuracy-aware buffer in the geofence check (WALL_BUFFER_METERS +
-// accuracy * 0.5) absorbs typical mobile GPS jitter so the small footprint
-// still admits staff genuinely inside the building.
+// The TRUE building outline (~34m × 76m), replacing an earlier ~5m × 7m patch
+// near the entrance that was rejecting staff genuinely inside the building
+// (they fell outside the tiny patch + 8m buffer). Corners are the surveyed
+// building outline; the old patch's centroid sits inside this polygon (verified).
+// Order is the perimeter walk; winding direction is irrelevant for the ray-cast.
+// The accuracy-aware buffer (WALL_BUFFER_METERS + accuracy * 0.5) absorbs GPS
+// jitter for staff right at the walls/doorway. NOTE: this is a tightly-packed
+// ministries block (Ministry of Justice ~46m, Controller & Accountant General's
+// ~49m away) — field-verify a clock-in from inside before relying on it, and the
+// buffer can be tightened now that the footprint (not a patch) is accurate.
 type LatLng = readonly [number, number];
 const OHCS_POLYGONS: readonly (readonly LatLng[])[] = [
   [
-    [5.552548291041157,  -0.19745481365835615],
-    [5.5525690558400616, -0.1974680899154652 ],
-    [5.552594539910443,  -0.19741119167071233],
-    [5.552572831257968,  -0.19740739845439553],
+    [5.5525043, -0.1977808],
+    [5.5527239, -0.1971268],
+    [5.5526358, -0.1970969],
+    [5.5524162, -0.1977509],
   ],
 ];
 
