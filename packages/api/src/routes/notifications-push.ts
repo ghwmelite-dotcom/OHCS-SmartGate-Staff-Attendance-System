@@ -18,9 +18,14 @@ notificationsPushRoutes.post('/subscribe', zValidator('json', subscribeSchema), 
   const session = c.get('session');
   const { endpoint, keys } = c.req.valid('json');
 
+  // Only update an existing subscription if it already belongs to this user — a
+  // caller cannot reassign (hijack) another user's endpoint to themselves. A stale
+  // endpoint from a previous user on a shared device is cleared on their logout
+  // (unsubscribe deletes by endpoint).
   await c.env.DB.prepare(
     `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)
-     ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth`
+     ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth
+     WHERE push_subscriptions.user_id = excluded.user_id`
   ).bind(session.userId, endpoint, keys.p256dh, keys.auth).run();
 
   return success(c, { ok: true });
