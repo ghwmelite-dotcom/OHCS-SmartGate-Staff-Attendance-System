@@ -15,6 +15,7 @@ const READY = {
   reauth: 1,
   liveness: 1,
   override_pin_set: 1,
+  backup_key_set: 1,
 };
 
 function check(counts: typeof READY, key: string) {
@@ -43,6 +44,13 @@ describe('buildReadinessChecks', () => {
 
   it('warns when no upcoming holidays are configured', () => {
     expect(check({ ...READY, holidays_upcoming: 0 }, 'holidays').status).toBe('warn');
+  });
+
+  it('warns when the backup encryption key is not set', () => {
+    const c = check({ ...READY, backup_key_set: 0 }, 'backup_encryption');
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('plaintext');
+    expect(check(READY, 'backup_encryption').status).toBe('ok');
   });
 
   it('flags lingering test activity as info with the counts', () => {

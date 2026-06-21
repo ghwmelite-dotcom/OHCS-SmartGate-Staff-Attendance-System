@@ -26,6 +26,8 @@ interface ReadinessCounts {
   reauth: number | null;
   liveness: number | null;
   override_pin_set: number;
+  // Not from SQL — set from env (whether BACKUP_ENCRYPTION_KEY is configured).
+  backup_key_set: number;
 }
 
 // One round trip: every signal the readiness panel reports. `?` binds today
@@ -130,6 +132,15 @@ export function buildReadinessChecks(c: ReadinessCounts): ReadinessCheck[] {
       + 'Review shadow data before enforcing — enforcing can block legitimate clock-ins.',
   });
 
+  checks.push({
+    key: 'backup_encryption',
+    label: 'Backup encryption',
+    status: c.backup_key_set ? 'ok' : 'warn',
+    detail: c.backup_key_set
+      ? 'Backups are encrypted at rest.'
+      : 'BACKUP_ENCRYPTION_KEY is not set — daily backups are written in plaintext (PII at rest in R2). Set it in the Worker secrets.',
+  });
+
   const testActivity = c.visits_total + c.clock_total;
   checks.push({
     key: 'test_activity',
@@ -153,6 +164,9 @@ adminReadinessRoutes.get('/', async (c) => {
   const today = new Date().toISOString().slice(0, 10);
   const counts = await c.env.DB.prepare(READINESS_SQL).bind(today).first<ReadinessCounts>();
   if (!counts) return success(c, { checks: [], generatedAt: new Date().toISOString() });
+
+  // Not a DB signal — whether the backup encryption secret is configured.
+  counts.backup_key_set = c.env.BACKUP_ENCRYPTION_KEY ? 1 : 0;
 
   return success(c, {
     checks: buildReadinessChecks(counts),

@@ -432,17 +432,19 @@ interface BackupStatus {
 // Shows the latest backup's date + whether it's verified restorable, with a
 // "Run backup now" action. Loads on demand. Uses the read-only backup-status
 // endpoint (which decrypts + parses the latest snapshot).
+interface RunBackupResult { date: string; encrypted: boolean; failed: string[] }
+
 function BackupStatusSection() {
   const [status, setStatus] = useState<BackupStatus | null>(null);
-  const [ran, setRan] = useState<string | null>(null);
+  const [ran, setRan] = useState<RunBackupResult | null>(null);
 
   const statusM = useMutation({
     mutationFn: () => api.get<BackupStatus>('/admin/maintenance/backup-status'),
     onSuccess: (r) => setStatus(r.data ?? null),
   });
   const runM = useMutation({
-    mutationFn: () => api.post<{ date: string }>('/admin/maintenance/run-backup', {}),
-    onSuccess: (r) => { setRan(r.data?.date ?? null); statusM.mutate(); },
+    mutationFn: () => api.post<RunBackupResult>('/admin/maintenance/run-backup', {}),
+    onSuccess: (r) => { setRan(r.data ?? null); statusM.mutate(); },
   });
 
   return (
@@ -472,7 +474,12 @@ function BackupStatusSection() {
           {runM.isPending ? 'Backing up…' : 'Run backup now'}
         </button>
       </div>
-      {ran && <p className="text-[12px] text-success mt-2">Backup written for {ran}.</p>}
+      {ran && (
+        <p className={`text-[12px] mt-2 ${ran.failed.length ? 'text-danger' : 'text-success'}`}>
+          Backup written for {ran.date}{ran.encrypted ? ' · encrypted' : ' · ⚠ UNENCRYPTED'}
+          {ran.failed.length > 0 && <> · failed tables: {ran.failed.join(', ')}</>}.
+        </p>
+      )}
       {status && (
         <div className="mt-2 text-[12px]">
           {status.date ? (

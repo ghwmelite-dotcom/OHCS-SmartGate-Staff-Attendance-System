@@ -21,6 +21,12 @@ export interface BackupResult {
   date: string;
   tables: { name: string; rows: number }[];
   pruned: number;
+  // Tables whose export failed (logged, not thrown). Callers about to do
+  // something destructive MUST check this is empty before trusting the backup.
+  failed: string[];
+  // Whether the payload was written encrypted (false = BACKUP_ENCRYPTION_KEY
+  // unset → plaintext PII at rest).
+  encrypted: boolean;
 }
 
 // Fixed internal allowlist — verified against schema.sql. NOT user input.
@@ -74,7 +80,7 @@ export async function exportBackupToR2(env: Env): Promise<BackupResult> {
 
   const pruned = await pruneOldBackups(env);
 
-  const result: BackupResult = { date, tables, pruned };
+  const result: BackupResult = { date, tables, pruned, failed, encrypted: !!env.BACKUP_ENCRYPTION_KEY };
 
   console.log(
     `[backup] date=${date} tables_ok=${tables.length} failed=${failed.length} ` +
