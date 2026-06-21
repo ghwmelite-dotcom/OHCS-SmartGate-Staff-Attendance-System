@@ -7,7 +7,8 @@ export interface AppSettings {
   work_start_time: string;
   late_threshold_time: string;
   work_end_time: string;
-  reception_override_pin: string | null;
+  // The cleartext PIN is never sent to the client — only whether one is set.
+  reception_override_pin_set?: boolean;
   clockin_reauth_enforce?: number;
   clockin_passive_liveness_enforce?: number;
   updated_by: string | null;
@@ -25,7 +26,9 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
   const [start, setStart] = useState(current.work_start_time);
   const [late, setLate] = useState(current.late_threshold_time);
   const [end, setEnd] = useState(current.work_end_time);
-  const [overridePin, setOverridePin] = useState(current.reception_override_pin ?? '');
+  const pinIsSet = current.reception_override_pin_set ?? false;
+  const [overridePin, setOverridePin] = useState('');
+  const [removeOverridePin, setRemoveOverridePin] = useState(false);
   const [enforceReauth, setEnforceReauth] = useState((current.clockin_reauth_enforce ?? 0) === 1);
   const [enforceLiveness, setEnforceLiveness] = useState((current.clockin_passive_liveness_enforce ?? 0) === 1);
   const [localErr, setLocalErr] = useState<string | null>(null);
@@ -34,13 +37,14 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
     setStart(current.work_start_time);
     setLate(current.late_threshold_time);
     setEnd(current.work_end_time);
-    setOverridePin(current.reception_override_pin ?? '');
+    setOverridePin('');
+    setRemoveOverridePin(false);
     setEnforceReauth((current.clockin_reauth_enforce ?? 0) === 1);
     setEnforceLiveness((current.clockin_passive_liveness_enforce ?? 0) === 1);
   }, [current]);
 
   const mutation = useMutation({
-    mutationFn: (body: { work_start_time: string; late_threshold_time: string; work_end_time: string; reception_override_pin: string; clockin_reauth_enforce: number; clockin_passive_liveness_enforce: number }) =>
+    mutationFn: (body: { work_start_time: string; late_threshold_time: string; work_end_time: string; reception_override_pin?: string; clockin_reauth_enforce: number; clockin_passive_liveness_enforce: number }) =>
       api.put<AppSettings>('/admin/settings', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['app-settings'] });
@@ -57,11 +61,16 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
     }
     const pin = overridePin.trim();
     if (pin && !/^\d{4,8}$/.test(pin)) {
-      setLocalErr('Override PIN must be 4–8 digits (or blank to disable)');
+      setLocalErr('Override PIN must be 4–8 digits');
       return;
     }
+    // Write-only: '' to clear (remove toggle), digits to set, otherwise omit (keep).
+    let overrideField: { reception_override_pin?: string } = {};
+    if (removeOverridePin) overrideField = { reception_override_pin: '' };
+    else if (pin) overrideField = { reception_override_pin: pin };
     mutation.mutate({
-      work_start_time: start, late_threshold_time: late, work_end_time: end, reception_override_pin: pin,
+      work_start_time: start, late_threshold_time: late, work_end_time: end,
+      ...overrideField,
       clockin_reauth_enforce: enforceReauth ? 1 : 0,
       clockin_passive_liveness_enforce: enforceLiveness ? 1 : 0,
     });
@@ -116,19 +125,27 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
           />
 
           <div>
-            <label className="block text-[13px] font-semibold text-foreground mb-1">Reception override PIN</label>
+            <label className="block text-[13px] font-semibold text-foreground mb-1">
+              Reception override PIN {pinIsSet && <span className="text-success">✓ set</span>}
+            </label>
             <input
-              type="text"
+              type="password"
               inputMode="numeric"
               autoComplete="off"
               value={overridePin}
               onChange={e => setOverridePin(e.target.value.replace(/\D/g, '').slice(0, 8))}
-              disabled={!canEdit}
-              placeholder="4–8 digits"
+              disabled={!canEdit || removeOverridePin}
+              placeholder={pinIsSet ? 'Enter a new PIN to change it' : 'Set a PIN (4–8 digits)'}
               className="w-full h-10 px-3 rounded-xl border border-border bg-background text-[14px] font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed"
             />
+            {canEdit && pinIsSet && (
+              <label className="flex items-center gap-2 mt-2 text-[12px] text-foreground cursor-pointer select-none">
+                <input type="checkbox" checked={removeOverridePin} onChange={e => { setRemoveOverridePin(e.target.checked); if (e.target.checked) setOverridePin(''); }} className="h-4 w-4 rounded border-border accent-danger" />
+                Remove the override PIN (disable overrides)
+              </label>
+            )}
             <p className="text-[11px] text-muted mt-1">
-              Receptionists enter this at the kiosk to approve a check-in the ID-photo check flagged (and to authorise a check-in while the office is closed). Leave blank to disable overrides.
+              Receptionists enter this at the kiosk to approve a flagged ID-photo or an after-hours check-in. Write-only — the value is never shown; leave blank to keep the current PIN.
             </p>
           </div>
 

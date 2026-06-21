@@ -73,14 +73,13 @@ kioskRoutes.get('/status', async (c) => {
   return success(c, status);
 });
 
-// Public directorate list for the kiosk form (id/name/abbreviation only — no PII).
+// Public directorate list for the kiosk form. id/name/abbreviation only — the
+// reception officer's NAME is deliberately NOT returned: this is an unauthenticated
+// endpoint and the officer roster is PII / recon material for a government building.
 kioskRoutes.get('/directorates', async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
   const rows = await c.env.DB.prepare(
-    `SELECT d.id, d.name, d.abbreviation, o.name AS reception_officer_name
-     FROM directorates d
-     LEFT JOIN officers o ON d.reception_officer_id = o.id
-     WHERE d.is_active = 1 ORDER BY d.name`
+    `SELECT id, name, abbreviation FROM directorates WHERE is_active = 1 ORDER BY name`
   ).all();
   return success(c, rows.results ?? []);
 });
