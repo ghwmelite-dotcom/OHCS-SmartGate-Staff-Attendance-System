@@ -7,7 +7,7 @@ import { Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle, Users, Bu
 
 type ImportType = 'users' | 'directorates' | 'officers';
 
-const TEMPLATES: Record<ImportType, { label: string; icon: typeof Users; headers: string[]; example: string[]; description: string }> = {
+const TEMPLATES: Record<ImportType, { label: string; icon: typeof Users; headers: string[]; optionalHeaders?: string[]; example: string[]; description: string }> = {
   users: {
     label: 'Users',
     icon: Users,
@@ -19,8 +19,9 @@ const TEMPLATES: Record<ImportType, { label: string; icon: typeof Users; headers
     label: 'Directorates & Units',
     icon: Building2,
     headers: ['name', 'abbreviation', 'type', 'rooms'],
-    example: ['Career Management Directorate', 'CMD', 'directorate', '33, 34'],
-    description: 'Import org entities. Types: directorate, secretariat, unit',
+    optionalHeaders: ['floor', 'wing'],
+    example: ['Career Management Directorate', 'CMD', 'directorate', '33, 34', '3rd Floor', 'East'],
+    description: 'Import org entities. Types: directorate, secretariat, unit. floor & wing are optional and print as the "Location" line on visitor badges.',
   },
   officers: {
     label: 'Officers',
@@ -33,7 +34,8 @@ const TEMPLATES: Record<ImportType, { label: string; icon: typeof Users; headers
 
 function downloadTemplate(type: ImportType) {
   const tmpl = TEMPLATES[type];
-  const csv = [tmpl.headers.join(','), tmpl.example.join(',')].join('\n');
+  const allHeaders = [...tmpl.headers, ...(tmpl.optionalHeaders ?? [])];
+  const csv = [allHeaders.join(','), tmpl.example.join(',')].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -74,6 +76,7 @@ export function BulkImportTab() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const tmpl = TEMPLATES[importType];
+  const allHeaders = [...tmpl.headers, ...(tmpl.optionalHeaders ?? [])];
 
   const importMutation = useMutation({
     mutationFn: (rows: Record<string, string>[]) =>
@@ -221,7 +224,7 @@ export function BulkImportTab() {
               <thead>
                 <tr className="border-b border-border bg-background/50">
                   <th className="text-left px-5 py-2.5 text-[11px] font-semibold text-muted uppercase tracking-wide">#</th>
-                  {tmpl.headers.map(h => (
+                  {allHeaders.map(h => (
                     <th key={h} className="text-left px-5 py-2.5 text-[11px] font-semibold text-muted uppercase tracking-wide">
                       {h.replace(/_/g, ' ')}
                     </th>
@@ -232,7 +235,7 @@ export function BulkImportTab() {
                 {previewData.slice(0, 50).map((row, i) => (
                   <tr key={i} className="hover:bg-background-warm/50 transition-colors">
                     <td className="px-5 py-2.5 text-[13px] text-muted font-mono">{i + 1}</td>
-                    {tmpl.headers.map(h => (
+                    {allHeaders.map(h => (
                       <td key={h} className="px-5 py-2.5 text-[14px] text-foreground">
                         {row[h] || <span className="text-muted-foreground italic">empty</span>}
                       </td>
