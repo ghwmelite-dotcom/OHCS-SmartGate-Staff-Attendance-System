@@ -3,7 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error, created, notFound } from '../lib/response';
-import { hashPin } from '../services/auth';
+import { hashPin, bumpSessionEpoch } from '../services/auth';
 import { sendWelcomeEmail } from '../services/email';
 import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
 
@@ -197,6 +197,12 @@ userRoutes.put('/:id', zValidator('json', updateUserSchema), async (c) => {
     });
   }
 
+  // Revoke existing sessions when access materially changes: role, PIN, or
+  // deactivation (is_active → 0). Forces re-login with the new state.
+  if (body.pin !== undefined || 'role' in changes || 'is_active' in changes) {
+    await bumpSessionEpoch(c.env, id);
+  }
+
   return success(c, user);
 });
 
@@ -214,6 +220,7 @@ userRoutes.delete('/:id', async (c) => {
   const target = await c.env.DB.prepare('SELECT name, email FROM users WHERE id = ?')
     .bind(id).first<{ name: string; email: string }>();
   await c.env.DB.prepare('UPDATE users SET is_active = 0 WHERE id = ?').bind(id).run();
+  await bumpSessionEpoch(c.env, id); // revoke any active sessions
   await recordAudit(c.env, auditActorFromContext(c), {
     action: 'user.deactivate', entityType: 'user', entityId: id,
     summary: `Deactivated user ${target?.name ?? id}${target?.email ? ` (${target.email})` : ''}`,

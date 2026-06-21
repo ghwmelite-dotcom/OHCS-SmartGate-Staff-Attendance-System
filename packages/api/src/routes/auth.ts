@@ -3,7 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import type { Env, SessionData } from '../types';
 import { LoginSchema, VerifyOtpSchema } from '../lib/validation';
-import { createOtp, verifyOtp, verifyPin, hashPin, needsRehash, createSession, deleteSession, getSession, readSessionId } from '../services/auth';
+import { createOtp, verifyOtp, verifyPin, hashPin, needsRehash, createSession, deleteSession, getSession, readSessionId, getUserAuthState } from '../services/auth';
 import { success, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
 import { z } from 'zod';
@@ -88,7 +88,8 @@ authRoutes.post('/verify', zValidator('json', verifySchema), async (c) => {
     return error(c, 'USER_NOT_FOUND', 'User not found', 404);
   }
 
-  const { sessionId, ttl } = await createSession(user.id, user.email, user.role, user.name, c.env, remember);
+  const epoch = (await getUserAuthState(c.env, user.id))?.session_epoch ?? 0;
+  const { sessionId, ttl } = await createSession(user.id, user.email, user.role, user.name, c.env, remember, epoch);
 
   await c.env.DB.prepare('UPDATE users SET last_login_at = ? WHERE id = ?')
     .bind(new Date().toISOString(), user.id)
@@ -169,7 +170,8 @@ authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
     );
   }
 
-  const { sessionId, ttl } = await createSession(user.id, user.email, user.role, user.name, c.env, remember);
+  const epoch = (await getUserAuthState(c.env, user.id))?.session_epoch ?? 0;
+  const { sessionId, ttl } = await createSession(user.id, user.email, user.role, user.name, c.env, remember, epoch);
 
   await c.env.DB.prepare('UPDATE users SET last_login_at = ? WHERE id = ?')
     .bind(new Date().toISOString(), user.id)

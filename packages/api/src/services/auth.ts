@@ -153,13 +153,61 @@ export async function createSession(
   role: string,
   name: string,
   env: Env,
-  remember = false
+  remember = false,
+  epoch = 0,
 ): Promise<{ sessionId: string; ttl: number }> {
   const sessionId = crypto.randomUUID();
   const ttl = remember ? SESSION_TTL_REMEMBER : SESSION_TTL_DEFAULT;
-  const session: SessionData = { userId, email, role, name };
+  const session: SessionData = { userId, email, role, name, epoch };
   await env.KV.put(`session:${sessionId}`, JSON.stringify(session), { expirationTtl: ttl });
   return { sessionId, ttl };
+}
+
+// --- Session revocation: per-user auth state, short-cached --------------------
+// authMiddleware re-checks the user on each request (is the account still active,
+// is the session epoch current, what's the current role). Cached per-isolate for
+// AUTH_STATE_TTL_MS so it adds negligible DB load; staleness is bounded by the TTL.
+export interface UserAuthState { is_active: number; role: string; session_epoch: number }
+
+const AUTH_STATE_TTL_MS = 30_000;
+const authStateMemo = new Map<string, { state: UserAuthState | null; ts: number }>();
+
+export async function getUserAuthState(env: Env, userId: string): Promise<UserAuthState | null> {
+  const now = Date.now();
+  const cached = authStateMemo.get(userId);
+  if (cached && now - cached.ts < AUTH_STATE_TTL_MS) return cached.state;
+
+  let row: UserAuthState | null = null;
+  try {
+    row = await env.DB.prepare(
+      'SELECT is_active, role, session_epoch FROM users WHERE id = ?'
+    ).bind(userId).first<UserAuthState>();
+  } catch {
+    // Deploy-safety: the session_epoch column may not exist yet (migration not
+    // applied). Degrade to is_active/role only with epoch 0 — deactivation/role
+    // checks still work; epoch enforcement starts once the migration is applied.
+    const fallback = await env.DB.prepare('SELECT is_active, role FROM users WHERE id = ?')
+      .bind(userId).first<{ is_active: number; role: string }>();
+    row = fallback ? { is_active: fallback.is_active, role: fallback.role, session_epoch: 0 } : null;
+  }
+  authStateMemo.set(userId, { state: row, ts: now });
+  return row;
+}
+
+export function invalidateUserAuthState(userId: string): void {
+  authStateMemo.delete(userId);
+}
+
+/** Revoke a user's sessions by bumping their epoch. Invalidates the local cache
+ *  immediately; other isolates refresh within AUTH_STATE_TTL_MS. Non-fatal if the
+ *  column doesn't exist yet (pre-migration) — the mutation must not fail. */
+export async function bumpSessionEpoch(env: Env, userId: string): Promise<void> {
+  try {
+    await env.DB.prepare('UPDATE users SET session_epoch = session_epoch + 1 WHERE id = ?').bind(userId).run();
+  } catch {
+    // session_epoch column not present yet — no-op until the migration is applied.
+  }
+  invalidateUserAuthState(userId);
 }
 
 export async function getSession(sessionId: string, env: Env): Promise<SessionData | null> {

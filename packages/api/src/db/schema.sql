@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS users (
     role             TEXT NOT NULL DEFAULT 'staff',
     grade            TEXT,
     is_active        INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+    -- Session revocation epoch (added by migration-session-epoch.sql). Bumped on
+    -- deactivate / role change / PIN reset to invalidate that user's sessions.
+    session_epoch    INTEGER NOT NULL DEFAULT 0,
     last_login_at    TEXT,
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
