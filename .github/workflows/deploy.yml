@@ -26,7 +26,8 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Node 24: tests use node:sqlite (added in 22.5; unflagged on 24), matching local.
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
