@@ -136,7 +136,15 @@ visitRoutes.post('/check-in', zValidator('json', CheckInSchema), async (c) => {
 visitRoutes.post('/:id/check-out', async (c) => {
   const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
   if (blocked) return blocked;
-  const result = await checkOutById(c.env, c.req.param('id'));
+  const visitId = c.req.param('id');
+  // Directorate isolation: a director may only check out visits in their directorate.
+  const directorScope = await resolveDirectorateScope(c);
+  if (directorScope !== null) {
+    const v = await c.env.DB.prepare('SELECT directorate_id FROM visits WHERE id = ?')
+      .bind(visitId).first<{ directorate_id: string | null }>();
+    if (!v || v.directorate_id !== directorScope) return notFound(c, 'Visit');
+  }
+  const result = await checkOutById(c.env, visitId);
   if (!result.ok) {
     if (result.code === 'NOT_FOUND') return notFound(c, 'Visit');
     return error(c, 'ALREADY_CHECKED_OUT', 'This visit has already ended', 400);

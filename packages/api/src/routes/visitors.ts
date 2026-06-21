@@ -9,6 +9,10 @@ import { z } from 'zod';
 
 export const visitorRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
+// Explicit columns (no SELECT *) so a future sensitive column can't auto-leak.
+const VISITOR_COLUMNS = `id, first_name, last_name, phone, email, organisation, id_type,
+  id_number, photo_url, id_photo_url, total_visits, last_visit_at, created_at, updated_at`;
+
 const searchSchema = z.object({
   q: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -20,7 +24,7 @@ visitorRoutes.get('/', zValidator('query', searchSchema), async (c) => {
   if (blocked) return blocked;
   const { q, limit, cursor } = c.req.valid('query');
   const dir = await resolveDirectorateScope(c);
-  let sql = 'SELECT * FROM visitors';
+  let sql = `SELECT ${VISITOR_COLUMNS} FROM visitors`;
   const params: unknown[] = [];
   const conditions: string[] = [];
 
@@ -61,7 +65,7 @@ visitorRoutes.get('/:id', async (c) => {
   if (blocked) return blocked;
   const id = c.req.param('id');
   const dir = await resolveDirectorateScope(c);
-  const visitor = await c.env.DB.prepare('SELECT * FROM visitors WHERE id = ?').bind(id).first();
+  const visitor = await c.env.DB.prepare(`SELECT ${VISITOR_COLUMNS} FROM visitors WHERE id = ?`).bind(id).first();
   if (!visitor) return notFound(c, 'Visitor');
 
   // Director isolation: only surface a visitor (and their PII) when that
@@ -98,7 +102,7 @@ visitorRoutes.post('/', zValidator('json', CreateVisitorSchema), async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(id, body.first_name, body.last_name, body.phone || null, body.email || null, body.organisation || null, body.id_type || null, body.id_number || null).run();
 
-  const visitor = await c.env.DB.prepare('SELECT * FROM visitors WHERE id = ?').bind(id).first();
+  const visitor = await c.env.DB.prepare(`SELECT ${VISITOR_COLUMNS} FROM visitors WHERE id = ?`).bind(id).first();
   return created(c, visitor);
 });
 
@@ -128,7 +132,7 @@ visitorRoutes.put('/:id', zValidator('json', UpdateVisitorSchema), async (c) => 
     await c.env.DB.prepare(`UPDATE visitors SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
   }
 
-  const visitor = await c.env.DB.prepare('SELECT * FROM visitors WHERE id = ?').bind(id).first();
+  const visitor = await c.env.DB.prepare(`SELECT ${VISITOR_COLUMNS} FROM visitors WHERE id = ?`).bind(id).first();
   return success(c, visitor);
 });
 
