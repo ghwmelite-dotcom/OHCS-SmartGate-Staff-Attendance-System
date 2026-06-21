@@ -49,7 +49,12 @@ export async function verifyOtp(email: string, code: string, env: Env): Promise<
 // bare lowercase-hex single-round SHA-256 strings (no `$`); they still verify
 // via verifyPin and are upgraded lazily by callers (see needsRehash).
 
-const PBKDF2_ITERATIONS = 210000;
+// Cloudflare Workers' Web Crypto caps PBKDF2 at 100,000 iterations — requesting
+// more throws NotSupportedError ("iteration counts above 100000 are not supported").
+// 100k is therefore the platform maximum; combined with a per-PIN random salt it's
+// the strongest work factor available here. (verifyPin reads the iteration count
+// embedded in each stored hash, so lowering this only affects newly-created hashes.)
+const PBKDF2_ITERATIONS = 100000;
 const PBKDF2_SALT_BYTES = 16;
 const PBKDF2_KEY_BITS = 256;
 const PBKDF2_PREFIX = 'pbkdf2$';
