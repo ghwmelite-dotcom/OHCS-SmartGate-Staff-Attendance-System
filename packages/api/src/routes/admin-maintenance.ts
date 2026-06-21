@@ -75,6 +75,45 @@ export const GO_LIVE_RESET_STATEMENTS: { sql: string; bindsKeep?: boolean }[] = 
   { sql: 'DELETE FROM audit_log' },
 ];
 
+// Read-only impact preview: exactly what the wipe WOULD delete vs. keep, computed
+// against live data WITHOUT changing anything. Lets a superadmin verify scope on
+// real data (they can't run the destructive action just to "check"). One round
+// trip. Bind order: keep,keep (users_deleted), keep,keep (webauthn_deleted),
+// keep,keep (users_kept) — 6 binds. Exported so its test shares the source.
+export const GO_LIVE_RESET_PREVIEW_SQL = `
+  SELECT
+    (SELECT COUNT(*) FROM officers)                              AS officers,
+    (SELECT COUNT(*) FROM directorate_receivers)                 AS reception_links,
+    (SELECT COUNT(*) FROM visits)                                AS visits,
+    (SELECT COUNT(*) FROM visitors)                              AS visitors,
+    (SELECT COUNT(*) FROM clock_records)                         AS clock_records,
+    (SELECT COUNT(*) FROM notifications)                         AS notifications,
+    (SELECT COUNT(*) FROM push_subscriptions)                    AS push_subscriptions,
+    (SELECT COUNT(*) FROM leave_requests)                        AS leave_requests,
+    (SELECT COUNT(*) FROM absence_notices)                       AS absence_notices,
+    (SELECT COUNT(*) FROM audit_log)                             AS audit_entries,
+    (SELECT COUNT(*) FROM users WHERE id NOT IN (?, ?))          AS users_deleted,
+    (SELECT COUNT(*) FROM webauthn_credentials WHERE user_id NOT IN (?, ?)) AS webauthn_deleted,
+    (SELECT COUNT(*) FROM users WHERE id IN (?, ?))              AS users_kept,
+    (SELECT COUNT(*) FROM directorates)                          AS directorates_kept,
+    (SELECT COUNT(*) FROM visit_categories)                      AS categories_kept,
+    (SELECT COUNT(*) FROM holidays)                              AS holidays_kept
+`;
+
+// Read-only — safe to call anytime. Returns the counts the destructive endpoint
+// WOULD act on, so the impact can be reviewed before arming the reset.
+adminMaintenanceRoutes.get('/go-live-reset/preview', async (c) => {
+  const blocked = requireRole(c, 'superadmin');
+  if (blocked) return blocked;
+
+  const session = c.get('session');
+  const k = session.userId;
+  const counts = await c.env.DB.prepare(GO_LIVE_RESET_PREVIEW_SQL)
+    .bind(k, KIOSK_USER_ID, k, KIOSK_USER_ID, k, KIOSK_USER_ID)
+    .first<Record<string, number>>();
+  return success(c, counts);
+});
+
 adminMaintenanceRoutes.post('/go-live-reset', zValidator('json', goLiveResetSchema), async (c) => {
   const blocked = requireRole(c, 'superadmin');
   if (blocked) return blocked;
