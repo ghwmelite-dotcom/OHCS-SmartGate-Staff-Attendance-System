@@ -3,41 +3,15 @@ import { zValidator } from '@hono/zod-validator';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import type { Env, SessionData } from '../types';
 import { LoginSchema, VerifyOtpSchema } from '../lib/validation';
-import { createOtp, verifyOtp, verifyPin, hashPin, needsRehash, createSession, deleteSession, getSession, readSessionId, getUserAuthState } from '../services/auth';
+import { createOtp, verifyOtp, verifyPin, hashPin, needsRehash, createSession, deleteSession, getSession, readSessionId, getUserAuthState, bumpSessionEpoch, getPinLock, recordPinFailure, clearPinLock, sessionCookieOptions, sessionCookieDeleteOptions } from '../services/auth';
 import { success, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
 import { z } from 'zod';
 
 export const authRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
-// Shared session-cookie options so the set/delete sites can't drift.
-//
-// In production both apps are served from *.ohcsghana.org and call the API
-// first-party at their own origin, so the session cookie is a FIRST-PARTY cookie:
-// scope it to the parent domain (`ohcsghana.org`) so it's shared across the
-// smartgate. + staff-attendance. subdomains, and use SameSite=Lax (same-site now,
-// stricter than the old cross-site `None`). In dev it's a host-only cookie on
-// localhost (no domain, not secure).
-function sessionCookieOptions(env: Env, maxAge: number) {
-  const isProd = env.ENVIRONMENT === 'production';
-  return {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: 'Lax' as const,
-    path: '/',
-    maxAge,
-    ...(isProd ? { domain: 'ohcsghana.org' } : {}),
-  };
-}
-
-// Delete must mirror domain + path exactly or the cookie isn't cleared.
-function sessionCookieDeleteOptions(env: Env) {
-  const isProd = env.ENVIRONMENT === 'production';
-  return {
-    path: '/',
-    ...(isProd ? { domain: 'ohcsghana.org' } : {}),
-  };
-}
+// (session-cookie option helpers moved to services/auth.ts so the WebAuthn login
+// path shares the exact same cookie attributes.)
 
 // Email OTP login (request code)
 authRoutes.post('/login', zValidator('json', LoginSchema), async (c) => {
@@ -50,15 +24,15 @@ authRoutes.post('/login', zValidator('json', LoginSchema), async (c) => {
 
   const user = await c.env.DB.prepare('SELECT id, name, email, role, is_active FROM users WHERE email = ?')
     .bind(email)
-    .first();
+    .first<{ is_active: number }>();
 
-  if (!user || !user.is_active) {
-    return error(c, 'USER_NOT_FOUND', 'No active account found with this email', 404);
+  // Only actually issue an OTP for a valid, active account — but ALWAYS return the
+  // same response so this endpoint can't be used to enumerate registered admins.
+  if (user && user.is_active) {
+    await createOtp(email, c.env);
   }
 
-  await createOtp(email, c.env);
-
-  return success(c, { message: 'OTP sent to your email' });
+  return success(c, { message: 'If an account exists for that email, an OTP has been sent.' });
 });
 
 // Email OTP verify
@@ -139,6 +113,14 @@ authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
     return error(c, 'RATE_LIMITED', 'Too many attempts. Please try again later.', 429);
   }
 
+  // Hard escalating lockout per identifier (defeats slow brute-force of the small
+  // PIN keyspace beyond the sliding rate limit).
+  const lock = await getPinLock(c.env, rawId);
+  if (lock.locked) {
+    c.header('Retry-After', String(lock.retryAfter));
+    return error(c, 'ACCOUNT_LOCKED', 'Too many failed attempts. This account is temporarily locked.', 429);
+  }
+
   const user = await c.env.DB.prepare(
     `SELECT id, name, email, role, pin_hash, is_active, pin_acknowledged FROM users WHERE ${lookupColumn} = ?`
   ).bind(rawId).first<{
@@ -156,8 +138,10 @@ authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
 
   const valid = await verifyPin(pin, user.pin_hash);
   if (!valid) {
+    await recordPinFailure(c.env, rawId);
     return error(c, 'INVALID_CREDENTIALS', 'Invalid credentials', 401);
   }
+  await clearPinLock(c.env, rawId);
 
   // Lazy upgrade: transparently re-hash legacy SHA-256 PINs to PBKDF2 on a
   // successful verify. Off the response path via waitUntil so it adds no latency.
@@ -227,6 +211,14 @@ authRoutes.post('/change-pin', zValidator('json', changePinSchema), async (c) =>
   const newHash = await hashPin(new_pin);
   await c.env.DB.prepare('UPDATE users SET pin_hash = ?, pin_acknowledged = 1 WHERE id = ?')
     .bind(newHash, session.userId).run();
+
+  // Revoke any OTHER sessions (the old PIN may be compromised), then re-issue
+  // THIS browser's session with the new epoch so the user isn't logged out here.
+  await bumpSessionEpoch(c.env, session.userId);
+  await deleteSession(sessionId, c.env);
+  const epoch = (await getUserAuthState(c.env, session.userId))?.session_epoch ?? 0;
+  const { sessionId: newSid, ttl } = await createSession(session.userId, session.email, session.role, session.name, c.env, false, epoch);
+  setCookie(c, 'session_id', newSid, sessionCookieOptions(c.env, ttl));
 
   return success(c, { message: 'PIN changed successfully' });
 });
