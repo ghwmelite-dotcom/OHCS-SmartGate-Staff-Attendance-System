@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { XCircle, Clock, AlertTriangle, CheckCircle2, Loader2, CalendarDays, Plus, Trash2, Database, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { XCircle, Clock, AlertTriangle, CheckCircle2, Loader2, CalendarDays, Plus, Trash2, Database, ShieldCheck, ShieldAlert, Rocket, Info } from 'lucide-react';
 
 export interface AppSettings {
   work_start_time: string;
@@ -185,6 +185,12 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
 
           {canEdit && (
             <div className="border-t border-border pt-4">
+              <GoLiveReadinessSection />
+            </div>
+          )}
+
+          {canEdit && (
+            <div className="border-t border-border pt-4">
               <GoLiveResetSection />
             </div>
           )}
@@ -276,6 +282,70 @@ function MigrationRunner() {
       </button>
       {result && (
         <p className={`text-[12px] mt-2 ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</p>
+      )}
+    </div>
+  );
+}
+
+interface ReadinessCheck { key: string; label: string; status: 'ok' | 'warn' | 'info'; detail: string }
+interface ReadinessResponse { checks: ReadinessCheck[]; generatedAt: string }
+
+// Read-only go-live pre-flight: shows what still needs doing before launch
+// (reception PIN, reception teams, holidays, lingering test data, …). Loads on
+// demand so it never adds weight to the settings open.
+function GoLiveReadinessSection() {
+  const [data, setData] = useState<ReadinessResponse | null>(null);
+  const m = useMutation({
+    mutationFn: () => api.get<ReadinessResponse>('/admin/readiness'),
+    onSuccess: (r) => setData(r.data ?? null),
+  });
+
+  const warnCount = data?.checks.filter((c) => c.status === 'warn').length ?? 0;
+
+  const dot = (status: ReadinessCheck['status']) => {
+    if (status === 'ok') return <CheckCircle2 className="h-4 w-4 text-success shrink-0 mt-0.5" />;
+    if (status === 'warn') return <AlertTriangle className="h-4 w-4 text-accent-warm shrink-0 mt-0.5" />;
+    return <Info className="h-4 w-4 text-muted shrink-0 mt-0.5" />;
+  };
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <Rocket className="h-4 w-4 text-primary" />
+        <label className="text-[13px] font-semibold text-foreground">Go-live readiness</label>
+      </div>
+      <p className="text-[11px] text-muted mb-2">
+        A pre-flight check of what still needs setting up before launch. Read-only — safe to run anytime.
+      </p>
+      <button
+        onClick={() => m.mutate()}
+        disabled={m.isPending}
+        className="inline-flex items-center gap-1.5 h-9 px-3 bg-primary text-white text-[13px] font-semibold rounded-lg hover:bg-primary/90 disabled:opacity-50"
+      >
+        {m.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Rocket className="h-3.5 w-3.5" />}
+        {m.isPending ? 'Checking…' : data ? 'Re-check readiness' : 'Check readiness'}
+      </button>
+
+      {data && (
+        <div className="mt-3">
+          <p className={`text-[12px] font-semibold mb-2 ${warnCount === 0 ? 'text-success' : 'text-accent-warm'}`}>
+            {warnCount === 0 ? 'All set — no blockers found.' : `${warnCount} item${warnCount === 1 ? '' : 's'} need attention.`}
+          </p>
+          <ul className="rounded-xl border border-border divide-y divide-border">
+            {data.checks.map((ch) => (
+              <li key={ch.key} className="flex items-start gap-2.5 px-3 py-2">
+                {dot(ch.status)}
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium text-foreground">{ch.label}</p>
+                  <p className="text-[11px] text-muted">{ch.detail}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {m.error instanceof Error && (
+        <p className="text-[12px] text-danger mt-2">{m.error.message}</p>
       )}
     </div>
   );
