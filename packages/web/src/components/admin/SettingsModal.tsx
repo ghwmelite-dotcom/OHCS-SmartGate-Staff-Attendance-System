@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { XCircle, Clock, AlertTriangle, CheckCircle2, Loader2, CalendarDays, Plus, Trash2, Database, ShieldCheck } from 'lucide-react';
+import { XCircle, Clock, AlertTriangle, CheckCircle2, Loader2, CalendarDays, Plus, Trash2, Database, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 export interface AppSettings {
   work_start_time: string;
@@ -183,6 +183,12 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
             </div>
           )}
 
+          {canEdit && (
+            <div className="border-t border-border pt-4">
+              <GoLiveResetSection />
+            </div>
+          )}
+
           {error && (
             <div className="flex items-start gap-2 p-3 bg-danger/5 border border-danger/20 rounded-xl">
               <AlertTriangle className="h-4 w-4 text-danger shrink-0 mt-0.5" />
@@ -268,6 +274,117 @@ function MigrationRunner() {
         {m.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
         {m.isPending ? 'Running…' : 'Run pending migrations'}
       </button>
+      {result && (
+        <p className={`text-[12px] mt-2 ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</p>
+      )}
+    </div>
+  );
+}
+
+interface GoLiveResetResult { ok: boolean; backup: { date: string } }
+
+// Superadmin-only "clean slate" before go-live. Deletes the demo directory
+// (officers + reception teams) and ALL test activity, keeping only the real org
+// config (directorates, categories, holidays, settings), this superadmin's own
+// login, and the kiosk user. Irreversible — the server backs up to R2 first.
+// Guarded by a typed confirmation phrase + a PIN re-entry.
+function GoLiveResetSection() {
+  const qc = useQueryClient();
+  const [armed, setArmed] = useState(false);
+  const [phrase, setPhrase] = useState('');
+  const [pin, setPin] = useState('');
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const reset = () => { setPhrase(''); setPin(''); };
+
+  const m = useMutation({
+    mutationFn: () => api.post<GoLiveResetResult>('/admin/maintenance/go-live-reset', { confirm: phrase, pin }),
+    onSuccess: (r) => {
+      const d = r.data;
+      setResult({
+        ok: true,
+        text: d
+          ? `System cleared. A backup was saved (${d.backup.date}) before deletion. You can now add the real directory.`
+          : 'System cleared.',
+      });
+      setArmed(false);
+      reset();
+      // Everything the dashboard shows is now empty/changed — refetch it all.
+      ['users', 'officers', 'directorates', 'notifications', 'attendance', 'visits', 'audit', 'app-settings']
+        .forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    },
+    onError: (e) => setResult({ ok: false, text: e instanceof Error ? e.message : 'Reset failed.' }),
+  });
+
+  const canSubmit = phrase === 'RESET' && pin.length >= 4 && !m.isPending;
+
+  return (
+    <div className="rounded-xl border border-danger/30 bg-danger/[0.03] p-4">
+      <div className="flex items-center gap-2 mb-1">
+        <ShieldAlert className="h-4 w-4 text-danger" />
+        <label className="text-[13px] font-semibold text-danger">Danger zone — Go-live reset</label>
+      </div>
+      <p className="text-[11px] text-muted mb-3">
+        Permanently deletes all demo officers, reception teams, every user except <strong>you</strong> and the kiosk,
+        and all test activity (visitors, visits, clock records, notifications, leave/absence, audit log).
+        Keeps directorates, visit categories, holidays and settings. A backup is saved first, but this <strong>cannot be undone</strong>.
+        Use this once, when the office is ready to go live.
+      </p>
+
+      {!armed ? (
+        <button
+          onClick={() => { setResult(null); setArmed(true); }}
+          className="inline-flex items-center gap-1.5 h-9 px-3 border border-danger/40 text-danger text-[13px] font-semibold rounded-lg hover:bg-danger/10 transition-colors"
+        >
+          <ShieldAlert className="h-3.5 w-3.5" /> Clear demo content…
+        </button>
+      ) : (
+        <div className="space-y-2.5">
+          <div>
+            <label className="block text-[12px] font-medium text-foreground mb-1">
+              Type <span className="font-mono font-bold text-danger">RESET</span> to confirm
+            </label>
+            <input
+              type="text"
+              autoComplete="off"
+              value={phrase}
+              onChange={(e) => setPhrase(e.target.value.toUpperCase())}
+              placeholder="RESET"
+              className="w-full h-10 px-3 rounded-xl border border-border bg-background text-[14px] font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-danger/20 focus:border-danger"
+            />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-foreground mb-1">Re-enter your PIN</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 12))}
+              placeholder="Your login PIN"
+              className="w-full h-10 px-3 rounded-xl border border-border bg-background text-[14px] font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-danger/20 focus:border-danger"
+            />
+          </div>
+          <div className="flex items-center gap-2 pt-0.5">
+            <button
+              onClick={() => { setResult(null); m.mutate(); }}
+              disabled={!canSubmit}
+              className="inline-flex items-center gap-1.5 h-9 px-3 bg-danger text-white text-[13px] font-semibold rounded-lg hover:bg-danger/90 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {m.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              {m.isPending ? 'Clearing…' : 'Permanently clear'}
+            </button>
+            <button
+              onClick={() => { setArmed(false); reset(); }}
+              disabled={m.isPending}
+              className="h-9 px-3 text-[13px] font-medium text-muted hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {result && (
         <p className={`text-[12px] mt-2 ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</p>
       )}
