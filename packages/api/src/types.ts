@@ -37,6 +37,10 @@ export interface SessionData {
   email: string;
   role: string;
   name: string;
+  // Session-revocation epoch captured at login. Optional so pre-existing sessions
+  // (which lack it) read as 0 — matching the users.session_epoch default — and are
+  // not force-logged-out on deploy. See middleware/auth.ts.
+  epoch?: number;
 }
 
 /**
