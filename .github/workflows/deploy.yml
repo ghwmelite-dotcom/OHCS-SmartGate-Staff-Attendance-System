@@ -144,13 +144,15 @@ jobs:
             done
             fail "$2 not healthy (last HTTP $code)"
           }
+          # Hit the Worker on its workers.dev host. The branded *.ohcsghana.org zone
+          # has Cloudflare bot protection that 403s datacenter-IP curls from CI, so we
+          # avoid it here; the two Pages SPAs are validated by the wrangler deploy steps.
+          WORKER="https://ohcs-smartgate-api.ohcsghana-main.workers.dev"
           echo "Waiting for propagation…"; sleep 8
-          check200 "https://ohcs-smartgate-api.ohcsghana-main.workers.dev/health" "Worker /health"
-          check200 "https://smartgate.ohcsghana.org/"                             "Admin/VMS SPA"
-          check200 "https://staff-attendance.ohcsghana.org/"                      "Staff PWA"
-          check200 "https://smartgate.ohcsghana.org/api/kiosk/status"             "Routed API (/api/kiosk/status)"
-          # Validate the routed-API payload shape, not just the status code.
-          body=$(curl -s https://smartgate.ohcsghana.org/api/kiosk/status)
+          check200 "$WORKER/health"             "Worker /health"
+          check200 "$WORKER/api/kiosk/status"   "Worker API (/api/kiosk/status)"
+          # Validate the API payload shape, not just the status code.
+          body=$(curl -s "$WORKER/api/kiosk/status")
           echo "kiosk/status payload: $body"
           printf '%s' "$body" | grep -q '"open"' || fail "kiosk/status payload missing the 'open' field"
           echo "✅ Smoke check passed."
