@@ -1,5 +1,5 @@
 import type { Env } from '../types';
-import { encryptText } from './backup-crypto';
+import { encryptText, decryptToText } from './backup-crypto';
 
 /**
  * Daily D1 -> R2 table backup.
@@ -27,7 +27,7 @@ export interface BackupResult {
 // Includes visit_categories (config) + webauthn_credentials (passkey enrolments)
 // so a restore recovers them; only transient notifications/push_subscriptions
 // are intentionally excluded. See docs .../2026-06-21-backup-safety-design.md.
-const BACKUP_TABLES = [
+export const BACKUP_TABLES = [
   'users',
   'visitors',
   'visits',
@@ -82,6 +82,64 @@ export async function exportBackupToR2(env: Env): Promise<BackupResult> {
   );
 
   return result;
+}
+
+export interface BackupVerification {
+  date: string | null;
+  ok: boolean;
+  totalRows: number;
+  tables: { name: string; rows: number; ok: boolean }[];
+  missing: string[];
+}
+
+/**
+ * Most recent backup date (YYYY-MM-DD) under `backups/`, or null if none.
+ * Uses a delimited list so we read folder prefixes, not every object.
+ */
+export async function getLatestBackupDate(env: Env): Promise<string | null> {
+  let latest: string | null = null;
+  let cursor: string | undefined;
+  do {
+    const list = await env.STORAGE.list({ prefix: BACKUP_PREFIX, delimiter: '/', cursor });
+    for (const p of list.delimitedPrefixes ?? []) {
+      const m = /^backups\/(\d{4}-\d{2}-\d{2})\/$/.exec(p);
+      if (m && (latest === null || m[1]! > latest)) latest = m[1]!;
+    }
+    cursor = list.truncated ? list.cursor : undefined;
+  } while (cursor);
+  return latest;
+}
+
+/**
+ * "A backup you can't restore isn't a backup." Reads the latest backup's
+ * objects, decrypts + parses each expected table, and reports per-table row
+ * counts + an overall ok flag. ok === every expected table present and a valid
+ * JSON array. Read-only. Run from the daily cron (alert on !ok) and exposed via
+ * GET /api/admin/maintenance/backup-status.
+ */
+export async function verifyLatestBackup(env: Env): Promise<BackupVerification> {
+  const date = await getLatestBackupDate(env);
+  if (!date) return { date: null, ok: false, totalRows: 0, tables: [], missing: [...BACKUP_TABLES] };
+
+  const tables: { name: string; rows: number; ok: boolean }[] = [];
+  const missing: string[] = [];
+
+  for (const t of BACKUP_TABLES) {
+    const obj = await env.STORAGE.get(`${BACKUP_PREFIX}${date}/${t}.json`);
+    if (!obj) { missing.push(t); continue; }
+    try {
+      const text = await decryptToText(await obj.text(), env.BACKUP_ENCRYPTION_KEY);
+      const rows = JSON.parse(text);
+      const okRow = Array.isArray(rows);
+      tables.push({ name: t, rows: okRow ? rows.length : 0, ok: okRow });
+    } catch {
+      tables.push({ name: t, rows: 0, ok: false });
+    }
+  }
+
+  const ok = missing.length === 0 && tables.every((t) => t.ok);
+  const totalRows = tables.reduce((s, t) => s + t.rows, 0);
+  return { date, ok, totalRows, tables, missing };
 }
 
 /**

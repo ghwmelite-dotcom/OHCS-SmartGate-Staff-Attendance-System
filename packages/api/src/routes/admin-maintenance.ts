@@ -5,7 +5,7 @@ import type { Env, SessionData } from '../types';
 import { success, error } from '../lib/response';
 import { requireRole } from '../lib/require-role';
 import { purgeExpiredVisitorPhotos } from '../services/photo-purge';
-import { exportBackupToR2 } from '../services/backup';
+import { exportBackupToR2, verifyLatestBackup } from '../services/backup';
 import { verifyPin } from '../services/auth';
 import { recordAudit, auditActorFromContext } from '../services/audit';
 
@@ -37,6 +37,16 @@ adminMaintenanceRoutes.post('/run-backup', async (c) => {
 
   const result = await exportBackupToR2(c.env);
   return success(c, result);
+});
+
+// Read-only — latest backup's date, per-table row counts, and whether it's
+// readable + restorable (decrypts + parses). Powers the Settings "last backup"
+// line so backups can be trusted without waiting for the verify cron to alert.
+adminMaintenanceRoutes.get('/backup-status', async (c) => {
+  const blocked = requireRole(c, 'superadmin');
+  if (blocked) return blocked;
+
+  return success(c, await verifyLatestBackup(c.env));
 });
 
 // ---------------------------------------------------------------------------
