@@ -291,6 +291,16 @@ CREATE TABLE IF NOT EXISTS directorate_receivers (
 );
 
 -- ---------------------------------------------------------------------------
+-- Public holidays — dates the kiosk treats as "office closed" (admin-managed).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS holidays (
+    id         TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    date       TEXT NOT NULL UNIQUE,                 -- 'YYYY-MM-DD' (Ghana local = UTC)
+    name       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+-- ---------------------------------------------------------------------------
 -- Migration bookkeeping (kept last)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS applied_migrations (

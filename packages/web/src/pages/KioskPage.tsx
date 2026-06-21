@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { kioskApi, KioskApiError, type KioskVisit, type KioskDirectorate, type IdCheckVerdict } from '@/lib/kioskApi';
+import { kioskApi, KioskApiError, type KioskVisit, type KioskDirectorate, type IdCheckVerdict, type KioskOfficeStatus } from '@/lib/kioskApi';
 import { API_BASE, BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
@@ -29,7 +29,18 @@ const visitorSchema = z.object({
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
 
-type Mode = 'welcome' | 'form' | 'face' | 'id' | 'submitting' | 'success' | 'checkout-scan' | 'checkout-confirm' | 'checkout-done';
+type Mode = 'welcome' | 'form' | 'face' | 'id' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-confirm' | 'checkout-done';
+
+// Short banner/label for a closed office, by reason.
+function officeBannerText(o: KioskOfficeStatus): string {
+  switch (o.reason) {
+    case 'holiday': return o.holiday_name ? `closed today — ${o.holiday_name}` : 'closed today — public holiday';
+    case 'weekend': return 'closed for the weekend';
+    case 'before_hours': return `opens at ${o.work_start}`;
+    case 'after_hours': return `closed for the day — reopens at ${o.work_start}`;
+    default: return 'closed';
+  }
+}
 
 const fieldCls = 'w-full h-12 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary';
 
@@ -44,6 +55,8 @@ export function KioskPage() {
   const [overridePin, setOverridePin] = useState('');
   const [overrideError, setOverrideError] = useState<string | null>(null);
   const [overrideSubmitting, setOverrideSubmitting] = useState(false);
+  const [office, setOffice] = useState<KioskOfficeStatus | null>(null);
+  const [officeClosedMsg, setOfficeClosedMsg] = useState<string | null>(null);
   const [checkoutBadge, setCheckoutBadge] = useState<string | null>(null);
   const [checkoutVisit, setCheckoutVisit] = useState<KioskVisit | null>(null);
   const checkingInRef = useRef(false);
@@ -60,6 +73,14 @@ export function KioskPage() {
       kioskApi.getDirectorates().then(setDirectorates).catch(() => { /* leave empty; reception assists */ });
     }
   }, [mode, directorates.length]);
+
+  // Refresh the office-open status whenever the kiosk returns to its idle screen,
+  // so the closed banner reflects the current time/day without a page reload.
+  useEffect(() => {
+    if (mode === 'welcome') {
+      kioskApi.getStatus().then(setOffice).catch(() => { /* assume open on error — never block */ });
+    }
+  }, [mode]);
 
   async function onSubmitForm(data: VisitorForm) {
     setSubmitError(null);
@@ -125,13 +146,23 @@ export function KioskPage() {
       setIdBlocked(false);
       setMode('success');
     } catch (e) {
-      const blocked = e instanceof KioskApiError && e.status === 422 && e.code === 'ID_NOT_VERIFIED';
-      if (blocked) {
+      const code = e instanceof KioskApiError ? e.code : null;
+      const status = e instanceof KioskApiError ? e.status : 0;
+      if (status === 422 && code === 'ID_NOT_VERIFIED') {
         setIdBlocked(true);
         if (isOverride) {
           setOverrideError('Incorrect PIN — please ask reception to assist at the desk.');
         }
         setMode('id'); // stay on the ID step
+      } else if (status === 423 && code === 'OFFICE_CLOSED') {
+        setOfficeClosedMsg(e instanceof Error ? e.message : 'The office is currently closed.');
+        if (isOverride) {
+          setOverrideError('Incorrect PIN — please ask reception to assist at the desk.');
+        } else {
+          setOverridePin('');
+          setOverrideError(null);
+        }
+        setMode('office-blocked'); // prompt for the reception override
       } else {
         setSubmitError(e instanceof Error ? e.message : 'Check-in failed. Please see reception.');
         setMode('success');
@@ -161,6 +192,7 @@ export function KioskPage() {
     setShowOverride(false);
     setOverridePin('');
     setOverrideError(null);
+    setOfficeClosedMsg(null);
     setCheckoutBadge(null);
     setCheckoutVisit(null);
     checkingInRef.current = false;
@@ -216,6 +248,15 @@ export function KioskPage() {
 
         {mode === 'welcome' && (
           <div className="space-y-3 mt-6">
+            {office && !office.open && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-accent/30 bg-accent/10 px-4 py-3">
+                <ShieldAlert className="h-4.5 w-4.5 text-accent-warm shrink-0 mt-0.5" />
+                <p className="text-[13px] text-foreground">
+                  <span className="font-semibold capitalize">Office {officeBannerText(office)}.</span>{' '}
+                  <span className="text-muted">Check-in needs reception authorisation; check-out is available.</span>
+                </p>
+              </div>
+            )}
             <button onClick={() => { form.reset(); setMode('form'); }} className="w-full h-14 bg-primary text-white text-base font-semibold rounded-xl inline-flex items-center justify-center gap-2 active:scale-[0.99]">
               <LogIn className="h-5 w-5" /> Check In
             </button>
@@ -404,6 +445,49 @@ export function KioskPage() {
 
         {mode === 'submitting' && (
           <div className="mt-8 text-center"><Loader2 className="h-8 w-8 text-primary mx-auto animate-spin" /></div>
+        )}
+
+        {mode === 'office-blocked' && (
+          <div className="mt-6 space-y-4">
+            <div className="bg-accent/5 rounded-2xl border border-accent/30 shadow-sm p-6 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 shrink-0 bg-accent/15 rounded-full flex items-center justify-center">
+                  <ShieldAlert className="h-5 w-5 text-accent-warm" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Office closed</h3>
+                  <p className="text-[13px] text-muted mt-1">{officeClosedMsg ?? 'The office is currently closed.'}</p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <p className="text-[13px] text-muted">Ask the reception officer to enter the override PIN to authorise this check-in.</p>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  pattern="\d*"
+                  maxLength={8}
+                  value={overridePin}
+                  onChange={(e) => setOverridePin(e.currentTarget.value.replace(/\D/g, '').slice(0, 8))}
+                  className={fieldCls}
+                  placeholder="Reception PIN"
+                  autoFocus
+                />
+                {overrideError && <p className="text-danger text-xs">{overrideError}</p>}
+                <div className="flex gap-2">
+                  <button onClick={resetAll} className="h-11 px-4 text-sm text-muted">Cancel</button>
+                  <button
+                    onClick={() => finishCheckIn(overridePin)}
+                    disabled={overrideSubmitting || overridePin.length < 4}
+                    className="flex-1 h-11 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                  >
+                    {overrideSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    {overrideSubmitting ? 'Verifying…' : 'Approve & Check In'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {mode === 'success' && (

@@ -13,6 +13,7 @@ import { checkOutByBadgeCode } from '../services/check-out';
 import { checkIdDocument } from '../services/id-check';
 import { isBlockingVerdict, mostConservativeVerdict, type IdCheckVerdict } from '../lib/id-check';
 import { getAppSettings } from '../services/settings';
+import { getOfficeStatus, officeClosedMessage } from '../services/office-hours';
 import { timingSafeEqualStrings } from '../services/auth';
 
 export const kioskRoutes = new Hono<{ Bindings: Env }>();
@@ -61,6 +62,14 @@ kioskRoutes.post('/visitors', zValidator('json', KioskCreateVisitorSchema), asyn
          body.organisation || null, body.id_type || null, body.id_number || null).run();
   const visitor = await c.env.DB.prepare('SELECT * FROM visitors WHERE id = ?').bind(id).first();
   return created(c, visitor);
+});
+
+// Public office-open status for the kiosk (drives the closed banner + the
+// reception-override prompt on check-in). No auth — same surface as /directorates.
+kioskRoutes.get('/status', async (c) => {
+  if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
+  const status = await getOfficeStatus(c.env);
+  return success(c, status);
 });
 
 // Public directorate list for the kiosk form (id/name/abbreviation only — no PII).
@@ -152,6 +161,21 @@ kioskRoutes.post('/check-in', zValidator('json', KioskCheckInSchema), async (c) 
     }
     // Override accepted — annotate the persisted verdict for the audit trail.
     persistedCheck = { ...effective!, override: { by: 'reception', at: new Date().toISOString() } };
+  }
+
+  // Office-hours gate: outside working hours / weekend / public holiday, a check-in
+  // requires the reception override PIN (the SAME PIN as the ID gate — one entry
+  // clears both). Check-out is never gated. The kiosk surfaces a distinct
+  // OFFICE_CLOSED (423) so it can prompt for the override.
+  const office = await getOfficeStatus(c.env);
+  if (!office.open) {
+    const pinSet = !!settings.reception_override_pin;
+    const supplied = body.reception_override_pin ?? '';
+    const overrideValid =
+      pinSet && supplied !== '' && timingSafeEqualStrings(supplied, settings.reception_override_pin!);
+    if (!overrideValid) {
+      return error(c, 'OFFICE_CLOSED', officeClosedMessage(office), 423);
+    }
   }
 
   const dir = await c.env.DB.prepare('SELECT reception_officer_id FROM directorates WHERE id = ?')
