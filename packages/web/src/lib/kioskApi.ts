@@ -75,6 +75,19 @@ export interface KioskDirectorate {
   reception_officer_name: string | null;
 }
 
+export type OfficeStatusReason = 'open' | 'before_hours' | 'after_hours' | 'weekend' | 'holiday';
+
+export interface KioskOfficeStatus {
+  open: boolean;
+  reason: OfficeStatusReason;
+  holiday_name: string | null;
+  work_start: string;
+  work_end: string;
+  date: string;
+  weekday: number;
+  server_time: string;
+}
+
 export interface IdCheckVerdict {
   verdict: 'document' | 'not_document' | 'indeterminate';
   detected_type?: 'ghana_card' | 'passport' | 'drivers_license' | 'staff_id' | 'other' | 'none';
@@ -102,4 +115,5 @@ export const kioskApi = {
   checkIn: (body: KioskCheckInBody) => kioskRequest<KioskVisit>('/check-in', body),
   checkOut: (badgeCode: string) => kioskRequest<KioskVisit>('/check-out', { badge_code: badgeCode }),
   getDirectorates: () => kioskGet<KioskDirectorate[]>('/directorates'),
+  getStatus: () => kioskGet<KioskOfficeStatus>('/status'),
 };

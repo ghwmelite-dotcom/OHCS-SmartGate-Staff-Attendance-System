@@ -34,6 +34,7 @@ const BACKUP_TABLES = [
   'leave_requests',
   'absence_notices',
   'directorate_receivers',
+  'holidays',
 ] as const;
 
 const RETENTION_DAYS = 30;

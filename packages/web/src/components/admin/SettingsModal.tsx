@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { XCircle, Clock, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
+import { XCircle, Clock, AlertTriangle, CheckCircle2, Loader2, CalendarDays, Plus, Trash2 } from 'lucide-react';
 
 export interface AppSettings {
   work_start_time: string;
@@ -118,8 +118,12 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
               className="w-full h-10 px-3 rounded-xl border border-border bg-background text-[14px] font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed"
             />
             <p className="text-[11px] text-muted mt-1">
-              Receptionists enter this at the kiosk to approve a check-in the ID-photo check flagged. Leave blank to disable overrides.
+              Receptionists enter this at the kiosk to approve a check-in the ID-photo check flagged (and to authorise a check-in while the office is closed). Leave blank to disable overrides.
             </p>
+          </div>
+
+          <div className="border-t border-border pt-4">
+            <HolidaysSection canEdit={canEdit} />
           </div>
 
           {error && (
@@ -157,6 +161,94 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+interface Holiday { id: string; date: string; name: string }
+
+function HolidaysSection({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const [date, setDate] = useState('');
+  const [name, setName] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+
+  const { data } = useQuery({
+    queryKey: ['holidays'],
+    queryFn: () => api.get<Holiday[]>('/admin/holidays'),
+  });
+  const holidays = data?.data ?? [];
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ['holidays'] });
+  const addM = useMutation({
+    mutationFn: (body: { date: string; name: string }) => api.post('/admin/holidays', body),
+    onSuccess: () => { setDate(''); setName(''); setErr(null); refresh(); },
+    onError: (e) => setErr(e instanceof Error ? e.message : 'Could not add holiday'),
+  });
+  const delM = useMutation({
+    mutationFn: (id: string) => api.delete(`/admin/holidays/${id}`),
+    onSuccess: refresh,
+  });
+
+  // Today (Ghana = UTC) as YYYY-MM-DD, to dim past holidays.
+  const today = new Date().toISOString().slice(0, 10);
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <CalendarDays className="h-4 w-4 text-primary" />
+        <label className="text-[13px] font-semibold text-foreground">Public holidays</label>
+      </div>
+      <p className="text-[11px] text-muted mb-3">
+        On these dates (and weekends, and outside working hours) the kiosk treats the office as closed and requires the reception override to check a visitor in. Verify against the official Ministry of the Interior list.
+      </p>
+
+      {holidays.length > 0 && (
+        <div className="max-h-44 overflow-y-auto rounded-xl border border-border divide-y divide-border mb-3">
+          {holidays.map((h) => (
+            <div key={h.id} className={`flex items-center gap-3 px-3 py-2 ${h.date < today ? 'opacity-50' : ''}`}>
+              <span className="text-[12px] font-mono text-muted w-[92px] shrink-0">{h.date}</span>
+              <span className="text-[13px] text-foreground flex-1 truncate">{h.name}</span>
+              {canEdit && (
+                <button
+                  onClick={() => delM.mutate(h.id)}
+                  disabled={delM.isPending}
+                  className="text-muted hover:text-danger transition-colors shrink-0"
+                  aria-label={`Remove ${h.name}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {canEdit && (
+        <div className="flex flex-wrap items-end gap-2">
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="h-9 px-2 rounded-lg border border-border bg-background text-[13px] font-mono"
+          />
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Holiday name"
+            className="h-9 px-3 rounded-lg border border-border bg-background text-[13px] flex-1 min-w-[140px]"
+          />
+          <button
+            onClick={() => { if (date && name.trim()) addM.mutate({ date, name: name.trim() }); }}
+            disabled={addM.isPending || !date || !name.trim()}
+            className="inline-flex items-center gap-1.5 h-9 px-3 bg-primary text-white text-[13px] font-semibold rounded-lg hover:bg-primary/90 disabled:opacity-50"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add
+          </button>
+          {err && <p className="text-danger text-[12px] w-full">{err}</p>}
+        </div>
+      )}
     </div>
   );
 }
