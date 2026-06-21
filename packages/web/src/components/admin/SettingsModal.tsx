@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { XCircle, Clock, AlertTriangle, CheckCircle2, Loader2, CalendarDays, Plus, Trash2 } from 'lucide-react';
+import { XCircle, Clock, AlertTriangle, CheckCircle2, Loader2, CalendarDays, Plus, Trash2, Database } from 'lucide-react';
 
 export interface AppSettings {
   work_start_time: string;
@@ -126,6 +126,12 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
             <HolidaysSection canEdit={canEdit} />
           </div>
 
+          {canEdit && (
+            <div className="border-t border-border pt-4">
+              <MigrationRunner />
+            </div>
+          )}
+
           {error && (
             <div className="flex items-start gap-2 p-3 bg-danger/5 border border-danger/20 rounded-xl">
               <AlertTriangle className="h-4 w-4 text-danger shrink-0 mt-0.5" />
@@ -161,6 +167,59 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+interface MigrationRunResult {
+  applied: string[];
+  skipped: string[];
+  failures: { filename: string; errorMessage: string }[];
+}
+
+// Superadmin control to apply any pending DB schema migrations (idempotent —
+// already-applied migrations are skipped). Saves needing the browser console.
+function MigrationRunner() {
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const m = useMutation({
+    mutationFn: () => api.post<MigrationRunResult>('/admin/migrations/run', {}),
+    onSuccess: (r) => {
+      const d = r.data;
+      if (!d) { setResult({ ok: false, text: 'No response from server.' }); return; }
+      if (d.failures.length > 0) {
+        setResult({ ok: false, text: `Failed: ${d.failures.map((f) => `${f.filename} — ${f.errorMessage}`).join('; ')}` });
+        return;
+      }
+      setResult({
+        ok: true,
+        text: d.applied.length > 0
+          ? `Applied ${d.applied.length}: ${d.applied.join(', ')}.`
+          : 'Nothing to apply — all migrations already up to date.',
+      });
+    },
+    onError: (e) => setResult({ ok: false, text: e instanceof Error ? e.message : 'Failed to run migrations.' }),
+  });
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <Database className="h-4 w-4 text-primary" />
+        <label className="text-[13px] font-semibold text-foreground">Database migrations</label>
+      </div>
+      <p className="text-[11px] text-muted mb-2">
+        Apply pending schema updates (e.g. the public-holidays table). Safe to run repeatedly — already-applied migrations are skipped.
+      </p>
+      <button
+        onClick={() => { setResult(null); m.mutate(); }}
+        disabled={m.isPending}
+        className="inline-flex items-center gap-1.5 h-9 px-3 bg-primary text-white text-[13px] font-semibold rounded-lg hover:bg-primary/90 disabled:opacity-50"
+      >
+        {m.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
+        {m.isPending ? 'Running…' : 'Run pending migrations'}
+      </button>
+      {result && (
+        <p className={`text-[12px] mt-2 ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</p>
+      )}
     </div>
   );
 }
