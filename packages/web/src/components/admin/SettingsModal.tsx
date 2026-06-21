@@ -283,6 +283,14 @@ function MigrationRunner() {
 
 interface GoLiveResetResult { ok: boolean; backup: { date: string } }
 
+interface GoLivePreview {
+  officers: number; reception_links: number; visits: number; visitors: number;
+  clock_records: number; notifications: number; push_subscriptions: number;
+  leave_requests: number; absence_notices: number; audit_entries: number;
+  users_deleted: number; webauthn_deleted: number;
+  users_kept: number; directorates_kept: number; categories_kept: number; holidays_kept: number;
+}
+
 // Superadmin-only "clean slate" before go-live. Deletes the demo directory
 // (officers + reception teams) and ALL test activity, keeping only the real org
 // config (directorates, categories, holidays, settings), this superadmin's own
@@ -294,8 +302,15 @@ function GoLiveResetSection() {
   const [phrase, setPhrase] = useState('');
   const [pin, setPin] = useState('');
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [preview, setPreview] = useState<GoLivePreview | null>(null);
 
   const reset = () => { setPhrase(''); setPin(''); };
+
+  // Read-only impact preview — safe to run anytime; never deletes anything.
+  const previewM = useMutation({
+    mutationFn: () => api.get<GoLivePreview>('/admin/maintenance/go-live-reset/preview'),
+    onSuccess: (r) => setPreview(r.data ?? null),
+  });
 
   const m = useMutation({
     mutationFn: () => api.post<GoLiveResetResult>('/admin/maintenance/go-live-reset', { confirm: phrase, pin }),
@@ -330,6 +345,35 @@ function GoLiveResetSection() {
         Keeps directorates, visit categories, holidays and settings. A backup is saved first, but this <strong>cannot be undone</strong>.
         Use this once, when the office is ready to go live.
       </p>
+
+      <div className="mb-3">
+        <button
+          onClick={() => previewM.mutate()}
+          disabled={previewM.isPending}
+          className="inline-flex items-center gap-1.5 h-8 px-2.5 border border-border text-foreground text-[12px] font-medium rounded-lg hover:bg-background transition-colors disabled:opacity-50"
+        >
+          {previewM.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
+          Preview impact (safe — counts only)
+        </button>
+        {preview && (
+          <div className="mt-2 rounded-lg border border-border bg-background/60 p-3 text-[12px]">
+            <p className="font-semibold text-danger mb-1">Would delete:</p>
+            <ul className="text-foreground space-y-0.5 mb-2">
+              <li>{preview.officers} officers · {preview.reception_links} reception links</li>
+              <li>{preview.users_deleted} users (keeping {preview.users_kept}: you + kiosk)</li>
+              <li>{preview.visits} visits · {preview.visitors} visitors</li>
+              <li>{preview.clock_records} clock records · {preview.notifications} notifications</li>
+              <li>{preview.leave_requests} leave · {preview.absence_notices} absence · {preview.push_subscriptions} push subs</li>
+              <li>{preview.webauthn_deleted} biometric credentials · {preview.audit_entries} audit entries</li>
+            </ul>
+            <p className="font-semibold text-success mb-1">Would keep:</p>
+            <ul className="text-foreground space-y-0.5">
+              <li>{preview.directorates_kept} directorates · {preview.categories_kept} visit categories · {preview.holidays_kept} holidays</li>
+              <li>App settings, your login, and the kiosk user</li>
+            </ul>
+          </div>
+        )}
+      </div>
 
       {!armed ? (
         <button

@@ -19,7 +19,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { GO_LIVE_RESET_STATEMENTS } from './admin-maintenance';
+import { GO_LIVE_RESET_STATEMENTS, GO_LIVE_RESET_PREVIEW_SQL } from './admin-maintenance';
 
 interface SqliteStatement {
   all(...params: unknown[]): unknown[];
@@ -122,6 +122,31 @@ describe('GO_LIVE_RESET_STATEMENTS — FK-safe wipe', () => {
     ]) {
       expect(count(db, t), `${t} should be empty`).toBe(0);
     }
+  });
+
+  it('preview reports the exact delete/keep counts WITHOUT changing anything', () => {
+    const db = newDb();
+    seed(db);
+
+    // Bind order mirrors the route: keep,keep (users_deleted), keep,keep
+    // (webauthn_deleted), keep,keep (users_kept).
+    const p = db.prepare(GO_LIVE_RESET_PREVIEW_SQL)
+      .get(SUPERADMIN_ID, KIOSK_ID, SUPERADMIN_ID, KIOSK_ID, SUPERADMIN_ID, KIOSK_ID) as Record<string, number>;
+
+    expect(p.officers).toBe(2);
+    expect(p.reception_links).toBe(2);
+    expect(p.visits).toBe(1);
+    expect(p.visitors).toBe(1);
+    expect(p.users_deleted).toBe(3);   // director, staff, intern
+    expect(p.users_kept).toBe(2);      // superadmin + kiosk
+    expect(p.webauthn_deleted).toBe(1); // staff's; superadmin's is kept
+    expect(p.directorates_kept).toBe(2);
+    expect(p.categories_kept).toBe(1);
+    expect(p.holidays_kept).toBe(1);
+
+    // Preview must be read-only — nothing was deleted.
+    expect(count(db, 'officers')).toBe(2);
+    expect(count(db, 'users')).toBe(5);
   });
 
   it('preserves the real org config, the acting superadmin and the kiosk user', () => {
