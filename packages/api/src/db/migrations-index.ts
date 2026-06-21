@@ -25,6 +25,7 @@ import idempotencyUnique from './migration-idempotency-unique.sql';
 import receptionOverridePin from './migration-reception-override-pin.sql';
 import visitorPhotoRetention from './migration-visitor-photo-retention.sql';
 import holidays from './migration-holidays.sql';
+import holidays2026Amendment from './migration-holidays-2026-amendment.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -54,6 +55,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-reception-override-pin.sql', sql: receptionOverridePin },
   { filename: 'migration-visitor-photo-retention.sql', sql: visitorPhotoRetention },
   { filename: 'migration-holidays.sql', sql: holidays },
+  { filename: 'migration-holidays-2026-amendment.sql', sql: holidays2026Amendment },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {
