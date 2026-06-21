@@ -32,6 +32,11 @@ crons = ["*/15 7-9 * * 1-5", "0 9 * * 1-5", "0 16 * * 5", "0 9 1 * *", "0 9 1 1 
 ENVIRONMENT = "production"
 VAPID_SUBJECT = "mailto:ops@ohcs.gov.gh"
 TELEGRAM_BOT_USERNAME = "ohcs_smartgate_bot"
+# Welcome-email config. RESEND_API_KEY is a Worker SECRET (set via dashboard/CLI),
+# not here. EMAIL_FROM must be a Resend-verified sender on a verified domain.
+EMAIL_FROM = "OHCS SmartGate <no-reply@ohcsghana.org>"
+STAFF_APP_URL = "https://staff-attendance.ohcsghana.org"
+ADMIN_APP_URL = "https://smartgate.ohcsghana.org"
 # Dev/staging only — accept any webauthn_assertion at clock-in for testing.
 # The Worker refuses requests in production when this is "true".
 DEV_BYPASS_REAUTH = "false"
@@ -58,6 +63,9 @@ binding = "AI"
 ENVIRONMENT = "development"
 VAPID_SUBJECT = "mailto:ops@ohcs.gov.gh"
 TELEGRAM_BOT_USERNAME = "ohcs_smartgate_bot"
+EMAIL_FROM = "OHCS SmartGate <no-reply@ohcsghana.org>"
+STAFF_APP_URL = "https://staff-attendance.ohcsghana.org"
+ADMIN_APP_URL = "https://smartgate.ohcsghana.org"
 
 [[env.dev.d1_databases]]
 binding = "DB"

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error, created, notFound } from '../lib/response';
 import { hashPin } from '../services/auth';
+import { sendWelcomeEmail } from '../services/email';
 
 export const userRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -86,6 +87,17 @@ userRoutes.post('/', zValidator('json', createUserSchema), async (c) => {
             d.abbreviation as directorate_abbr
      FROM users u LEFT JOIN directorates d ON u.directorate_id = d.id WHERE u.id = ?`
   ).bind(id).first();
+
+  // Fire-and-forget welcome email (best-effort — never blocks/fails creation).
+  c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
+    userId: id,
+    name: body.name,
+    email: body.email,
+    role: body.role,
+    identifierLabel: 'Staff ID',
+    identifierValue: body.staff_id.toUpperCase(),
+    pin: body.pin,
+  }));
 
   return created(c, user);
 });

@@ -14,6 +14,12 @@ export interface Env {
   // Dev/staging only — accept any webauthn_assertion at clock-in for testing.
   // Production refuses to start with this set to "true".
   DEV_BYPASS_REAUTH?: string;
+  // Transactional email (Resend) — welcome email on user creation. Email is
+  // best-effort and skipped entirely when RESEND_API_KEY / EMAIL_FROM are unset.
+  RESEND_API_KEY?: string;            // secret
+  EMAIL_FROM?: string;                // e.g. "OHCS SmartGate <no-reply@ohcsghana.org>" — must be a Resend-verified sender
+  STAFF_APP_URL?: string;             // staff attendance PWA base (default https://staff-attendance.ohcsghana.org)
+  ADMIN_APP_URL?: string;             // admin/VMS portal base (default https://smartgate.ohcsghana.org)
 }
 
 export type Role =

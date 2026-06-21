@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error, created, notFound } from '../lib/response';
 import { hashPin } from '../services/auth';
+import { sendWelcomeEmail } from '../services/email';
 import { requireRole } from '../lib/require-role';
 import { getAppSettings, toSqlTime } from '../services/settings';
 import { runNssEndOfServiceCheck } from '../services/nss-eos';
@@ -152,6 +153,17 @@ adminNssRoutes.post('/', zValidator('json', createNssSchema), async (c) => {
   )
     .bind(id)
     .first<NssUserRow>();
+
+  // Fire-and-forget welcome email (best-effort — NSS sign in with their NSS number).
+  c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
+    userId: id,
+    name: body.name,
+    email: body.email,
+    role: 'staff',
+    identifierLabel: 'NSS Number',
+    identifierValue: body.nss_number,
+    pin: initialPin,
+  }));
 
   return created(c, { user, initial_pin: initialPin });
 });
