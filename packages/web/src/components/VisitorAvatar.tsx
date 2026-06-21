@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { getInitials } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { resolvePhotoUrl } from '@/lib/api';
@@ -18,19 +19,18 @@ const sizeMap = {
 
 export function VisitorAvatar({ firstName, lastName, photoUrl, size = 'md', className }: VisitorAvatarProps) {
   const resolved = resolvePhotoUrl(photoUrl);
-  if (resolved) {
+  // On image load error, fall back to initials via React state — never innerHTML
+  // (which would be an HTML-injection sink for visitor-supplied names).
+  const [imgFailed, setImgFailed] = useState(false);
+
+  if (resolved && !imgFailed) {
     return (
       <div className={cn('rounded-xl overflow-hidden shrink-0', sizeMap[size], className)}>
         <img
           src={resolved}
           alt={`${firstName} ${lastName}`}
           className="w-full h-full object-cover"
-          onError={(e) => {
-            // Fallback to initials on load error
-            (e.target as HTMLImageElement).style.display = 'none';
-            (e.target as HTMLImageElement).parentElement!.classList.add('bg-primary/10');
-            (e.target as HTMLImageElement).parentElement!.innerHTML = `<span class="text-primary font-bold">${getInitials(firstName, lastName)}</span>`;
-          }}
+          onError={() => setImgFailed(true)}
         />
       </div>
     );

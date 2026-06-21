@@ -237,7 +237,9 @@ export function BulkImportTab() {
                     <td className="px-5 py-2.5 text-[13px] text-muted font-mono">{i + 1}</td>
                     {allHeaders.map(h => (
                       <td key={h} className="px-5 py-2.5 text-[14px] text-foreground">
-                        {row[h] || <span className="text-muted-foreground italic">empty</span>}
+                        {h === 'pin'
+                          ? (row[h] ? <span className="font-mono tracking-widest">••••</span> : <span className="text-muted-foreground italic">empty</span>)
+                          : (row[h] || <span className="text-muted-foreground italic">empty</span>)}
                       </td>
                     ))}
                   </tr>

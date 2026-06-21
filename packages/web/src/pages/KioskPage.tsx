@@ -320,14 +320,6 @@ export function KioskPage() {
                   ))}
                 </select>
               </FieldWrapper>
-              {(() => {
-                const sel = directorates.find((d) => d.id === form.watch('directorate_id'));
-                return sel?.reception_officer_name ? (
-                  <p className="text-[13px] text-muted -mt-2">
-                    You'll be received by <span className="font-semibold text-foreground">{sel.reception_officer_name}</span>.
-                  </p>
-                ) : null;
-              })()}
               <FieldWrapper icon={<User className="h-4 w-4" />} label="Who are you visiting? (optional)" error={form.formState.errors.host_name?.message}>
                 <input {...form.register('host_name')} className={fieldCls} placeholder="e.g. Mr. Mensah" />
               </FieldWrapper>

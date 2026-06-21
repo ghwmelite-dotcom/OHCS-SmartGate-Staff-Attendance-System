@@ -8,7 +8,10 @@ import { recordAudit, auditActorFromContext, diffRecords } from '../services/aud
 
 const AUDITED_SETTINGS_FIELDS = ['work_start_time', 'late_threshold_time', 'work_end_time', 'reception_override_pin', 'clockin_reauth_enforce', 'clockin_passive_liveness_enforce'];
 
-const SETTINGS_COLUMNS = `work_start_time, late_threshold_time, work_end_time, reception_override_pin,
+// Response columns — NEVER return the cleartext reception_override_pin (a secret
+// readable by admins); expose only whether one is set.
+const SETTINGS_COLUMNS = `work_start_time, late_threshold_time, work_end_time,
+  (reception_override_pin IS NOT NULL AND reception_override_pin <> '') AS reception_override_pin_set,
   clockin_reauth_enforce, clockin_passive_liveness_enforce, updated_by, updated_at`;
 
 export const adminSettingsRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
@@ -50,8 +53,10 @@ adminSettingsRoutes.put('/', zValidator('json', settingsSchema), async (c) => {
     `SELECT work_start_time, late_threshold_time, work_end_time, reception_override_pin,
             clockin_reauth_enforce, clockin_passive_liveness_enforce FROM app_settings WHERE id = 1`
   ).first<Record<string, number | string | null>>();
-  // Empty string = disable overrides (store NULL); digits = store as-is.
-  const overridePin = body.reception_override_pin ? body.reception_override_pin : null;
+  // Write-only PIN: omitted = keep current; '' = clear (NULL); digits = set.
+  const overridePin = body.reception_override_pin === undefined
+    ? ((before?.reception_override_pin as string | null) ?? null)
+    : (body.reception_override_pin || null);
   // Enforce flags are optional in the payload — keep the current value when omitted.
   const reauthEnforce = body.clockin_reauth_enforce ?? (before?.clockin_reauth_enforce ?? 0);
   const livenessEnforce = body.clockin_passive_liveness_enforce ?? (before?.clockin_passive_liveness_enforce ?? 0);
