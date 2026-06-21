@@ -172,6 +172,14 @@ export interface UserAuthState { is_active: number; role: string; session_epoch:
 const AUTH_STATE_TTL_MS = 30_000;
 const authStateMemo = new Map<string, { state: UserAuthState | null; ts: number }>();
 
+// Only the pre-migration "session_epoch column doesn't exist" case should be
+// tolerated; any other DB error must propagate (don't mask a transient failure
+// as "no epoch" or as "user gone").
+function isMissingColumnError(err: unknown): boolean {
+  const m = err instanceof Error ? err.message : String(err);
+  return /no such column|has no column named/i.test(m);
+}
+
 export async function getUserAuthState(env: Env, userId: string): Promise<UserAuthState | null> {
   const now = Date.now();
   const cached = authStateMemo.get(userId);
@@ -182,10 +190,11 @@ export async function getUserAuthState(env: Env, userId: string): Promise<UserAu
     row = await env.DB.prepare(
       'SELECT is_active, role, session_epoch FROM users WHERE id = ?'
     ).bind(userId).first<UserAuthState>();
-  } catch {
-    // Deploy-safety: the session_epoch column may not exist yet (migration not
-    // applied). Degrade to is_active/role only with epoch 0 — deactivation/role
-    // checks still work; epoch enforcement starts once the migration is applied.
+  } catch (err) {
+    // Deploy-safety: tolerate ONLY the missing session_epoch column (pre-migration).
+    // Any other error propagates so a transient DB blip can't masquerade as
+    // "user gone" (which would delete the session) or silently disable epoch checks.
+    if (!isMissingColumnError(err)) throw err;
     const fallback = await env.DB.prepare('SELECT is_active, role FROM users WHERE id = ?')
       .bind(userId).first<{ is_active: number; role: string }>();
     row = fallback ? { is_active: fallback.is_active, role: fallback.role, session_epoch: 0 } : null;
@@ -204,10 +213,74 @@ export function invalidateUserAuthState(userId: string): void {
 export async function bumpSessionEpoch(env: Env, userId: string): Promise<void> {
   try {
     await env.DB.prepare('UPDATE users SET session_epoch = session_epoch + 1 WHERE id = ?').bind(userId).run();
-  } catch {
-    // session_epoch column not present yet — no-op until the migration is applied.
+  } catch (err) {
+    // Tolerate ONLY the pre-migration missing column; a real failure must surface
+    // so the caller knows revocation didn't happen (don't report a false success).
+    if (!isMissingColumnError(err)) throw err;
+  } finally {
+    invalidateUserAuthState(userId);
   }
-  invalidateUserAuthState(userId);
+}
+
+// Shared session-cookie options so every set/delete site stays consistent.
+// Prod: first-party cookie scoped to the parent domain (shared across the
+// smartgate. + staff-attendance. subdomains), SameSite=Lax, Secure. Dev: host-only.
+export function sessionCookieOptions(env: Env, maxAge: number) {
+  const isProd = env.ENVIRONMENT === 'production';
+  return {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'Lax' as const,
+    path: '/',
+    maxAge,
+    ...(isProd ? { domain: 'ohcsghana.org' } : {}),
+  };
+}
+
+// Delete must mirror domain + path exactly or the cookie isn't cleared.
+export function sessionCookieDeleteOptions(env: Env) {
+  const isProd = env.ENVIRONMENT === 'production';
+  return {
+    path: '/',
+    ...(isProd ? { domain: 'ohcsghana.org' } : {}),
+  };
+}
+
+// --- PIN-login lockout -------------------------------------------------------
+// Hard, escalating lockout per identifier on top of the sliding rate limit. After
+// PIN_LOCK_THRESHOLD consecutive failures the account locks for an escalating
+// cooldown (5m → 10m → 20m … capped 1h), defeating slow online brute-force of the
+// small PIN keyspace. Best-effort KV (not atomic) — paired with the per-id/per-IP
+// rate limits it bounds throughput hard. Cleared on a successful login.
+const PIN_LOCK_THRESHOLD = 5;
+const PIN_LOCK_BASE_SECONDS = 300;
+const PIN_LOCK_MAX_SECONDS = 3600;
+interface PinLock { fails: number; until: number }
+
+export async function getPinLock(env: Env, id: string): Promise<{ locked: boolean; retryAfter: number }> {
+  const raw = await env.KV.get(`pin-lock:${id}`);
+  if (!raw) return { locked: false, retryAfter: 0 };
+  let lock: PinLock;
+  try { lock = JSON.parse(raw) as PinLock; } catch { return { locked: false, retryAfter: 0 }; }
+  const now = Date.now();
+  return lock.until > now ? { locked: true, retryAfter: Math.ceil((lock.until - now) / 1000) } : { locked: false, retryAfter: 0 };
+}
+
+export async function recordPinFailure(env: Env, id: string): Promise<void> {
+  const raw = await env.KV.get(`pin-lock:${id}`);
+  let prev: PinLock = { fails: 0, until: 0 };
+  if (raw) { try { prev = JSON.parse(raw) as PinLock; } catch { /* reset */ } }
+  const fails = prev.fails + 1;
+  let until = 0;
+  if (fails >= PIN_LOCK_THRESHOLD) {
+    const seconds = Math.min(PIN_LOCK_BASE_SECONDS * 2 ** (fails - PIN_LOCK_THRESHOLD), PIN_LOCK_MAX_SECONDS);
+    until = Date.now() + seconds * 1000;
+  }
+  await env.KV.put(`pin-lock:${id}`, JSON.stringify({ fails, until }), { expirationTtl: 86400 });
+}
+
+export async function clearPinLock(env: Env, id: string): Promise<void> {
+  await env.KV.delete(`pin-lock:${id}`);
 }
 
 export async function getSession(sessionId: string, env: Env): Promise<SessionData | null> {

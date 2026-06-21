@@ -17,7 +17,7 @@ import { isoBase64URL, isoUint8Array } from '@simplewebauthn/server/helpers';
 import type { Env, SessionData } from '../types';
 import { success, error } from '../lib/response';
 import { resolveRp } from '../lib/webauthn-rp';
-import { createSession } from '../services/auth';
+import { createSession, getUserAuthState, sessionCookieOptions } from '../services/auth';
 import { rateLimit } from '../lib/rate-limit';
 
 // Public login endpoints (mounted before authMiddleware)
@@ -293,19 +293,16 @@ authWebAuthnPublicRoutes.post('/login/verify', zValidator('json', loginVerifySch
   ).bind(cred.user_id).first<{ id: string; name: string; email: string; role: string; pin_acknowledged: number }>();
   if (!user) return error(c, 'NOT_FOUND', 'User not found', 404);
 
-  const { sessionId, ttl } = await createSession(user.id, user.email, user.role, user.name, c.env, remember ?? false);
+  const epoch = (await getUserAuthState(c.env, user.id))?.session_epoch ?? 0;
+  const { sessionId, ttl } = await createSession(user.id, user.email, user.role, user.name, c.env, remember ?? false, epoch);
 
   await c.env.DB.prepare('UPDATE users SET last_login_at = ? WHERE id = ?')
     .bind(new Date().toISOString(), user.id)
     .run();
 
-  setCookie(c, 'session_id', sessionId, {
-    httpOnly: true,
-    secure: c.env.ENVIRONMENT === 'production',
-    sameSite: c.env.ENVIRONMENT === 'production' ? 'None' : 'Lax',
-    path: '/',
-    maxAge: ttl,
-  });
+  // Use the shared cookie options (HttpOnly, Secure-in-prod, SameSite=Lax,
+  // Domain=ohcsghana.org) — same as the OTP/PIN login paths.
+  setCookie(c, 'session_id', sessionId, sessionCookieOptions(c.env, ttl));
 
   return success(c, {
     user: {
