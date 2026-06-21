@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type Notification } from '@/lib/api';
 import { cn, timeAgo } from '@/lib/utils';
-import { Bell, CheckCheck } from 'lucide-react';
+import { Bell, CheckCheck, X, Trash2 } from 'lucide-react';
 
 export function NotificationBell() {
   const queryClient = useQueryClient();
@@ -30,6 +30,20 @@ export function NotificationBell() {
 
   const markAllReadMutation = useMutation({
     mutationFn: () => api.post('/notifications/read-all', {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/notifications/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+
+  const clearAllMutation = useMutation({
+    mutationFn: () => api.delete('/notifications'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
@@ -67,15 +81,27 @@ export function NotificationBell() {
         <div className="absolute right-0 top-full mt-2 w-80 bg-surface rounded-xl border border-border shadow-lg z-50 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
-            {unreadCount > 0 && (
-              <button
-                onClick={() => markAllReadMutation.mutate()}
-                className="text-xs text-primary hover:underline flex items-center gap-1"
-              >
-                <CheckCheck className="h-3 w-3" />
-                Mark all read
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {unreadCount > 0 && (
+                <button
+                  onClick={() => markAllReadMutation.mutate()}
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                >
+                  <CheckCheck className="h-3 w-3" />
+                  Mark all read
+                </button>
+              )}
+              {notifications.length > 0 && (
+                <button
+                  onClick={() => clearAllMutation.mutate()}
+                  disabled={clearAllMutation.isPending}
+                  className="text-xs text-muted hover:text-danger flex items-center gap-1 disabled:opacity-50"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Clear all
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="max-h-80 overflow-y-auto">
@@ -86,17 +112,17 @@ export function NotificationBell() {
             ) : (
               <div className="divide-y divide-border">
                 {notifications.map((notif) => (
-                  <button
+                  <div
                     key={notif.id}
-                    onClick={() => {
-                      if (!notif.is_read) markReadMutation.mutate(notif.id);
-                    }}
                     className={cn(
-                      'w-full text-left px-4 py-3 transition-colors',
-                      notif.is_read ? 'bg-surface' : 'bg-info/5 hover:bg-info/10'
+                      'group flex items-start gap-2 px-4 py-3 transition-colors',
+                      notif.is_read ? 'bg-surface' : 'bg-info/5'
                     )}
                   >
-                    <div className="flex items-start gap-2">
+                    <button
+                      onClick={() => { if (!notif.is_read) markReadMutation.mutate(notif.id); }}
+                      className="flex-1 min-w-0 text-left flex items-start gap-2"
+                    >
                       {!notif.is_read && (
                         <div className="w-2 h-2 rounded-full bg-info mt-1.5 shrink-0" />
                       )}
@@ -109,8 +135,16 @@ export function NotificationBell() {
                         )}
                         <p className="text-xs text-muted-foreground mt-1">{timeAgo(notif.created_at)}</p>
                       </div>
-                    </div>
-                  </button>
+                    </button>
+                    <button
+                      onClick={() => deleteMutation.mutate(notif.id)}
+                      disabled={deleteMutation.isPending}
+                      aria-label="Remove notification"
+                      className="shrink-0 h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 ))}
               </div>
             )}

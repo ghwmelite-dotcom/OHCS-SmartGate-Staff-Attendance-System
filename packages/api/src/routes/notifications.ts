@@ -58,3 +58,22 @@ notificationRoutes.post('/read-all', async (c) => {
 
   return success(c, { message: 'All marked as read' });
 });
+
+// Remove a single notification (own only).
+notificationRoutes.delete('/:id', async (c) => {
+  const session = c.get('session');
+  const id = c.req.param('id');
+  await c.env.DB.prepare(
+    'DELETE FROM notifications WHERE id = ? AND user_id = ?'
+  ).bind(id, session.userId).run();
+  return success(c, { message: 'Deleted' });
+});
+
+// Clear ALL of the current user's notifications (read and unread).
+notificationRoutes.delete('/', async (c) => {
+  const session = c.get('session');
+  await c.env.DB.prepare(
+    'DELETE FROM notifications WHERE user_id = ?'
+  ).bind(session.userId).run();
+  return success(c, { message: 'All cleared' });
+});
