@@ -85,6 +85,8 @@ const dirRowSchema = z.object({
   abbreviation: z.string().min(1).max(255),
   type: z.enum(['directorate', 'secretariat', 'unit']),
   rooms: z.string().max(255).optional(),
+  floor: z.string().max(255).optional(),
+  wing: z.string().max(255).optional(),
 });
 
 bulkImportRoutes.post('/directorates', async (c) => {
@@ -110,7 +112,7 @@ bulkImportRoutes.post('/directorates', async (c) => {
       continue;
     }
 
-    const { name, abbreviation, type, rooms } = parsed.data;
+    const { name, abbreviation, type, rooms, floor, wing } = parsed.data;
     const abbr = abbreviation.toUpperCase();
 
     const existing = await c.env.DB.prepare(
@@ -125,8 +127,8 @@ bulkImportRoutes.post('/directorates', async (c) => {
 
     const id = crypto.randomUUID().replace(/-/g, '');
     await c.env.DB.prepare(
-      'INSERT INTO directorates (id, name, abbreviation, type, rooms) VALUES (?, ?, ?, ?, ?)'
-    ).bind(id, name, abbr, type, rooms || null).run();
+      'INSERT INTO directorates (id, name, abbreviation, type, rooms, floor, wing) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, name, abbr, type, rooms || null, floor || null, wing || null).run();
 
     imported++;
   }
