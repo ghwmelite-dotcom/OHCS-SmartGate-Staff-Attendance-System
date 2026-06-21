@@ -1,23 +1,66 @@
-name: Deploy to Cloudflare
+name: CI + Deploy to Cloudflare
 
 on:
   push:
     branches: [main]
+  pull_request: {}
   workflow_dispatch: {}
 
-# Only one deploy at a time per branch; a newer push cancels an in-flight run.
+# Only one run at a time per ref; a newer push/PR-push cancels an in-flight run.
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # ───── Gate: typecheck + tests (runs on PRs too, for pre-merge feedback) ─────
+  test:
+    name: Typecheck + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck api
+        run: node ../../node_modules/typescript/bin/tsc --noEmit
+        working-directory: packages/api
+
+      - name: Typecheck web
+        run: node ../../node_modules/typescript/bin/tsc --noEmit
+        working-directory: packages/web
+
+      - name: Typecheck staff
+        run: node ../../node_modules/typescript/bin/tsc --noEmit
+        working-directory: packages/staff
+
+      - name: Test api
+        run: node ../../node_modules/vitest/vitest.mjs run
+        working-directory: packages/api
+
+      - name: Test web
+        run: node ../../node_modules/vitest/vitest.mjs run
+        working-directory: packages/web
+
+  # ───── Deploy (only on push to main / manual; never on PRs) ─────
   deploy:
     name: Build + deploy (Worker + both Pages)
+    needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
-
     env:
       CLOUDFLARE_ACCOUNT_ID: f4f236a6cd8fbddf397c6e9de17d8113
 
@@ -33,19 +76,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      # ───── Gate: typecheck all three packages before any deploy ─────
-      - name: Typecheck api
-        run: node ../../node_modules/typescript/bin/tsc --noEmit
-        working-directory: packages/api
-
-      - name: Typecheck web
-        run: node ../../node_modules/typescript/bin/tsc --noEmit
-        working-directory: packages/web
-
-      - name: Typecheck staff
-        run: node ../../node_modules/typescript/bin/tsc --noEmit
-        working-directory: packages/staff
 
       # ───── Build both PWAs ─────
       - name: Build admin/VMS PWA
@@ -90,3 +120,36 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy packages/staff/dist --project-name=staff-attendance --branch=main --commit-dirty=true
+
+  # ───── Post-deploy smoke check: confirm the live surfaces respond ─────
+  smoke:
+    name: Post-deploy smoke check
+    needs: deploy
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Smoke-check live endpoints
+        run: |
+          set -e
+          fail() { echo "::error::$1"; exit 1; }
+          # Retry a URL up to 3× for a 200 (tolerates brief deploy propagation).
+          check200() {
+            local code
+            for i in 1 2 3; do
+              code=$(curl -s -o /dev/null -w "%{http_code}" "$1")
+              if [ "$code" = "200" ]; then echo "$2 -> 200 ✓"; return 0; fi
+              echo "$2 -> $code (attempt $i)"; sleep 5
+            done
+            fail "$2 not healthy (last HTTP $code)"
+          }
+          echo "Waiting for propagation…"; sleep 8
+          check200 "https://ohcs-smartgate-api.ohcsghana-main.workers.dev/health" "Worker /health"
+          check200 "https://smartgate.ohcsghana.org/"                             "Admin/VMS SPA"
+          check200 "https://staff-attendance.ohcsghana.org/"                      "Staff PWA"
+          check200 "https://smartgate.ohcsghana.org/api/kiosk/status"             "Routed API (/api/kiosk/status)"
+          # Validate the routed-API payload shape, not just the status code.
+          body=$(curl -s https://smartgate.ohcsghana.org/api/kiosk/status)
+          echo "kiosk/status payload: $body"
+          printf '%s' "$body" | grep -q '"open"' || fail "kiosk/status payload missing the 'open' field"
+          echo "✅ Smoke check passed."
