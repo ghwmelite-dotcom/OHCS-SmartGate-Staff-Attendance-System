@@ -5,15 +5,15 @@
 
 export type LatLng = readonly [number, number];
 
-// Single precision-retraced polygon as of 2026-05-08, replacing the earlier
-// 3-building approximation. Keep in sync with the server source of truth in
-// packages/api/src/routes/clock.ts.
+// MUST match the server source of truth in packages/api/src/routes/clock.ts
+// (the real OHCS building footprint, ~34×76m). Previously this was a stale ~7×3m
+// patch, which client-side-rejected staff genuinely inside the building.
 export const OHCS_POLYGONS: readonly (readonly LatLng[])[] = [
   [
-    [5.552548291041157,  -0.19745481365835615],
-    [5.5525690558400616, -0.1974680899154652 ],
-    [5.552594539910443,  -0.19741119167071233],
-    [5.552572831257968,  -0.19740739845439553],
+    [5.5525043, -0.1977808],
+    [5.5527239, -0.1971268],
+    [5.5526358, -0.1970969],
+    [5.5524162, -0.1977509],
   ],
 ];
 

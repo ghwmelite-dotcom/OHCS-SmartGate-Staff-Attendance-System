@@ -125,7 +125,9 @@ export async function recordAudit(env: Env, ctx: AuditContext, input: AuditInput
         action: input.action,
         entity_type: input.entityType ?? null,
         entity_id: input.entityId ?? null,
-        summary: input.summary ?? null,
+        // Cap length; callers must not put secrets in summary (free text isn't
+        // redactable — secret VALUES belong in `changes`, which IS redacted).
+        summary: input.summary ? input.summary.slice(0, 500) : null,
         changes: changesJson,
         ip: ctx.ip,
       };

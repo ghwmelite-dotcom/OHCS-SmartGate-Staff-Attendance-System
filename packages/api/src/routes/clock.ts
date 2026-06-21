@@ -7,6 +7,7 @@ import { sendLateClockAlert } from '../services/reminders';
 import { getAppSettings, hhmmToMinutes } from '../services/settings';
 import { verifyClockWebAuthnAssertion, verifyClockPin } from '../services/clock-reauth';
 import { devLog } from '../lib/log';
+import { recordAudit, auditActorFromContext } from '../services/audit';
 import { isJpeg } from '../lib/image-magic';
 import { ALL_CHALLENGES, verifyLivenessBurst, getReviewCount, incrementReviewCount } from '../services/liveness';
 import type { LivenessChallenge, LivenessSignature } from '../services/liveness/types';
@@ -630,6 +631,11 @@ clockRoutes.post('/admin/clear-test-records', async (c) => {
   const deleted = result.meta?.changes ?? 0;
   const session = c.get('session');
   devLog(c.env, `[CLOCK_TEST_CLEAR] superadmin=${session.userId} cleared=${deleted} target_user=${body.user_id} date=${date}`);
+  // Durable, tamper-evident record of this destructive test-tooling action.
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'clock.test_records_cleared', entityType: 'user', entityId: body.user_id,
+    summary: `Cleared ${deleted} clock record(s) for user ${body.user_id} on ${date} (test tooling)`,
+  });
 
   return success(c, { deleted, user_id: body.user_id, date });
 });

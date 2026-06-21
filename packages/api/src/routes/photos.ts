@@ -36,6 +36,9 @@ photoRoutes.post('/visitors/:id/photo', async (c) => {
   const visitor = await c.env.DB.prepare('SELECT id FROM visitors WHERE id = ?').bind(visitorId).first();
   if (!visitor) return notFound(c, 'Visitor');
 
+  if (Number(c.req.header('content-length') ?? '0') > MAX_PHOTO_BYTES) {
+    return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
+  }
   const body = await c.req.arrayBuffer();
   if (body.byteLength === 0) return error(c, 'EMPTY_BODY', 'No photo data', 400);
   if (body.byteLength > MAX_PHOTO_BYTES) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
@@ -54,6 +57,9 @@ photoRoutes.post('/visitors/:id/id-photo', async (c) => {
   const visitor = await c.env.DB.prepare('SELECT id FROM visitors WHERE id = ?').bind(visitorId).first();
   if (!visitor) return notFound(c, 'Visitor');
 
+  if (Number(c.req.header('content-length') ?? '0') > MAX_PHOTO_BYTES) {
+    return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
+  }
   const body = await c.req.arrayBuffer();
   if (body.byteLength === 0) return error(c, 'EMPTY_BODY', 'No photo data', 400);
   if (body.byteLength > MAX_PHOTO_BYTES) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);

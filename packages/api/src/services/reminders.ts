@@ -26,7 +26,7 @@ export async function sendClockReminders(env: Env): Promise<void> {
   const rows = await env.DB.prepare(
     `SELECT u.id, u.name FROM users u
      WHERE u.is_active = 1
-       AND u.staff_id IS NOT NULL
+       AND (u.staff_id IS NOT NULL OR u.nss_number IS NOT NULL OR u.intern_code IS NOT NULL)
        AND NOT EXISTS (
          SELECT 1 FROM clock_records c
          WHERE c.user_id = u.id AND c.type = 'clock_in' AND DATE(c.timestamp) = ?

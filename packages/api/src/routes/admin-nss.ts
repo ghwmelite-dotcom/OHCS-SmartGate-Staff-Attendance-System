@@ -852,6 +852,7 @@ adminNssRoutes.post('/bulk-import', async (c) => {
     const dirAbbr = dirAbbrRaw.toUpperCase();
 
     if (!name) { skipped.push({ row: rowNumber, reason: 'name is required' }); continue; }
+    if (name.length > 100) { skipped.push({ row: rowNumber, reason: 'name too long (max 100)' }); continue; }
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       skipped.push({ row: rowNumber, reason: 'invalid email' }); continue;
     }
