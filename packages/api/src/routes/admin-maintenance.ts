@@ -5,12 +5,77 @@ import type { Env, SessionData } from '../types';
 import { success, error } from '../lib/response';
 import { requireRole } from '../lib/require-role';
 import { purgeExpiredVisitorPhotos } from '../services/photo-purge';
-import { exportBackupToR2, verifyLatestBackup, loadBackupSnapshot, BACKUP_TABLES } from '../services/backup';
+import { exportBackupToR2, verifyLatestBackup, loadBackupSnapshot, BACKUP_TABLES, type BackupResult } from '../services/backup';
 import { buildRestorePlan, type ColumnMap } from '../services/restore';
-import { verifyPin } from '../services/auth';
+import { verifyPin, getPinLock, recordPinFailure, clearPinLock } from '../services/auth';
 import { recordAudit, auditActorFromContext } from '../services/audit';
+import type { Context } from 'hono';
 
 export const adminMaintenanceRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
+
+type Ctx = Context<{ Bindings: Env; Variables: { session: SessionData } }>;
+
+// Re-authenticate the acting superadmin's own PIN for a destructive action,
+// with the SAME escalating lockout the login path uses (keyed separately so it
+// doesn't interfere with login). The PIN is the last control before an
+// irreversible operation, so a stolen session can't brute-force it. Returns an
+// error Response to short-circuit on failure, or null to proceed. Failed
+// attempts are audited (best-effort) for accountability.
+async function reauthOrError(c: Ctx, pin: string): Promise<Response | null> {
+  const session = c.get('session');
+  const lockId = `destructive-reauth:${session.userId}`;
+
+  const lock = await getPinLock(c.env, lockId);
+  if (lock.locked) {
+    return error(c, 'REAUTH_LOCKED', `Too many attempts. Try again in ${lock.retryAfter}s.`, 429);
+  }
+
+  const me = await c.env.DB.prepare('SELECT pin_hash FROM users WHERE id = ?')
+    .bind(session.userId)
+    .first<{ pin_hash: string | null }>();
+
+  if (!me?.pin_hash || !(await verifyPin(pin, me.pin_hash))) {
+    await recordPinFailure(c.env, lockId);
+    // Best-effort audit of the failed attempt (survives a reset since this
+    // returns before any wipe). Never reveals missing-hash vs wrong-PIN.
+    await recordAudit(c.env, auditActorFromContext(c), {
+      action: 'system.reauth_failed',
+      entityType: 'system',
+      entityId: null,
+      summary: 'Failed PIN re-auth on a destructive maintenance action.',
+    });
+    return error(c, 'REAUTH_FAILED', 'PIN verification failed.', 401);
+  }
+
+  await clearPinLock(c.env, lockId);
+  return null;
+}
+
+// Take a backup of the current DB and refuse to proceed unless it is COMPLETE
+// and verifiably restorable. exportBackupToR2 is resilient per-table (it logs
+// and continues on a per-table failure rather than throwing), so "it didn't
+// throw" is NOT proof of a usable restore point — we must check `failed` is
+// empty AND that the written objects read back + parse (verifyLatestBackup).
+// Returns { backup } on success, or an error Response to short-circuit.
+async function safetyBackupOrError(c: Ctx): Promise<BackupResult | Response> {
+  let backup: BackupResult;
+  try {
+    backup = await exportBackupToR2(c.env);
+  } catch (err) {
+    console.error(`[maintenance] safety backup threw: ${err instanceof Error ? err.message : String(err)}`);
+    return error(c, 'BACKUP_FAILED', 'Backup failed — operation aborted. No data was changed.', 500);
+  }
+  if (backup.failed.length > 0) {
+    console.error(`[maintenance] safety backup incomplete — failed tables: ${backup.failed.join(',')}`);
+    return error(c, 'BACKUP_INCOMPLETE', 'Backup did not capture every table — operation aborted. No data was changed.', 500);
+  }
+  const verification = await verifyLatestBackup(c.env);
+  if (!verification.ok || verification.date !== backup.date) {
+    console.error(`[maintenance] safety backup failed verification: date=${verification.date} ok=${verification.ok} missing=[${verification.missing.join(',')}]`);
+    return error(c, 'BACKUP_UNVERIFIED', 'Backup could not be verified as restorable — operation aborted. No data was changed.', 500);
+  }
+  return backup;
+}
 
 // The system kiosk user is preserved across a go-live reset (it's the author of
 // kiosk-sourced check-ins, not a demo account). Keep in sync with seed.sql.
@@ -132,30 +197,15 @@ adminMaintenanceRoutes.post('/go-live-reset', zValidator('json', goLiveResetSche
   const session = c.get('session');
   const { pin } = c.req.valid('json');
 
-  // Re-authenticate: the acting superadmin must re-enter their own PIN. Never
-  // reveal whether the failure was a missing hash vs. a wrong PIN.
-  const me = await c.env.DB.prepare('SELECT pin_hash FROM users WHERE id = ?')
-    .bind(session.userId)
-    .first<{ pin_hash: string | null }>();
-  if (!me?.pin_hash || !(await verifyPin(pin, me.pin_hash))) {
-    return error(c, 'REAUTH_FAILED', 'PIN verification failed.', 401);
-  }
+  // Throttled PIN re-auth (last control before an irreversible wipe).
+  const reauthErr = await reauthOrError(c, pin);
+  if (reauthErr) return reauthErr;
 
-  // Always back up first. If the backup fails, ABORT — never wipe without a
-  // restore point. exportBackupToR2 itself is resilient per-table; a thrown
-  // error here means the whole export couldn't run.
-  let backup;
-  try {
-    backup = await exportBackupToR2(c.env);
-  } catch (err) {
-    return error(
-      c,
-      'BACKUP_FAILED',
-      'Backup failed — reset aborted. No data was deleted.',
-      500,
-      { detail: err instanceof Error ? err.message : String(err) },
-    );
-  }
+  // Always back up first, and only proceed if it's complete + verifiably
+  // restorable — never wipe without a real restore point.
+  const safety = await safetyBackupOrError(c);
+  if (safety instanceof Response) return safety;
+  const backup = safety;
 
   // FK-safe, atomic wipe (D1 runs a batch in one implicit transaction; any
   // failure rolls the whole thing back). Order: null the circular / text-only
@@ -217,37 +267,27 @@ adminMaintenanceRoutes.post('/restore', zValidator('json', restoreSchema), async
   const blocked = requireRole(c, 'superadmin');
   if (blocked) return blocked;
 
-  const session = c.get('session');
   const { pin, date } = c.req.valid('json');
 
-  // Re-auth (same as reset): verify the acting superadmin's own PIN.
-  const me = await c.env.DB.prepare('SELECT pin_hash FROM users WHERE id = ?')
-    .bind(session.userId)
-    .first<{ pin_hash: string | null }>();
-  if (!me?.pin_hash || !(await verifyPin(pin, me.pin_hash))) {
-    return error(c, 'REAUTH_FAILED', 'PIN verification failed.', 401);
-  }
+  // Throttled PIN re-auth (last control before replacing all live data).
+  const reauthErr = await reauthOrError(c, pin);
+  if (reauthErr) return reauthErr;
 
   // Load the chosen snapshot (decrypts). 404 if that date has no backup.
   let snapshot;
   try {
     snapshot = await loadBackupSnapshot(c.env, date);
   } catch (err) {
-    return error(c, 'RESTORE_READ_FAILED', 'Could not read/decrypt that backup.', 500, {
-      detail: err instanceof Error ? err.message : String(err),
-    });
+    console.error(`[maintenance] restore read/decrypt failed for ${date}: ${err instanceof Error ? err.message : String(err)}`);
+    return error(c, 'RESTORE_READ_FAILED', 'Could not read or decrypt that backup.', 500);
   }
   if (!snapshot) return error(c, 'BACKUP_NOT_FOUND', `No backup found for ${date}.`, 404);
 
-  // Back up the CURRENT state first so the restore is itself reversible.
-  let safetyBackup;
-  try {
-    safetyBackup = await exportBackupToR2(c.env);
-  } catch (err) {
-    return error(c, 'BACKUP_FAILED', 'Pre-restore backup failed — restore aborted. No data changed.', 500, {
-      detail: err instanceof Error ? err.message : String(err),
-    });
-  }
+  // Back up the CURRENT state first (verified complete) so the restore is
+  // itself reversible.
+  const safety = await safetyBackupOrError(c);
+  if (safety instanceof Response) return safety;
+  const safetyBackup = safety;
 
   // Build + run the FK-safe wipe+reinsert as one atomic batch.
   const columns = await liveColumnMap(c.env);
