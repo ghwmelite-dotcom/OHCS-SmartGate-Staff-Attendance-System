@@ -222,12 +222,16 @@ export function KioskPage() {
 
   return (
     <div className="min-h-screen bg-civic relative flex flex-col items-center justify-center p-6">
-      <img
-        src="/ohcs-logo.jpg"
-        alt=""
+      <div
         aria-hidden="true"
-        className="pointer-events-none select-none fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(72vw,124vh,1040px)] max-w-none opacity-[0.09] grayscale mix-blend-multiply"
-      />
+        className="pointer-events-none select-none fixed inset-0 z-0 flex items-center justify-center overflow-hidden"
+      >
+        <img
+          src="/ohcs-logo.jpg"
+          alt=""
+          className="kiosk-seal w-[min(72vw,124vh,1040px)] max-w-none opacity-[0.11] grayscale mix-blend-multiply"
+        />
+      </div>
       <div className="relative z-10 w-full max-w-lg bg-white/70 backdrop-blur-sm rounded-2xl border border-border shadow-xl ring-1 ring-accent/10 overflow-hidden p-6">
         <div className="ghana-flag-bar -mt-6 -mx-6 mb-5" />
         <KioskHeader />

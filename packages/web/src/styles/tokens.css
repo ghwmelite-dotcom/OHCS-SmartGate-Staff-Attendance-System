@@ -89,6 +89,21 @@
   50% { background-position: 100% 50%; }
 }
 
+/* Slowly rotating OHCS crest seal behind the kiosk card. The crest is circular,
+   so the ring stays perfectly steady while the "GHANA CIVIL SERVICE" lettering and
+   emblem revolve — a sleek, hypnotic effect rather than a wobble. Transform-only +
+   will-change so it runs on the compositor (GPU). The global prefers-reduced-motion
+   rule below neutralises it for motion-sensitive users. */
+@keyframes kiosk-seal-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.kiosk-seal {
+  animation: kiosk-seal-rotate 48s linear infinite;
+  transform-origin: center center;
+  will-change: transform;
+}
+
 /* Warm paper texture overlay */
 .paper-texture {
   position: relative;
