@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { XCircle, Clock, AlertTriangle, CheckCircle2, Loader2, CalendarDays, Plus, Trash2, Database } from 'lucide-react';
+import { XCircle, Clock, AlertTriangle, CheckCircle2, Loader2, CalendarDays, Plus, Trash2, Database, ShieldCheck } from 'lucide-react';
 
 export interface AppSettings {
   work_start_time: string;
   late_threshold_time: string;
   work_end_time: string;
   reception_override_pin: string | null;
+  clockin_reauth_enforce?: number;
+  clockin_passive_liveness_enforce?: number;
   updated_by: string | null;
   updated_at: string;
 }
@@ -24,6 +26,8 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
   const [late, setLate] = useState(current.late_threshold_time);
   const [end, setEnd] = useState(current.work_end_time);
   const [overridePin, setOverridePin] = useState(current.reception_override_pin ?? '');
+  const [enforceReauth, setEnforceReauth] = useState((current.clockin_reauth_enforce ?? 0) === 1);
+  const [enforceLiveness, setEnforceLiveness] = useState((current.clockin_passive_liveness_enforce ?? 0) === 1);
   const [localErr, setLocalErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -31,10 +35,12 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
     setLate(current.late_threshold_time);
     setEnd(current.work_end_time);
     setOverridePin(current.reception_override_pin ?? '');
+    setEnforceReauth((current.clockin_reauth_enforce ?? 0) === 1);
+    setEnforceLiveness((current.clockin_passive_liveness_enforce ?? 0) === 1);
   }, [current]);
 
   const mutation = useMutation({
-    mutationFn: (body: { work_start_time: string; late_threshold_time: string; work_end_time: string; reception_override_pin: string }) =>
+    mutationFn: (body: { work_start_time: string; late_threshold_time: string; work_end_time: string; reception_override_pin: string; clockin_reauth_enforce: number; clockin_passive_liveness_enforce: number }) =>
       api.put<AppSettings>('/admin/settings', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['app-settings'] });
@@ -54,7 +60,11 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
       setLocalErr('Override PIN must be 4–8 digits (or blank to disable)');
       return;
     }
-    mutation.mutate({ work_start_time: start, late_threshold_time: late, work_end_time: end, reception_override_pin: pin });
+    mutation.mutate({
+      work_start_time: start, late_threshold_time: late, work_end_time: end, reception_override_pin: pin,
+      clockin_reauth_enforce: enforceReauth ? 1 : 0,
+      clockin_passive_liveness_enforce: enforceLiveness ? 1 : 0,
+    });
   }
 
   const apiErr = mutation.error instanceof Error ? mutation.error.message : null;
@@ -120,6 +130,30 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
             <p className="text-[11px] text-muted mt-1">
               Receptionists enter this at the kiosk to approve a check-in the ID-photo check flagged (and to authorise a check-in while the office is closed). Leave blank to disable overrides.
             </p>
+          </div>
+
+          <div className="border-t border-border pt-4">
+            <div className="flex items-center gap-2 mb-1">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              <label className="text-[13px] font-semibold text-foreground">Clock-in security</label>
+            </div>
+            <p className="text-[11px] text-muted mb-2">
+              When enforced, clock-ins that fail the check are <strong>rejected</strong> (instead of recorded-only). Flip back here instantly if staff get blocked.
+            </p>
+            <label className="flex items-start gap-2 mb-2 cursor-pointer select-none">
+              <input type="checkbox" checked={enforceReauth} onChange={e => setEnforceReauth(e.target.checked)} disabled={!canEdit} className="h-4 w-4 mt-0.5 rounded border-border accent-primary disabled:opacity-50" />
+              <span className="text-[13px] text-foreground">Enforce re-auth <span className="text-muted">— require a PIN or biometric at clock-in (PIN works as a fallback).</span></span>
+            </label>
+            <label className="flex items-start gap-2 cursor-pointer select-none">
+              <input type="checkbox" checked={enforceLiveness} onChange={e => setEnforceLiveness(e.target.checked)} disabled={!canEdit} className="h-4 w-4 mt-0.5 rounded border-border accent-primary disabled:opacity-50" />
+              <span className="text-[13px] text-foreground">Enforce liveness <span className="text-muted">— reject clock-in photos that fail the anti-spoof check.</span></span>
+            </label>
+            {(enforceReauth || enforceLiveness) && (
+              <div className="flex items-start gap-2 mt-2 p-2 bg-accent/10 border border-accent/20 rounded-lg">
+                <AlertTriangle className="h-3.5 w-3.5 text-accent-warm shrink-0 mt-0.5" />
+                <p className="text-[11px] text-foreground">Enforcing can block legitimate clock-ins (liveness false-rejects, or offline clock-ins with no prompt). Roll out one at a time and watch the HR-review queue.</p>
+              </div>
+            )}
           </div>
 
           <div className="border-t border-border pt-4">
