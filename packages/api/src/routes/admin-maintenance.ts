@@ -5,7 +5,8 @@ import type { Env, SessionData } from '../types';
 import { success, error } from '../lib/response';
 import { requireRole } from '../lib/require-role';
 import { purgeExpiredVisitorPhotos } from '../services/photo-purge';
-import { exportBackupToR2, verifyLatestBackup } from '../services/backup';
+import { exportBackupToR2, verifyLatestBackup, loadBackupSnapshot, BACKUP_TABLES } from '../services/backup';
+import { buildRestorePlan, type ColumnMap } from '../services/restore';
 import { verifyPin } from '../services/auth';
 import { recordAudit, auditActorFromContext } from '../services/audit';
 
@@ -183,4 +184,86 @@ adminMaintenanceRoutes.post('/go-live-reset', zValidator('json', goLiveResetSche
   });
 
   return success(c, { ok: true, backup });
+});
+
+// ---------------------------------------------------------------------------
+// Restore from backup (superadmin) — replace ALL live data with a chosen R2
+// snapshot. Disaster recovery / undo a mistaken go-live reset. Backs up the
+// CURRENT state first (so a restore is itself reversible), then atomically
+// wipes + re-inserts the snapshot FK-safely. notifications + push subscriptions
+// are NOT in backups and are cleared (transient). visit_categories + passkeys
+// ARE restored. Spec: docs/superpowers/specs/2026-06-21-backup-safety-design.md
+// ---------------------------------------------------------------------------
+const RESTORE_PHRASE = 'RESTORE';
+const restoreSchema = z.object({
+  confirm: z.literal(RESTORE_PHRASE),
+  pin: z.string().min(4).max(12),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+// Live-schema column names per backed-up table (PRAGMA table_info). Lets the
+// plan drop columns a snapshot has but the current schema doesn't (and rely on
+// defaults for new ones). Table names come from the fixed BACKUP_TABLES list.
+async function liveColumnMap(env: Env): Promise<ColumnMap> {
+  const map: ColumnMap = {};
+  for (const t of BACKUP_TABLES) {
+    const r = await env.DB.prepare(`PRAGMA table_info(${t})`).all<{ name: string }>();
+    map[t] = (r.results ?? []).map((row) => row.name);
+  }
+  return map;
+}
+
+adminMaintenanceRoutes.post('/restore', zValidator('json', restoreSchema), async (c) => {
+  const blocked = requireRole(c, 'superadmin');
+  if (blocked) return blocked;
+
+  const session = c.get('session');
+  const { pin, date } = c.req.valid('json');
+
+  // Re-auth (same as reset): verify the acting superadmin's own PIN.
+  const me = await c.env.DB.prepare('SELECT pin_hash FROM users WHERE id = ?')
+    .bind(session.userId)
+    .first<{ pin_hash: string | null }>();
+  if (!me?.pin_hash || !(await verifyPin(pin, me.pin_hash))) {
+    return error(c, 'REAUTH_FAILED', 'PIN verification failed.', 401);
+  }
+
+  // Load the chosen snapshot (decrypts). 404 if that date has no backup.
+  let snapshot;
+  try {
+    snapshot = await loadBackupSnapshot(c.env, date);
+  } catch (err) {
+    return error(c, 'RESTORE_READ_FAILED', 'Could not read/decrypt that backup.', 500, {
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+  if (!snapshot) return error(c, 'BACKUP_NOT_FOUND', `No backup found for ${date}.`, 404);
+
+  // Back up the CURRENT state first so the restore is itself reversible.
+  let safetyBackup;
+  try {
+    safetyBackup = await exportBackupToR2(c.env);
+  } catch (err) {
+    return error(c, 'BACKUP_FAILED', 'Pre-restore backup failed — restore aborted. No data changed.', 500, {
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Build + run the FK-safe wipe+reinsert as one atomic batch.
+  const columns = await liveColumnMap(c.env);
+  const plan = buildRestorePlan(snapshot, columns);
+  await c.env.DB.batch(plan.map((s) => c.env.DB.prepare(s.sql).bind(...s.binds)));
+
+  const restored = Object.fromEntries(Object.entries(snapshot).map(([t, rows]) => [t, rows.length]));
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'system.restore',
+    entityType: 'system',
+    entityId: date,
+    summary:
+      `Restored from backup ${date} (current state first backed up at ${safetyBackup.date}). ` +
+      `Replaced all live data; notifications + push subscriptions cleared (not in backups).`,
+  });
+
+  return success(c, { ok: true, date, safetyBackup, restored });
 });

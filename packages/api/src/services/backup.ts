@@ -84,6 +84,29 @@ export async function exportBackupToR2(env: Env): Promise<BackupResult> {
   return result;
 }
 
+export type BackupSnapshot = Record<string, Record<string, unknown>[]>;
+
+/**
+ * Load + decrypt every backed-up table for `date` into memory. Returns null if
+ * no objects exist for that date (so the caller can 404). Missing individual
+ * tables come back as []. Used by the restore flow.
+ */
+export async function loadBackupSnapshot(env: Env, date: string): Promise<BackupSnapshot | null> {
+  const snapshot: BackupSnapshot = {};
+  let foundAny = false;
+
+  for (const t of BACKUP_TABLES) {
+    const obj = await env.STORAGE.get(`${BACKUP_PREFIX}${date}/${t}.json`);
+    if (!obj) { snapshot[t] = []; continue; }
+    foundAny = true;
+    const text = await decryptToText(await obj.text(), env.BACKUP_ENCRYPTION_KEY);
+    const rows = JSON.parse(text);
+    snapshot[t] = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+  }
+
+  return foundAny ? snapshot : null;
+}
+
 export interface BackupVerification {
   date: string | null;
   ok: boolean;

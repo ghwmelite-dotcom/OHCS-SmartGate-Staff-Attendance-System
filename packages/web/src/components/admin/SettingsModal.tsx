@@ -201,6 +201,12 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
             </div>
           )}
 
+          {canEdit && (
+            <div className="border-t border-border pt-4">
+              <RestoreSection />
+            </div>
+          )}
+
           {error && (
             <div className="flex items-start gap-2 p-3 bg-danger/5 border border-danger/20 rounded-xl">
               <AlertTriangle className="h-4 w-4 text-danger shrink-0 mt-0.5" />
@@ -289,6 +295,128 @@ function MigrationRunner() {
       {result && (
         <p className={`text-[12px] mt-2 ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</p>
       )}
+    </div>
+  );
+}
+
+interface RestoreResult { ok: boolean; date: string; safetyBackup: { date: string }; restored: Record<string, number> }
+
+// Superadmin restore from an R2 backup. Replaces ALL live data with the chosen
+// snapshot; the server backs up the current state first. Guarded by typed
+// RESTORE + PIN, prefilled with the latest backup date.
+function RestoreSection() {
+  const qc = useQueryClient();
+  const [armed, setArmed] = useState(false);
+  const [date, setDate] = useState('');
+  const [phrase, setPhrase] = useState('');
+  const [pin, setPin] = useState('');
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Prefill the date with the latest backup when arming.
+  const latestM = useMutation({
+    mutationFn: () => api.get<BackupStatus>('/admin/maintenance/backup-status'),
+    onSuccess: (r) => { if (r.data?.date && !date) setDate(r.data.date); },
+  });
+
+  const m = useMutation({
+    mutationFn: () => api.post<RestoreResult>('/admin/maintenance/restore', { confirm: phrase, pin, date }),
+    onSuccess: (r) => {
+      const d = r.data;
+      setResult({
+        ok: true,
+        text: d
+          ? `Restored from ${d.date}. Current state was backed up first (${d.safetyBackup.date}).`
+          : 'Restore complete.',
+      });
+      setArmed(false);
+      setPhrase(''); setPin('');
+      ['users', 'officers', 'directorates', 'notifications', 'attendance', 'visits', 'audit', 'app-settings', 'holidays']
+        .forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    },
+    onError: (e) => setResult({ ok: false, text: e instanceof Error ? e.message : 'Restore failed.' }),
+  });
+
+  const canSubmit = phrase === 'RESTORE' && /^\d{4}-\d{2}-\d{2}$/.test(date) && pin.length >= 4 && !m.isPending;
+
+  return (
+    <div className="rounded-xl border border-danger/30 bg-danger/[0.03] p-4">
+      <div className="flex items-center gap-2 mb-1">
+        <Database className="h-4 w-4 text-danger" />
+        <label className="text-[13px] font-semibold text-danger">Danger zone — Restore from backup</label>
+      </div>
+      <p className="text-[11px] text-muted mb-3">
+        Replaces <strong>all current data</strong> with a chosen backup snapshot. The current state is backed up first,
+        so this is reversible — but in-app notifications, push subscriptions are not part of backups and will be cleared.
+        Use only for disaster recovery.
+      </p>
+
+      {!armed ? (
+        <button
+          onClick={() => { setResult(null); setArmed(true); latestM.mutate(); }}
+          className="inline-flex items-center gap-1.5 h-9 px-3 border border-danger/40 text-danger text-[13px] font-semibold rounded-lg hover:bg-danger/10 transition-colors"
+        >
+          <Database className="h-3.5 w-3.5" /> Restore a backup…
+        </button>
+      ) : (
+        <div className="space-y-2.5">
+          <div>
+            <label className="block text-[12px] font-medium text-foreground mb-1">Backup date</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={date}
+              onChange={(e) => setDate(e.target.value.trim())}
+              placeholder="YYYY-MM-DD"
+              className="w-full h-10 px-3 rounded-xl border border-border bg-background text-[14px] font-mono focus:outline-none focus:ring-2 focus:ring-danger/20 focus:border-danger"
+            />
+            <p className="text-[11px] text-muted mt-1">Prefilled with the latest backup. Use the Backups section above to check dates.</p>
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-foreground mb-1">
+              Type <span className="font-mono font-bold text-danger">RESTORE</span> to confirm
+            </label>
+            <input
+              type="text"
+              autoComplete="off"
+              value={phrase}
+              onChange={(e) => setPhrase(e.target.value.toUpperCase())}
+              placeholder="RESTORE"
+              className="w-full h-10 px-3 rounded-xl border border-border bg-background text-[14px] font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-danger/20 focus:border-danger"
+            />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-foreground mb-1">Re-enter your PIN</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 12))}
+              placeholder="Your login PIN"
+              className="w-full h-10 px-3 rounded-xl border border-border bg-background text-[14px] font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-danger/20 focus:border-danger"
+            />
+          </div>
+          <div className="flex items-center gap-2 pt-0.5">
+            <button
+              onClick={() => { setResult(null); m.mutate(); }}
+              disabled={!canSubmit}
+              className="inline-flex items-center gap-1.5 h-9 px-3 bg-danger text-white text-[13px] font-semibold rounded-lg hover:bg-danger/90 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {m.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
+              {m.isPending ? 'Restoring…' : 'Restore now'}
+            </button>
+            <button
+              onClick={() => { setArmed(false); setPhrase(''); setPin(''); }}
+              disabled={m.isPending}
+              className="h-9 px-3 text-[13px] font-medium text-muted hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {result && <p className={`text-[12px] mt-2 ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</p>}
     </div>
   );
 }
