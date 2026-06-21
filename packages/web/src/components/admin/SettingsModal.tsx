@@ -179,6 +179,12 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
 
           {canEdit && (
             <div className="border-t border-border pt-4">
+              <BackupStatusSection />
+            </div>
+          )}
+
+          {canEdit && (
+            <div className="border-t border-border pt-4">
               <MigrationRunner />
             </div>
           )}
@@ -282,6 +288,77 @@ function MigrationRunner() {
       </button>
       {result && (
         <p className={`text-[12px] mt-2 ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</p>
+      )}
+    </div>
+  );
+}
+
+interface BackupStatus {
+  date: string | null;
+  ok: boolean;
+  totalRows: number;
+  tables: { name: string; rows: number; ok: boolean }[];
+  missing: string[];
+}
+
+// Shows the latest backup's date + whether it's verified restorable, with a
+// "Run backup now" action. Loads on demand. Uses the read-only backup-status
+// endpoint (which decrypts + parses the latest snapshot).
+function BackupStatusSection() {
+  const [status, setStatus] = useState<BackupStatus | null>(null);
+  const [ran, setRan] = useState<string | null>(null);
+
+  const statusM = useMutation({
+    mutationFn: () => api.get<BackupStatus>('/admin/maintenance/backup-status'),
+    onSuccess: (r) => setStatus(r.data ?? null),
+  });
+  const runM = useMutation({
+    mutationFn: () => api.post<{ date: string }>('/admin/maintenance/run-backup', {}),
+    onSuccess: (r) => { setRan(r.data?.date ?? null); statusM.mutate(); },
+  });
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <Database className="h-4 w-4 text-primary" />
+        <label className="text-[13px] font-semibold text-foreground">Backups</label>
+      </div>
+      <p className="text-[11px] text-muted mb-2">
+        Daily D1→R2 snapshot (encrypted at rest). Check the latest, or run one now.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => statusM.mutate()}
+          disabled={statusM.isPending}
+          className="inline-flex items-center gap-1.5 h-9 px-3 border border-border text-foreground text-[13px] font-semibold rounded-lg hover:bg-background disabled:opacity-50"
+        >
+          {statusM.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 text-primary" />}
+          Check latest backup
+        </button>
+        <button
+          onClick={() => { setRan(null); runM.mutate(); }}
+          disabled={runM.isPending}
+          className="inline-flex items-center gap-1.5 h-9 px-3 bg-primary text-white text-[13px] font-semibold rounded-lg hover:bg-primary/90 disabled:opacity-50"
+        >
+          {runM.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
+          {runM.isPending ? 'Backing up…' : 'Run backup now'}
+        </button>
+      </div>
+      {ran && <p className="text-[12px] text-success mt-2">Backup written for {ran}.</p>}
+      {status && (
+        <div className="mt-2 text-[12px]">
+          {status.date ? (
+            <p className={status.ok ? 'text-success' : 'text-danger'}>
+              {status.ok ? '✓' : '✕'} Last backup {status.date} — {status.ok ? 'verified restorable' : 'FAILED verification'} · {status.totalRows} rows
+              {status.missing.length > 0 && <> · missing: {status.missing.join(', ')}</>}
+            </p>
+          ) : (
+            <p className="text-accent-warm">No backups found yet.</p>
+          )}
+        </div>
+      )}
+      {(statusM.error || runM.error) instanceof Error && (
+        <p className="text-[12px] text-danger mt-2">{((statusM.error || runM.error) as Error).message}</p>
       )}
     </div>
   );

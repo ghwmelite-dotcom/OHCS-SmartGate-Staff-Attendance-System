@@ -36,7 +36,7 @@ import { sendDailySummary as sendDailySummaryFn } from './services/daily-summary
 import { sendClockReminders, sendMonthlyReportReady } from './services/reminders';
 import { runNssEndOfServiceCheck } from './services/nss-eos';
 import { purgeExpiredVisitorPhotos } from './services/photo-purge';
-import { exportBackupToR2 } from './services/backup';
+import { exportBackupToR2, verifyLatestBackup } from './services/backup';
 import { alertAdminError } from './lib/error-alert';
 import { authMiddleware } from './middleware/auth';
 import { errorHandler } from './middleware/error-handler';
@@ -198,6 +198,16 @@ export default {
           }
           try {
             await exportBackupToR2(env);
+            // Immediately verify what we just wrote is readable + restorable. A
+            // backup that silently can't be parsed is worse than no backup.
+            const v = await verifyLatestBackup(env);
+            if (!v.ok) {
+              await alertAdminError(
+                env,
+                'cron:backup-verify',
+                new Error(`Backup ${v.date ?? '(none)'} failed verification — missing=[${v.missing.join(',')}] bad=[${v.tables.filter((t) => !t.ok).map((t) => t.name).join(',')}]`),
+              );
+            }
           } catch (err) {
             console.error(`[scheduled] backup failed: ${err instanceof Error ? err.message : String(err)}`);
             await alertAdminError(env, 'cron:backup', err);
