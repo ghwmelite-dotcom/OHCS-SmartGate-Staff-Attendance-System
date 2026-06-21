@@ -20,6 +20,10 @@ export interface Env {
   EMAIL_FROM?: string;                // e.g. "OHCS SmartGate <no-reply@ohcsghana.org>" — must be a Resend-verified sender
   STAFF_APP_URL?: string;             // staff attendance PWA base (default https://staff-attendance.ohcsghana.org)
   ADMIN_APP_URL?: string;             // admin/VMS portal base (default https://smartgate.ohcsghana.org)
+  // Optional base64 (32-byte) AES-GCM key for at-rest encryption of D1→R2
+  // backups. Unset → backups are written in plaintext (deploy-safe); legacy
+  // plaintext backups remain restorable regardless. See services/backup-crypto.ts.
+  BACKUP_ENCRYPTION_KEY?: string;     // secret
 }
 
 export type Role =

@@ -1,4 +1,5 @@
 import type { Env } from '../types';
+import { encryptText } from './backup-crypto';
 
 /**
  * Daily D1 -> R2 table backup.
@@ -23,6 +24,9 @@ export interface BackupResult {
 }
 
 // Fixed internal allowlist — verified against schema.sql. NOT user input.
+// Includes visit_categories (config) + webauthn_credentials (passkey enrolments)
+// so a restore recovers them; only transient notifications/push_subscriptions
+// are intentionally excluded. See docs .../2026-06-21-backup-safety-design.md.
 const BACKUP_TABLES = [
   'users',
   'visitors',
@@ -30,6 +34,8 @@ const BACKUP_TABLES = [
   'clock_records',
   'officers',
   'directorates',
+  'visit_categories',
+  'webauthn_credentials',
   'app_settings',
   'leave_requests',
   'absence_notices',
@@ -47,11 +53,16 @@ export async function exportBackupToR2(env: Env): Promise<BackupResult> {
   const tables: { name: string; rows: number }[] = [];
   const failed: string[] = [];
 
+  if (!env.BACKUP_ENCRYPTION_KEY) {
+    console.warn('[backup] BACKUP_ENCRYPTION_KEY not set — writing plaintext backup (PII at rest in R2).');
+  }
+
   for (const t of BACKUP_TABLES) {
     try {
       // `t` is from the fixed BACKUP_TABLES allowlist — safe to interpolate.
       const rows = (await env.DB.prepare('SELECT * FROM ' + t).all()).results ?? [];
-      await env.STORAGE.put(`${BACKUP_PREFIX}${date}/${t}.json`, JSON.stringify(rows));
+      const payload = await encryptText(JSON.stringify(rows), env.BACKUP_ENCRYPTION_KEY);
+      await env.STORAGE.put(`${BACKUP_PREFIX}${date}/${t}.json`, payload);
       tables.push({ name: t, rows: rows.length });
     } catch (err) {
       failed.push(t);
