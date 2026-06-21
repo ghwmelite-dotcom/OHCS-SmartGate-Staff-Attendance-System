@@ -56,8 +56,8 @@ button applies it to prod. Added to `backup.ts` `BACKUP_TABLES`.
 
 ### Hash chain
 
-- `canonical = JSON.stringify({seq, at, actor_user_id, actor_role, action, entity_type, entity_id, summary, changes})`
-  using stable key order.
+- `canonical = JSON.stringify([seq, at, actor_user_id, actor_role, actor_label, action, entity_type, entity_id, summary, changes, ip])`
+  (stable order; includes `actor_label` + `ip` so those forensic fields are tamper-evident too — hardened after the tamper test showed `ip` was editable undetected).
 - `hash = sha256Hex(canonical + prev_hash)` (reuse `sha256Hex` from `migrations-index.ts`).
 - Genesis entry: `prev_hash = ''`.
 - **Concurrency:** seq + prev_hash come from the current last row, so two
