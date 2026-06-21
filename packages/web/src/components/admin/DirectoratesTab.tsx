@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { api, type Directorate, type Officer } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { Building2, UserPlus, Pencil, Power, Plus, X } from 'lucide-react';
+import { Building2, UserPlus, Pencil, Plus } from 'lucide-react';
 
 const TYPES = [
   { value: 'directorate', label: 'Directorate', color: 'bg-primary/10 text-primary' },
@@ -27,6 +27,8 @@ const dirSchema = z.object({
   abbreviation: z.string().min(1).max(20),
   type: z.enum(['directorate', 'secretariat', 'unit']),
   rooms: z.string().max(200).optional(),
+  floor: z.string().max(100).optional(),
+  wing: z.string().max(100).optional(),
 });
 
 const officerSchema = z.object({
@@ -40,12 +42,12 @@ const officerSchema = z.object({
 
 export function DirectoratesTab() {
   const queryClient = useQueryClient();
-  const [showAddDir, setShowAddDir] = useState(false);
-  const [showAddOfficer, setShowAddOfficer] = useState(false);
+  const [dirForm, setDirForm] = useState<{ open: boolean; editing: DirectorateExt | null }>({ open: false, editing: null });
+  const [offForm, setOffForm] = useState<{ open: boolean; editing: OfficerExt | null }>({ open: false, editing: null });
 
   const { data: dirData } = useQuery({
     queryKey: ['directorates-admin'],
-    queryFn: () => api.get<DirectorateExt[]>('/directorates'),
+    queryFn: () => api.get<DirectorateExt[]>('/admin/directorates'),
   });
 
   const { data: offData } = useQuery({
@@ -55,6 +57,9 @@ export function DirectoratesTab() {
 
   const directorates = dirData?.data ?? [];
   const officers = offData?.data ?? [];
+
+  const refreshDirs = () => queryClient.invalidateQueries({ queryKey: ['directorates-admin'] });
+  const refreshOfficers = () => queryClient.invalidateQueries({ queryKey: ['officers-admin'] });
 
   return (
     <div className="space-y-6">
@@ -68,16 +73,20 @@ export function DirectoratesTab() {
               Org Entities ({directorates.length})
             </h3>
           </div>
-          <button onClick={() => setShowAddDir(true)}
+          <button onClick={() => setDirForm({ open: true, editing: null })}
             className="inline-flex items-center gap-1.5 h-9 px-4 bg-primary text-white text-[13px] font-semibold rounded-xl hover:bg-primary-light transition-all shadow-sm">
             <Plus className="h-3.5 w-3.5" /> Add Entity
           </button>
         </div>
 
-        {showAddDir && <AddDirectorateForm onClose={() => setShowAddDir(false)} onSuccess={() => {
-          setShowAddDir(false);
-          queryClient.invalidateQueries({ queryKey: ['directorates-admin'] });
-        }} />}
+        {dirForm.open && (
+          <DirectorateForm
+            key={dirForm.editing?.id ?? 'new'}
+            editing={dirForm.editing}
+            onClose={() => setDirForm({ open: false, editing: null })}
+            onSuccess={() => { setDirForm({ open: false, editing: null }); refreshDirs(); }}
+          />
+        )}
 
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -86,15 +95,18 @@ export function DirectoratesTab() {
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Code</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Name</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Type</th>
-                <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Rooms</th>
+                <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Location</th>
+                <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Status</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Reception team</th>
+                <th className="text-right px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Edit</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {directorates.map(d => {
                 const typeCfg = TYPES.find(t => t.value === d.type);
+                const location = locationLabel(d);
                 return (
-                  <tr key={d.id} className="hover:bg-background-warm/50 transition-colors">
+                  <tr key={d.id} className={cn('hover:bg-background-warm/50 transition-colors', !d.is_active && 'opacity-55')}>
                     <td className="px-6 py-3 text-[14px] font-mono font-semibold text-foreground">{d.abbreviation}</td>
                     <td className="px-6 py-3 text-[14px] text-foreground">{d.name}</td>
                     <td className="px-6 py-3">
@@ -102,9 +114,22 @@ export function DirectoratesTab() {
                         {typeCfg?.label ?? d.type}
                       </span>
                     </td>
-                    <td className="px-6 py-3 text-[13px] text-muted">{d.rooms ?? '—'}</td>
+                    <td className="px-6 py-3 text-[13px] text-muted">{location ?? '—'}</td>
                     <td className="px-6 py-3">
-                      <ReceptionTeamCell directorate={d} officers={officers} onChanged={() => queryClient.invalidateQueries({ queryKey: ['directorates-admin'] })} />
+                      <span className={cn('inline-flex items-center h-6 px-2 text-[10px] font-bold rounded-lg uppercase tracking-wide',
+                        d.is_active ? 'bg-success/10 text-success' : 'bg-border text-muted')}>
+                        {d.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3">
+                      <ReceptionTeamCell directorate={d} officers={officers} onChanged={refreshDirs} />
+                    </td>
+                    <td className="px-6 py-3 text-right">
+                      <button type="button" onClick={() => setDirForm({ open: true, editing: d })}
+                        title="Edit entity"
+                        className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-muted hover:text-primary hover:bg-primary/8 transition-colors">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
                     </td>
                   </tr>
                 );
@@ -124,20 +149,21 @@ export function DirectoratesTab() {
               Officers ({officers.length})
             </h3>
           </div>
-          <button onClick={() => setShowAddOfficer(true)}
+          <button onClick={() => setOffForm({ open: true, editing: null })}
             className="inline-flex items-center gap-1.5 h-9 px-4 bg-primary text-white text-[13px] font-semibold rounded-xl hover:bg-primary-light transition-all shadow-sm">
             <Plus className="h-3.5 w-3.5" /> Add Officer
           </button>
         </div>
 
-        {showAddOfficer && <AddOfficerForm
-          directorates={directorates}
-          onClose={() => setShowAddOfficer(false)}
-          onSuccess={() => {
-            setShowAddOfficer(false);
-            queryClient.invalidateQueries({ queryKey: ['officers-admin'] });
-          }}
-        />}
+        {offForm.open && (
+          <OfficerForm
+            key={offForm.editing?.id ?? 'new'}
+            editing={offForm.editing}
+            directorates={directorates}
+            onClose={() => setOffForm({ open: false, editing: null })}
+            onSuccess={() => { setOffForm({ open: false, editing: null }); refreshOfficers(); }}
+          />
+        )}
 
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -148,11 +174,12 @@ export function DirectoratesTab() {
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Directorate</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Office</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Status</th>
+                <th className="text-right px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Edit</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {officers.map(o => (
-                <tr key={o.id} className="hover:bg-background-warm/50 transition-colors">
+                <tr key={o.id} className={cn('hover:bg-background-warm/50 transition-colors', !o.is_available && 'opacity-55')}>
                   <td className="px-6 py-3 text-[14px] font-semibold text-foreground">{o.name}</td>
                   <td className="px-6 py-3 text-[14px] text-muted">{o.title ?? '—'}</td>
                   <td className="px-6 py-3">
@@ -166,6 +193,13 @@ export function DirectoratesTab() {
                       {o.is_available ? 'Available' : 'Unavailable'}
                     </span>
                   </td>
+                  <td className="px-6 py-3 text-right">
+                    <button type="button" onClick={() => setOffForm({ open: true, editing: o })}
+                      title="Edit officer"
+                      className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-muted hover:text-primary hover:bg-primary/8 transition-colors">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -174,6 +208,14 @@ export function DirectoratesTab() {
       </div>
     </div>
   );
+}
+
+function locationLabel(d: DirectorateExt): string | null {
+  const parts: string[] = [];
+  if (d.rooms) parts.push(`Rm ${d.rooms}`);
+  if (d.floor) parts.push(d.floor);
+  if (d.wing) parts.push(`${d.wing} Wing`);
+  return parts.length ? parts.join(' · ') : null;
 }
 
 interface ReceiverRow { id: string; name: string; linked: boolean; primary: boolean }
@@ -231,35 +273,67 @@ function ReceptionTeamCell({ directorate, officers, onChanged }: {
   );
 }
 
-function AddDirectorateForm({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const form = useForm({ resolver: zodResolver(dirSchema), defaultValues: { name: '', abbreviation: '', type: 'directorate' as const, rooms: '' } });
+const fieldLabel = 'block text-[11px] font-semibold text-muted uppercase mb-1';
+const fieldInput = 'h-9 px-3 rounded-lg border border-border bg-background text-[13px]';
+
+function DirectorateForm({ editing, onClose, onSuccess }: { editing: DirectorateExt | null; onClose: () => void; onSuccess: () => void }) {
+  const isEdit = !!editing;
+  const [active, setActive] = useState(editing ? editing.is_active === 1 : true);
+  const form = useForm({
+    resolver: zodResolver(dirSchema),
+    defaultValues: {
+      name: editing?.name ?? '',
+      abbreviation: editing?.abbreviation ?? '',
+      type: (editing?.type as 'directorate' | 'secretariat' | 'unit') ?? 'directorate',
+      rooms: editing?.rooms ?? '',
+      floor: editing?.floor ?? '',
+      wing: editing?.wing ?? '',
+    },
+  });
   const mutation = useMutation({
-    mutationFn: (data: z.infer<typeof dirSchema>) => api.post('/admin/directorates', data),
+    mutationFn: (data: z.infer<typeof dirSchema>) =>
+      isEdit
+        ? api.put(`/admin/directorates/${editing!.id}`, { ...data, is_active: active ? 1 : 0 })
+        : api.post('/admin/directorates', data),
     onSuccess,
   });
 
   return (
     <form onSubmit={form.handleSubmit(d => mutation.mutate(d))} className="px-6 py-4 border-b border-border bg-background-warm/50 flex flex-wrap gap-3 items-end">
       <div>
-        <label className="block text-[11px] font-semibold text-muted uppercase mb-1">Name</label>
-        <input {...form.register('name')} className="h-9 px-3 rounded-lg border border-border bg-background text-[13px] w-56" placeholder="Directorate name" />
+        <label className={fieldLabel}>Name</label>
+        <input {...form.register('name')} className={cn(fieldInput, 'w-56')} placeholder="Directorate name" />
       </div>
       <div>
-        <label className="block text-[11px] font-semibold text-muted uppercase mb-1">Code</label>
-        <input {...form.register('abbreviation')} className="h-9 px-3 rounded-lg border border-border bg-background text-[13px] w-24 uppercase" placeholder="CMD" />
+        <label className={fieldLabel}>Code</label>
+        <input {...form.register('abbreviation')} className={cn(fieldInput, 'w-24 uppercase')} placeholder="CMD" />
       </div>
       <div>
-        <label className="block text-[11px] font-semibold text-muted uppercase mb-1">Type</label>
-        <select {...form.register('type')} className="h-9 px-3 rounded-lg border border-border bg-background text-[13px]">
+        <label className={fieldLabel}>Type</label>
+        <select {...form.register('type')} className={fieldInput}>
           {TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </div>
       <div>
-        <label className="block text-[11px] font-semibold text-muted uppercase mb-1">Rooms</label>
-        <input {...form.register('rooms')} className="h-9 px-3 rounded-lg border border-border bg-background text-[13px] w-32" placeholder="19, 21" />
+        <label className={fieldLabel}>Rooms</label>
+        <input {...form.register('rooms')} className={cn(fieldInput, 'w-28')} placeholder="19, 21" />
       </div>
+      <div>
+        <label className={fieldLabel}>Floor</label>
+        <input {...form.register('floor')} className={cn(fieldInput, 'w-32')} placeholder="1st Floor" />
+      </div>
+      <div>
+        <label className={fieldLabel}>Wing</label>
+        <input {...form.register('wing')} className={cn(fieldInput, 'w-28')} placeholder="East" />
+      </div>
+      {isEdit && (
+        <label className="flex items-center gap-2 h-9 text-[13px] text-foreground cursor-pointer select-none">
+          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="h-4 w-4 rounded border-border accent-primary" />
+          Active
+        </label>
+      )}
       <button type="submit" disabled={mutation.isPending} className="h-9 px-4 bg-primary text-white text-[13px] font-semibold rounded-lg hover:bg-primary-light disabled:opacity-50">
-        {mutation.isPending ? 'Adding...' : 'Add'}
+        {mutation.isPending ? 'Saving…' : isEdit ? 'Save' : 'Add'}
       </button>
       <button type="button" onClick={onClose} className="h-9 px-3 text-[13px] text-muted hover:text-foreground">Cancel</button>
       {mutation.isError && <p className="text-danger text-[12px] w-full">{mutation.error instanceof Error ? mutation.error.message : 'Failed'}</p>}
@@ -267,36 +341,65 @@ function AddDirectorateForm({ onClose, onSuccess }: { onClose: () => void; onSuc
   );
 }
 
-function AddOfficerForm({ directorates, onClose, onSuccess }: { directorates: DirectorateExt[]; onClose: () => void; onSuccess: () => void }) {
-  const form = useForm({ resolver: zodResolver(officerSchema), defaultValues: { name: '', title: '', directorate_id: '', email: '', phone: '', office_number: '' } });
+function OfficerForm({ editing, directorates, onClose, onSuccess }: { editing: OfficerExt | null; directorates: DirectorateExt[]; onClose: () => void; onSuccess: () => void }) {
+  const isEdit = !!editing;
+  const [available, setAvailable] = useState(editing ? editing.is_available === 1 : true);
+  const form = useForm({
+    resolver: zodResolver(officerSchema),
+    defaultValues: {
+      name: editing?.name ?? '',
+      title: editing?.title ?? '',
+      directorate_id: editing?.directorate_id ?? '',
+      email: editing?.email ?? '',
+      phone: editing?.phone ?? '',
+      office_number: editing?.office_number ?? '',
+    },
+  });
   const mutation = useMutation({
-    mutationFn: (data: z.infer<typeof officerSchema>) => api.post('/admin/directorates/officers', data),
+    mutationFn: (data: z.infer<typeof officerSchema>) =>
+      isEdit
+        ? api.put(`/admin/directorates/officers/${editing!.id}`, { ...data, is_available: available ? 1 : 0 })
+        : api.post('/admin/directorates/officers', data),
     onSuccess,
   });
 
   return (
     <form onSubmit={form.handleSubmit(d => mutation.mutate(d))} className="px-6 py-4 border-b border-border bg-background-warm/50 flex flex-wrap gap-3 items-end">
       <div>
-        <label className="block text-[11px] font-semibold text-muted uppercase mb-1">Name</label>
-        <input {...form.register('name')} className="h-9 px-3 rounded-lg border border-border bg-background text-[13px] w-44" placeholder="Mr. Kwame Mensah" />
+        <label className={fieldLabel}>Name</label>
+        <input {...form.register('name')} className={cn(fieldInput, 'w-44')} placeholder="Mr. Kwame Mensah" />
       </div>
       <div>
-        <label className="block text-[11px] font-semibold text-muted uppercase mb-1">Title</label>
-        <input {...form.register('title')} className="h-9 px-3 rounded-lg border border-border bg-background text-[13px] w-32" placeholder="Director" />
+        <label className={fieldLabel}>Title</label>
+        <input {...form.register('title')} className={cn(fieldInput, 'w-32')} placeholder="Director" />
       </div>
       <div>
-        <label className="block text-[11px] font-semibold text-muted uppercase mb-1">Directorate</label>
-        <select {...form.register('directorate_id')} className="h-9 px-3 rounded-lg border border-border bg-background text-[13px]">
+        <label className={fieldLabel}>Directorate</label>
+        <select {...form.register('directorate_id')} className={fieldInput}>
           <option value="">Select...</option>
           {directorates.map(d => <option key={d.id} value={d.id}>{d.abbreviation}</option>)}
         </select>
       </div>
       <div>
-        <label className="block text-[11px] font-semibold text-muted uppercase mb-1">Office</label>
-        <input {...form.register('office_number')} className="h-9 px-3 rounded-lg border border-border bg-background text-[13px] w-24" placeholder="Room 19" />
+        <label className={fieldLabel}>Office</label>
+        <input {...form.register('office_number')} className={cn(fieldInput, 'w-24')} placeholder="Room 19" />
       </div>
+      <div>
+        <label className={fieldLabel}>Email</label>
+        <input {...form.register('email')} className={cn(fieldInput, 'w-52')} placeholder="k.mensah@ohcs.gov.gh" />
+      </div>
+      <div>
+        <label className={fieldLabel}>Phone</label>
+        <input {...form.register('phone')} className={cn(fieldInput, 'w-36')} placeholder="0241234567" />
+      </div>
+      {isEdit && (
+        <label className="flex items-center gap-2 h-9 text-[13px] text-foreground cursor-pointer select-none">
+          <input type="checkbox" checked={available} onChange={(e) => setAvailable(e.target.checked)} className="h-4 w-4 rounded border-border accent-primary" />
+          Available
+        </label>
+      )}
       <button type="submit" disabled={mutation.isPending} className="h-9 px-4 bg-primary text-white text-[13px] font-semibold rounded-lg hover:bg-primary-light disabled:opacity-50">
-        {mutation.isPending ? 'Adding...' : 'Add'}
+        {mutation.isPending ? 'Saving…' : isEdit ? 'Save' : 'Add'}
       </button>
       <button type="button" onClick={onClose} className="h-9 px-3 text-[13px] text-muted hover:text-foreground">Cancel</button>
       {mutation.isError && <p className="text-danger text-[12px] w-full">{mutation.error instanceof Error ? mutation.error.message : 'Failed'}</p>}

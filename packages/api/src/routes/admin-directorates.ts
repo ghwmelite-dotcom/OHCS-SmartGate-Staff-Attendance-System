@@ -15,6 +15,19 @@ const createSchema = z.object({
   abbreviation: z.string().min(1).max(20).trim(),
   type: z.enum(['directorate', 'secretariat', 'unit']),
   rooms: z.string().max(200).optional().or(z.literal('')),
+  floor: z.string().max(100).optional().or(z.literal('')),
+  wing: z.string().max(100).optional().or(z.literal('')),
+});
+
+// List ALL directorates incl. inactive (superadmin) — the public GET /directorates
+// filters to is_active = 1, which would hide a deactivated entity and make it
+// impossible to reactivate from the dashboard.
+adminDirectorateRoutes.get('/', async (c) => {
+  if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+  const rows = await c.env.DB.prepare(
+    'SELECT * FROM directorates ORDER BY is_active DESC, abbreviation'
+  ).all();
+  return success(c, rows.results ?? []);
 });
 
 adminDirectorateRoutes.post('/', zValidator('json', createSchema), async (c) => {
@@ -23,8 +36,8 @@ adminDirectorateRoutes.post('/', zValidator('json', createSchema), async (c) => 
   const id = crypto.randomUUID().replace(/-/g, '');
 
   await c.env.DB.prepare(
-    'INSERT INTO directorates (id, name, abbreviation, type, rooms) VALUES (?, ?, ?, ?, ?)'
-  ).bind(id, body.name, body.abbreviation.toUpperCase(), body.type, body.rooms || null).run();
+    'INSERT INTO directorates (id, name, abbreviation, type, rooms, floor, wing) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).bind(id, body.name, body.abbreviation.toUpperCase(), body.type, body.rooms || null, body.floor || null, body.wing || null).run();
 
   const row = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first();
   return created(c, row);
@@ -49,6 +62,8 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
   if (body.abbreviation !== undefined) { fields.push('abbreviation = ?'); values.push(body.abbreviation.toUpperCase()); }
   if (body.type !== undefined) { fields.push('type = ?'); values.push(body.type); }
   if (body.rooms !== undefined) { fields.push('rooms = ?'); values.push(body.rooms || null); }
+  if (body.floor !== undefined) { fields.push('floor = ?'); values.push(body.floor || null); }
+  if (body.wing !== undefined) { fields.push('wing = ?'); values.push(body.wing || null); }
   if (body.is_active !== undefined) { fields.push('is_active = ?'); values.push(body.is_active); }
 
   if (body.reception_officer_id !== undefined) {
