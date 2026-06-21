@@ -20,6 +20,7 @@ interface DirectorateExt extends Directorate {
 
 interface OfficerExt extends Officer {
   directorate_abbr?: string;
+  has_override_pin?: number;
 }
 
 const dirSchema = z.object({
@@ -343,7 +344,10 @@ function DirectorateForm({ editing, onClose, onSuccess }: { editing: Directorate
 
 function OfficerForm({ editing, directorates, onClose, onSuccess }: { editing: OfficerExt | null; directorates: DirectorateExt[]; onClose: () => void; onSuccess: () => void }) {
   const isEdit = !!editing;
+  const hasPin = !!editing?.has_override_pin;
   const [available, setAvailable] = useState(editing ? editing.is_available === 1 : true);
+  const [overridePin, setOverridePin] = useState('');
+  const [removeOverride, setRemoveOverride] = useState(false);
   const form = useForm({
     resolver: zodResolver(officerSchema),
     defaultValues: {
@@ -356,10 +360,15 @@ function OfficerForm({ editing, directorates, onClose, onSuccess }: { editing: O
     },
   });
   const mutation = useMutation({
-    mutationFn: (data: z.infer<typeof officerSchema>) =>
-      isEdit
-        ? api.put(`/admin/directorates/officers/${editing!.id}`, { ...data, is_available: available ? 1 : 0 })
-        : api.post('/admin/directorates/officers', data),
+    mutationFn: (data: z.infer<typeof officerSchema>) => {
+      // override_pin: '' clears, digits set, omitted = keep existing.
+      const override: { override_pin?: string } = {};
+      if (removeOverride) override.override_pin = '';
+      else if (overridePin.trim()) override.override_pin = overridePin.trim();
+      return isEdit
+        ? api.put(`/admin/directorates/officers/${editing!.id}`, { ...data, is_available: available ? 1 : 0, ...override })
+        : api.post('/admin/directorates/officers', { ...data, ...override });
+    },
     onSuccess,
   });
 
@@ -392,6 +401,25 @@ function OfficerForm({ editing, directorates, onClose, onSuccess }: { editing: O
         <label className={fieldLabel}>Phone</label>
         <input {...form.register('phone')} className={cn(fieldInput, 'w-36')} placeholder="0241234567" />
       </div>
+      <div>
+        <label className={fieldLabel}>Override PIN{hasPin ? ' ✓' : ''}</label>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={overridePin}
+          onChange={(e) => setOverridePin(e.currentTarget.value.replace(/\D/g, '').slice(0, 8))}
+          disabled={removeOverride}
+          className={cn(fieldInput, 'w-32 font-mono tracking-widest disabled:opacity-50')}
+          placeholder={hasPin ? 'change (4–8)' : 'set (4–8)'}
+        />
+      </div>
+      {isEdit && hasPin && (
+        <label className="flex items-center gap-2 h-9 text-[13px] text-foreground cursor-pointer select-none">
+          <input type="checkbox" checked={removeOverride} onChange={(e) => { setRemoveOverride(e.target.checked); if (e.target.checked) setOverridePin(''); }} className="h-4 w-4 rounded border-border accent-danger" />
+          Remove PIN
+        </label>
+      )}
       {isEdit && (
         <label className="flex items-center gap-2 h-9 text-[13px] text-foreground cursor-pointer select-none">
           <input type="checkbox" checked={available} onChange={(e) => setAvailable(e.target.checked)} className="h-4 w-4 rounded border-border accent-primary" />

@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS officers (
     is_available     INTEGER NOT NULL DEFAULT 1 CHECK(is_available IN (0, 1)),
     -- Telegram linking (added by migration-phase2.sql)
     telegram_chat_id TEXT,
+    -- Per-officer kiosk override PIN, PBKDF2-hashed (migration-officer-override-pin.sql).
+    override_pin_hash TEXT,
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );

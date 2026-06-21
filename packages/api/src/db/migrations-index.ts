@@ -29,6 +29,7 @@ import holidays2026Amendment from './migration-holidays-2026-amendment.sql';
 import auditLog from './migration-audit-log.sql';
 import auditLogReset from './migration-audit-log-reset.sql';
 import sessionEpoch from './migration-session-epoch.sql';
+import officerOverridePin from './migration-officer-override-pin.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -62,6 +63,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-audit-log.sql', sql: auditLog },
   { filename: 'migration-audit-log-reset.sql', sql: auditLogReset },
   { filename: 'migration-session-epoch.sql', sql: sessionEpoch },
+  { filename: 'migration-officer-override-pin.sql', sql: officerOverridePin },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {

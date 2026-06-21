@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error, created, notFound } from '../lib/response';
 import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
+import { hashPin } from '../services/auth';
 
 export const adminDirectorateRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -163,6 +164,8 @@ const officerCreateSchema = z.object({
   email: z.string().email().max(255).optional().or(z.literal('')),
   phone: z.string().max(20).optional().or(z.literal('')),
   office_number: z.string().max(20).optional().or(z.literal('')),
+  // Per-officer kiosk override PIN (4–8 digits; '' clears). Hashed, never returned.
+  override_pin: z.string().regex(/^\d{4,8}$/, 'Override PIN must be 4–8 digits').optional().or(z.literal('')),
 });
 
 adminDirectorateRoutes.post('/officers', zValidator('json', officerCreateSchema), async (c) => {
@@ -170,12 +173,16 @@ adminDirectorateRoutes.post('/officers', zValidator('json', officerCreateSchema)
   const body = c.req.valid('json');
   const id = crypto.randomUUID().replace(/-/g, '');
 
+  const overridePinHash = body.override_pin ? await hashPin(body.override_pin) : null;
   await c.env.DB.prepare(
-    'INSERT INTO officers (id, name, title, directorate_id, email, phone, office_number) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, body.name, body.title || null, body.directorate_id, body.email || null, body.phone || null, body.office_number || null).run();
+    'INSERT INTO officers (id, name, title, directorate_id, email, phone, office_number, override_pin_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(id, body.name, body.title || null, body.directorate_id, body.email || null, body.phone || null, body.office_number || null, overridePinHash).run();
 
   const row = await c.env.DB.prepare(
-    `SELECT o.*, d.abbreviation as directorate_abbr FROM officers o JOIN directorates d ON o.directorate_id = d.id WHERE o.id = ?`
+    `SELECT o.id, o.name, o.title, o.directorate_id, o.email, o.phone, o.office_number, o.is_available,
+            o.created_at, o.updated_at, (o.override_pin_hash IS NOT NULL) AS has_override_pin,
+            d.abbreviation as directorate_abbr
+     FROM officers o JOIN directorates d ON o.directorate_id = d.id WHERE o.id = ?`
   ).bind(id).first();
   await recordAudit(c.env, auditActorFromContext(c), {
     action: 'officer.create', entityType: 'officer', entityId: id,
@@ -207,6 +214,11 @@ adminDirectorateRoutes.put('/officers/:id', zValidator('json', officerUpdateSche
   if (body.phone !== undefined) { fields.push('phone = ?'); values.push(body.phone || null); }
   if (body.office_number !== undefined) { fields.push('office_number = ?'); values.push(body.office_number || null); }
   if (body.is_available !== undefined) { fields.push('is_available = ?'); values.push(body.is_available); }
+  if (body.override_pin !== undefined) {
+    // digits → set (hashed); '' → clear (NULL). Never logged/returned.
+    fields.push('override_pin_hash = ?');
+    values.push(body.override_pin ? await hashPin(body.override_pin) : null);
+  }
 
   fields.push("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')");
   if (fields.length > 1) {
@@ -215,12 +227,16 @@ adminDirectorateRoutes.put('/officers/:id', zValidator('json', officerUpdateSche
   }
 
   const row = await c.env.DB.prepare(
-    `SELECT o.*, d.abbreviation as directorate_abbr FROM officers o JOIN directorates d ON o.directorate_id = d.id WHERE o.id = ?`
+    `SELECT o.id, o.name, o.title, o.directorate_id, o.email, o.phone, o.office_number, o.is_available,
+            o.created_at, o.updated_at, (o.override_pin_hash IS NOT NULL) AS has_override_pin,
+            d.abbreviation as directorate_abbr
+     FROM officers o JOIN directorates d ON o.directorate_id = d.id WHERE o.id = ?`
   ).bind(id).first();
   const after = await c.env.DB.prepare(
     'SELECT name, title, directorate_id, email, phone, office_number, is_available FROM officers WHERE id = ?'
   ).bind(id).first<Record<string, unknown>>();
   const changes = diffRecords(existing, after, ['name', 'title', 'directorate_id', 'email', 'phone', 'office_number', 'is_available']);
+  if (body.override_pin !== undefined) changes.override_pin = { from: '[redacted]', to: '[redacted]' };
   if (Object.keys(changes).length > 0) {
     await recordAudit(c.env, auditActorFromContext(c), {
       action: 'officer.update', entityType: 'officer', entityId: id,
