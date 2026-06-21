@@ -14,7 +14,7 @@ import { checkIdDocument } from '../services/id-check';
 import { isBlockingVerdict, mostConservativeVerdict, type IdCheckVerdict } from '../lib/id-check';
 import { getAppSettings } from '../services/settings';
 import { getOfficeStatus, officeClosedMessage } from '../services/office-hours';
-import { timingSafeEqualStrings } from '../services/auth';
+import { resolveOverride } from '../services/override';
 import { recordAudit, systemActor } from '../services/audit';
 
 export const kioskRoutes = new Hono<{ Bindings: Env }>();
@@ -25,7 +25,7 @@ const MAX_PHOTO_BYTES = 500_000;
 // The shape persisted onto visits.id_photo_check — an IdCheckVerdict plus an
 // optional reception-override audit annotation.
 type PersistedIdCheck = IdCheckVerdict & {
-  override?: { by: 'reception'; at: string };
+  override?: { by: string; officer_id?: string | null; at: string };
 };
 
 // Safely parse a KV-stashed verdict JSON into a verdict; any failure → null
@@ -136,21 +136,21 @@ kioskRoutes.post('/check-in', zValidator('json', KioskCheckInSchema), async (c) 
   // unblock a KV `not_document`. Used for BOTH the gate decision and persistence.
   const effective = mostConservativeVerdict(kvVerdict, bodyVerdict);
 
-  const settings = await getAppSettings(c.env);
+  await getAppSettings(c.env); // (kept for cache warm-up / parity)
+  const ip = c.req.header('cf-connecting-ip') ?? null;
+
+  // Resolve the override PIN ONCE — a single entry clears both gates. Per-officer
+  // PINs (hashed) are matched first for named attribution; the shared PIN is the
+  // anonymous fallback. Per-IP kiosk rate limit (40/60s) bounds brute-force.
+  const override = body.reception_override_pin
+    ? await resolveOverride(c.env, body.reception_override_pin)
+    : { ok: false, officerId: null, label: '' };
 
   // What gets persisted onto the visit's id_photo_check (default: indeterminate).
   let persistedCheck: PersistedIdCheck = effective ?? { verdict: 'indeterminate' };
 
   if (isBlockingVerdict(effective)) {
-    // Override is valid only when an override PIN is configured AND the supplied
-    // PIN matches it via constant-time compare (never `===` with early-exit).
-    // Per-IP kiosk rate limit (40/60s) bounds override brute-force on this route.
-    const pinSet = !!settings.reception_override_pin;
-    const supplied = body.reception_override_pin ?? '';
-    const overrideValid =
-      pinSet && supplied !== '' && timingSafeEqualStrings(supplied, settings.reception_override_pin!);
-
-    if (!overrideValid) {
+    if (!override.ok) {
       // Block BEFORE creating any visit. Do NOT delete the KV verdict here, so a
       // retake or a reception override retry still sees the stashed verdict.
       return error(
@@ -160,30 +160,24 @@ kioskRoutes.post('/check-in', zValidator('json', KioskCheckInSchema), async (c) 
         422,
       );
     }
-    // Override accepted — annotate the persisted verdict for the audit trail.
-    persistedCheck = { ...effective!, override: { by: 'reception', at: new Date().toISOString() } };
-    await recordAudit(c.env, systemActor('reception (shared PIN)', c.req.header('cf-connecting-ip') ?? null), {
+    // Override accepted — annotate the persisted verdict (who approved) for audit.
+    persistedCheck = { ...effective!, override: { by: override.label, officer_id: override.officerId, at: new Date().toISOString() } };
+    await recordAudit(c.env, systemActor(override.label, ip), {
       action: 'override.use', entityType: 'visit', entityId: body.visitor_id,
-      summary: 'Reception override accepted — ID document gate',
+      summary: `Reception override accepted — ID document gate (by ${override.label})`,
     });
   }
 
   // Office-hours gate: outside working hours / weekend / public holiday, a check-in
-  // requires the reception override PIN (the SAME PIN as the ID gate — one entry
-  // clears both). Check-out is never gated. The kiosk surfaces a distinct
-  // OFFICE_CLOSED (423) so it can prompt for the override.
+  // requires a reception override (same resolved PIN). Check-out is never gated.
   const office = await getOfficeStatus(c.env);
   if (!office.open) {
-    const pinSet = !!settings.reception_override_pin;
-    const supplied = body.reception_override_pin ?? '';
-    const overrideValid =
-      pinSet && supplied !== '' && timingSafeEqualStrings(supplied, settings.reception_override_pin!);
-    if (!overrideValid) {
+    if (!override.ok) {
       return error(c, 'OFFICE_CLOSED', officeClosedMessage(office), 423);
     }
-    await recordAudit(c.env, systemActor('reception (shared PIN)', c.req.header('cf-connecting-ip') ?? null), {
+    await recordAudit(c.env, systemActor(override.label, ip), {
       action: 'override.use', entityType: 'visit', entityId: body.visitor_id,
-      summary: `Reception override accepted — office closed (${office.reason})`,
+      summary: `Reception override accepted — office closed (${office.reason}) (by ${override.label})`,
     });
   }
 
