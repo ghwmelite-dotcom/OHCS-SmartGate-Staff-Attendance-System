@@ -15,6 +15,7 @@ import { isBlockingVerdict, mostConservativeVerdict, type IdCheckVerdict } from 
 import { getAppSettings } from '../services/settings';
 import { getOfficeStatus, officeClosedMessage } from '../services/office-hours';
 import { timingSafeEqualStrings } from '../services/auth';
+import { recordAudit, systemActor } from '../services/audit';
 
 export const kioskRoutes = new Hono<{ Bindings: Env }>();
 
@@ -161,6 +162,10 @@ kioskRoutes.post('/check-in', zValidator('json', KioskCheckInSchema), async (c) 
     }
     // Override accepted — annotate the persisted verdict for the audit trail.
     persistedCheck = { ...effective!, override: { by: 'reception', at: new Date().toISOString() } };
+    await recordAudit(c.env, systemActor('reception (shared PIN)', c.req.header('cf-connecting-ip') ?? null), {
+      action: 'override.use', entityType: 'visit', entityId: body.visitor_id,
+      summary: 'Reception override accepted — ID document gate',
+    });
   }
 
   // Office-hours gate: outside working hours / weekend / public holiday, a check-in
@@ -176,6 +181,10 @@ kioskRoutes.post('/check-in', zValidator('json', KioskCheckInSchema), async (c) 
     if (!overrideValid) {
       return error(c, 'OFFICE_CLOSED', officeClosedMessage(office), 423);
     }
+    await recordAudit(c.env, systemActor('reception (shared PIN)', c.req.header('cf-connecting-ip') ?? null), {
+      action: 'override.use', entityType: 'visit', entityId: body.visitor_id,
+      summary: `Reception override accepted — office closed (${office.reason})`,
+    });
   }
 
   const dir = await c.env.DB.prepare('SELECT reception_officer_id FROM directorates WHERE id = ?')

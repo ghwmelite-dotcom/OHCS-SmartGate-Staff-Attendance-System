@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error } from '../lib/response';
 import { hashPin } from '../services/auth';
+import { recordAudit, auditActorFromContext } from '../services/audit';
 
 export const bulkImportRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -76,6 +77,10 @@ bulkImportRoutes.post('/users', async (c) => {
     imported++;
   }
 
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'users.bulk_import', entityType: 'user', entityId: null,
+    summary: `Bulk import (users): ${imported} imported, ${skipped} skipped`,
+  });
   return success(c, { imported, skipped, errors });
 });
 
@@ -133,6 +138,10 @@ bulkImportRoutes.post('/directorates', async (c) => {
     imported++;
   }
 
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'directorates.bulk_import', entityType: 'directorate', entityId: null,
+    summary: `Bulk import (directorates): ${imported} imported, ${skipped} skipped`,
+  });
   return success(c, { imported, skipped, errors });
 });
 
@@ -190,5 +199,9 @@ bulkImportRoutes.post('/officers', async (c) => {
     imported++;
   }
 
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'officers.bulk_import', entityType: 'officer', entityId: null,
+    summary: `Bulk import (officers): ${imported} imported, ${skipped} skipped`,
+  });
   return success(c, { imported, skipped, errors });
 });

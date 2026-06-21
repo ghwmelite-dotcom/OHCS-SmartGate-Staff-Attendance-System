@@ -11,6 +11,7 @@ import { DirectoratesTab } from '@/components/admin/DirectoratesTab';
 import { BulkImportTab } from '@/components/admin/BulkImportTab';
 import { AttendanceTab } from '@/components/admin/AttendanceTab';
 import { NssTab } from '@/components/admin/NssTab';
+import { AuditLogTab } from '@/components/admin/AuditLogTab';
 import {
   Users,
   UserPlus,
@@ -64,7 +65,7 @@ const editUserSchema = z.object({
 });
 type EditUserForm = z.infer<typeof editUserSchema>;
 
-type AdminTab = 'users' | 'org' | 'attendance' | 'nss' | 'import';
+type AdminTab = 'users' | 'org' | 'attendance' | 'nss' | 'import' | 'audit';
 
 export function AdminPage() {
   const user = useAuthStore(s => s.user);
@@ -84,6 +85,7 @@ export function AdminPage() {
         { value: 'attendance', label: 'Attendance' },
         { value: 'nss', label: 'NSS & Interns' },
         { value: 'import', label: 'Bulk Import' },
+        { value: 'audit', label: 'Audit Log' },
       ];
     }
     return [{ value: 'nss', label: 'NSS & Interns' }];
@@ -166,6 +168,7 @@ export function AdminPage() {
       {activeTab === 'attendance' && isSuperadmin && <AttendanceTab />}
       {activeTab === 'nss' && <NssTab />}
       {activeTab === 'import' && isSuperadmin && <BulkImportTab />}
+      {activeTab === 'audit' && isSuperadmin && <AuditLogTab />}
     </div>
   );
 }

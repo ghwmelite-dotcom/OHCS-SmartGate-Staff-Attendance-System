@@ -5,6 +5,7 @@ import type { Env, SessionData } from '../types';
 import { error, created, success } from '../lib/response';
 import { hashPin } from '../services/auth';
 import { sendWelcomeEmail } from '../services/email';
+import { recordAudit, auditActorFromContext } from '../services/audit';
 import { requireRole } from '../lib/require-role';
 import { nextInternCode } from '../services/intern-code';
 import {
@@ -108,6 +109,11 @@ adminInternRoutes.post('/', zValidator('json', createInternSchema), async (c) =>
        LEFT JOIN users sup ON sup.id = u.supervisor_user_id
       WHERE u.id = ?`
   ).bind(id).first<NssUserRow>();
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'intern.create', entityType: 'user', entityId: id,
+    summary: `Created intern ${body.name} (${body.email}) · intern_code=${internCode}`,
+  });
 
   // Fire-and-forget welcome email (best-effort — interns sign in with their intern code).
   c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {

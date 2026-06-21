@@ -5,6 +5,9 @@ import type { Env, SessionData } from '../types';
 import { success, error, created, notFound } from '../lib/response';
 import { hashPin } from '../services/auth';
 import { sendWelcomeEmail } from '../services/email';
+import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
+
+const AUDITED_USER_FIELDS = ['name', 'email', 'staff_id', 'role', 'grade', 'directorate_id', 'is_active'];
 
 export const userRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -88,6 +91,11 @@ userRoutes.post('/', zValidator('json', createUserSchema), async (c) => {
      FROM users u LEFT JOIN directorates d ON u.directorate_id = d.id WHERE u.id = ?`
   ).bind(id).first();
 
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'user.create', entityType: 'user', entityId: id,
+    summary: `Created user ${body.name} (${body.email}) · role=${body.role} · staff_id=${body.staff_id.toUpperCase()}`,
+  });
+
   // Fire-and-forget welcome email (best-effort — never blocks/fails creation).
   c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
     userId: id,
@@ -121,8 +129,8 @@ userRoutes.put('/:id', zValidator('json', updateUserSchema), async (c) => {
   const body = c.req.valid('json');
 
   const existing = await c.env.DB.prepare(
-    'SELECT id, user_type FROM users WHERE id = ?'
-  ).bind(id).first<{ id: string; user_type: string }>();
+    'SELECT id, user_type, name, email, staff_id, role, grade, directorate_id, is_active FROM users WHERE id = ?'
+  ).bind(id).first<Record<string, unknown> & { id: string; user_type: string }>();
   if (!existing) return notFound(c, 'User');
 
   // Service personnel (NSS/Intern) are not eligible for admin roles. Block any role
@@ -172,6 +180,23 @@ userRoutes.put('/:id', zValidator('json', updateUserSchema), async (c) => {
      FROM users WHERE id = ?`
   ).bind(id).first();
 
+  const after = await c.env.DB.prepare(
+    'SELECT name, email, staff_id, role, grade, directorate_id, is_active FROM users WHERE id = ?'
+  ).bind(id).first<Record<string, unknown>>();
+  const changes = diffRecords(existing, after, AUDITED_USER_FIELDS);
+  if (body.pin !== undefined) changes.pin = { from: '[redacted]', to: '[redacted]' };
+  if (Object.keys(changes).length > 0) {
+    const roleChanged = !!changes.role;
+    await recordAudit(c.env, auditActorFromContext(c), {
+      action: roleChanged ? 'user.role_change' : 'user.update',
+      entityType: 'user', entityId: id,
+      summary: roleChanged
+        ? `Changed role of ${existing.name} (${existing.email}): ${existing.role} → ${after?.role}`
+        : `Updated user ${existing.name} (${existing.email})${body.pin !== undefined ? ' · PIN reset' : ''}`,
+      changes,
+    });
+  }
+
   return success(c, user);
 });
 
@@ -186,6 +211,12 @@ userRoutes.delete('/:id', async (c) => {
     return error(c, 'SELF_DELETE', 'You cannot deactivate your own account', 400);
   }
 
+  const target = await c.env.DB.prepare('SELECT name, email FROM users WHERE id = ?')
+    .bind(id).first<{ name: string; email: string }>();
   await c.env.DB.prepare('UPDATE users SET is_active = 0 WHERE id = ?').bind(id).run();
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'user.deactivate', entityType: 'user', entityId: id,
+    summary: `Deactivated user ${target?.name ?? id}${target?.email ? ` (${target.email})` : ''}`,
+  });
   return success(c, { message: 'User deactivated' });
 });

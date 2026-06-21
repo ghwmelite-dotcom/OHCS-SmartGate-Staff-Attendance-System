@@ -5,6 +5,7 @@ import type { Env, SessionData } from '../types';
 import { success, error, created, notFound } from '../lib/response';
 import { hashPin } from '../services/auth';
 import { sendWelcomeEmail } from '../services/email';
+import { recordAudit, auditActorFromContext } from '../services/audit';
 import { requireRole } from '../lib/require-role';
 import { getAppSettings, toSqlTime } from '../services/settings';
 import { runNssEndOfServiceCheck } from '../services/nss-eos';
@@ -153,6 +154,11 @@ adminNssRoutes.post('/', zValidator('json', createNssSchema), async (c) => {
   )
     .bind(id)
     .first<NssUserRow>();
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'nss.create', entityType: 'user', entityId: id,
+    summary: `Created NSS personnel ${body.name} (${body.email}) · nss_number=${body.nss_number}`,
+  });
 
   // Fire-and-forget welcome email (best-effort — NSS sign in with their NSS number).
   c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {

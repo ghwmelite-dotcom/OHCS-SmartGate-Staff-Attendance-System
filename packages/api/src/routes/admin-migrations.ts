@@ -3,6 +3,7 @@ import type { Env, SessionData } from '../types';
 import { success } from '../lib/response';
 import { requireRole } from '../lib/require-role';
 import { MIGRATIONS, sha256Hex } from '../db/migrations-index';
+import { recordAudit, auditActorFromContext } from '../services/audit';
 
 export const adminMigrationsRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -56,5 +57,11 @@ adminMigrationsRoutes.post('/run', async (c) => {
     }
   }
 
+  if (applied.length > 0 || failures.length > 0) {
+    await recordAudit(c.env, auditActorFromContext(c), {
+      action: 'migrations.run', entityType: 'migration', entityId: null,
+      summary: `Ran migrations — applied ${applied.length} (${applied.join(', ') || 'none'}), ${failures.length} failed, ${skipped.length} skipped`,
+    });
+  }
   return success(c, { applied, skipped, failures });
 });

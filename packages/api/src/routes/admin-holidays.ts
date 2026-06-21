@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, created, error, notFound } from '../lib/response';
+import { recordAudit, auditActorFromContext } from '../services/audit';
 
 export const adminHolidayRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -30,14 +31,23 @@ adminHolidayRoutes.post('/', zValidator('json', createSchema), async (c) => {
   const id = crypto.randomUUID().replace(/-/g, '');
   await c.env.DB.prepare('INSERT INTO holidays (id, date, name) VALUES (?, ?, ?)').bind(id, date, name).run();
   const row = await c.env.DB.prepare('SELECT id, date, name FROM holidays WHERE id = ?').bind(id).first();
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'holiday.create', entityType: 'holiday', entityId: id,
+    summary: `Added public holiday ${date} — ${name}`,
+  });
   return created(c, row);
 });
 
 adminHolidayRoutes.delete('/:id', async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
   const id = c.req.param('id');
-  const existing = await c.env.DB.prepare('SELECT id FROM holidays WHERE id = ?').bind(id).first();
+  const existing = await c.env.DB.prepare('SELECT id, date, name FROM holidays WHERE id = ?')
+    .bind(id).first<{ id: string; date: string; name: string }>();
   if (!existing) return notFound(c, 'Holiday');
   await c.env.DB.prepare('DELETE FROM holidays WHERE id = ?').bind(id).run();
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'holiday.delete', entityType: 'holiday', entityId: id,
+    summary: `Removed public holiday ${existing.date} — ${existing.name}`,
+  });
   return success(c, { removed: true });
 });
