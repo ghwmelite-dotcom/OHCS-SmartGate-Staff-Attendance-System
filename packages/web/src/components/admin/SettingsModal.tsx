@@ -63,7 +63,7 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-md overflow-hidden"
+        className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="h-[2px]" style={{ background: 'linear-gradient(90deg, #D4A017, #F5D76E, #D4A017)' }} />
@@ -82,7 +82,7 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
           </button>
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-4 overflow-y-auto flex-1">
           <TimeField
             label="Start of day"
             caption="When the workday officially begins"
