@@ -85,15 +85,16 @@ export interface AuditInput {
 
 const MAX_RETRIES = 5;
 
-// Stable-key canonical form that the hash covers.
+// Stable-key canonical form that the hash covers. Includes actor_label + ip so
+// those forensic fields are also tamper-evident (not just actor_user_id/role).
 function canonicalize(row: {
   seq: number; at: string; actor_user_id: string | null; actor_role: string | null;
-  action: string; entity_type: string | null; entity_id: string | null;
-  summary: string | null; changes: string | null;
+  actor_label: string | null; action: string; entity_type: string | null; entity_id: string | null;
+  summary: string | null; changes: string | null; ip: string | null;
 }): string {
   return JSON.stringify([
-    row.seq, row.at, row.actor_user_id, row.actor_role, row.action,
-    row.entity_type, row.entity_id, row.summary, row.changes,
+    row.seq, row.at, row.actor_user_id, row.actor_role, row.actor_label, row.action,
+    row.entity_type, row.entity_id, row.summary, row.changes, row.ip,
   ]);
 }
 
@@ -120,11 +121,13 @@ export async function recordAudit(env: Env, ctx: AuditContext, input: AuditInput
         seq, at,
         actor_user_id: ctx.actor.userId,
         actor_role: ctx.actor.role,
+        actor_label: ctx.actor.label,
         action: input.action,
         entity_type: input.entityType ?? null,
         entity_id: input.entityId ?? null,
         summary: input.summary ?? null,
         changes: changesJson,
+        ip: ctx.ip,
       };
       const hash = await sha256Hex(canonicalize(row) + prevHash);
       const id = crypto.randomUUID().replace(/-/g, '');
@@ -197,12 +200,12 @@ export interface ChainVerifyResult { ok: boolean; checked: number; brokenAtSeq: 
 /** Re-walk the chain in order and confirm each hash + prev_hash link. */
 export async function verifyChain(env: Env): Promise<ChainVerifyResult> {
   const res = await env.DB.prepare(
-    `SELECT seq, at, actor_user_id, actor_role, action, entity_type, entity_id, summary, changes, prev_hash, hash
+    `SELECT seq, at, actor_user_id, actor_role, actor_label, action, entity_type, entity_id, summary, changes, ip, prev_hash, hash
      FROM audit_log ORDER BY seq ASC`
   ).all<{
     seq: number; at: string; actor_user_id: string | null; actor_role: string | null;
-    action: string; entity_type: string | null; entity_id: string | null;
-    summary: string | null; changes: string | null; prev_hash: string; hash: string;
+    actor_label: string | null; action: string; entity_type: string | null; entity_id: string | null;
+    summary: string | null; changes: string | null; ip: string | null; prev_hash: string; hash: string;
   }>();
   const rows = res.results ?? [];
 
@@ -212,8 +215,8 @@ export async function verifyChain(env: Env): Promise<ChainVerifyResult> {
     if (r.prev_hash !== prevHash) return { ok: false, checked, brokenAtSeq: r.seq };
     const recomputed = await sha256Hex(canonicalize({
       seq: r.seq, at: r.at, actor_user_id: r.actor_user_id, actor_role: r.actor_role,
-      action: r.action, entity_type: r.entity_type, entity_id: r.entity_id,
-      summary: r.summary, changes: r.changes,
+      actor_label: r.actor_label, action: r.action, entity_type: r.entity_type, entity_id: r.entity_id,
+      summary: r.summary, changes: r.changes, ip: r.ip,
     }) + r.prev_hash);
     if (recomputed !== r.hash) return { ok: false, checked, brokenAtSeq: r.seq };
     prevHash = r.hash;
