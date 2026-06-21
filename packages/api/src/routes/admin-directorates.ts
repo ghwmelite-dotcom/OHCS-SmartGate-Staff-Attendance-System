@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error, created, notFound } from '../lib/response';
+import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
 
 export const adminDirectorateRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -40,6 +41,10 @@ adminDirectorateRoutes.post('/', zValidator('json', createSchema), async (c) => 
   ).bind(id, body.name, body.abbreviation.toUpperCase(), body.type, body.rooms || null, body.floor || null, body.wing || null).run();
 
   const row = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first();
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'directorate.create', entityType: 'directorate', entityId: id,
+    summary: `Created ${body.type} ${body.abbreviation.toUpperCase()} — ${body.name}`,
+  });
   return created(c, row);
 });
 
@@ -53,7 +58,7 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
   const id = c.req.param('id');
   const body = c.req.valid('json');
 
-  const existing = await c.env.DB.prepare('SELECT id FROM directorates WHERE id = ?').bind(id).first();
+  const existing = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first<Record<string, unknown>>();
   if (!existing) return notFound(c, 'Directorate');
 
   const fields: string[] = [];
@@ -83,7 +88,19 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
     await c.env.DB.prepare(`UPDATE directorates SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
   }
 
-  const row = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first();
+  const row = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first<Record<string, unknown>>();
+  const changes = diffRecords(existing, row, ['name', 'abbreviation', 'type', 'rooms', 'floor', 'wing', 'is_active', 'reception_officer_id']);
+  if (Object.keys(changes).length > 0) {
+    const onlyPrimary = Object.keys(changes).length === 1 && !!changes.reception_officer_id;
+    await recordAudit(c.env, auditActorFromContext(c), {
+      action: onlyPrimary ? 'reception_team.set_primary' : 'directorate.update',
+      entityType: 'directorate', entityId: id,
+      summary: onlyPrimary
+        ? `Set primary receiver for ${existing.abbreviation}`
+        : `Updated directorate ${existing.abbreviation}`,
+      changes,
+    });
+  }
   return success(c, row);
 });
 
@@ -116,6 +133,10 @@ adminDirectorateRoutes.post('/:id/receivers', zValidator('json', addReceiverSche
   if (officer.directorate_id !== id) return error(c, 'INVALID_OFFICER', 'Officer must belong to this directorate', 400);
   await c.env.DB.prepare('INSERT OR IGNORE INTO directorate_receivers (directorate_id, officer_id) VALUES (?, ?)')
     .bind(id, officer_id).run();
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'reception_team.add', entityType: 'directorate', entityId: id,
+    summary: `Added officer ${officer_id} to the reception team`,
+  });
   return created(c, { officer_id });
 });
 
@@ -127,6 +148,10 @@ adminDirectorateRoutes.delete('/:id/receivers/:officerId', async (c) => {
     .bind(id, officerId).run();
   await c.env.DB.prepare('UPDATE directorates SET reception_officer_id = NULL WHERE id = ? AND reception_officer_id = ?')
     .bind(id, officerId).run();
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'reception_team.remove', entityType: 'directorate', entityId: id,
+    summary: `Removed officer ${officerId} from the reception team`,
+  });
   return success(c, { removed: true });
 });
 
@@ -152,6 +177,10 @@ adminDirectorateRoutes.post('/officers', zValidator('json', officerCreateSchema)
   const row = await c.env.DB.prepare(
     `SELECT o.*, d.abbreviation as directorate_abbr FROM officers o JOIN directorates d ON o.directorate_id = d.id WHERE o.id = ?`
   ).bind(id).first();
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'officer.create', entityType: 'officer', entityId: id,
+    summary: `Created officer ${body.name}${body.title ? ` (${body.title})` : ''}`,
+  });
   return created(c, row);
 });
 
@@ -164,7 +193,9 @@ adminDirectorateRoutes.put('/officers/:id', zValidator('json', officerUpdateSche
   const id = c.req.param('id');
   const body = c.req.valid('json');
 
-  const existing = await c.env.DB.prepare('SELECT id FROM officers WHERE id = ?').bind(id).first();
+  const existing = await c.env.DB.prepare(
+    'SELECT id, name, title, directorate_id, email, phone, office_number, is_available FROM officers WHERE id = ?'
+  ).bind(id).first<Record<string, unknown> & { name?: string }>();
   if (!existing) return notFound(c, 'Officer');
 
   const fields: string[] = [];
@@ -186,6 +217,17 @@ adminDirectorateRoutes.put('/officers/:id', zValidator('json', officerUpdateSche
   const row = await c.env.DB.prepare(
     `SELECT o.*, d.abbreviation as directorate_abbr FROM officers o JOIN directorates d ON o.directorate_id = d.id WHERE o.id = ?`
   ).bind(id).first();
+  const after = await c.env.DB.prepare(
+    'SELECT name, title, directorate_id, email, phone, office_number, is_available FROM officers WHERE id = ?'
+  ).bind(id).first<Record<string, unknown>>();
+  const changes = diffRecords(existing, after, ['name', 'title', 'directorate_id', 'email', 'phone', 'office_number', 'is_available']);
+  if (Object.keys(changes).length > 0) {
+    await recordAudit(c.env, auditActorFromContext(c), {
+      action: 'officer.update', entityType: 'officer', entityId: id,
+      summary: `Updated officer ${existing.name ?? id}`,
+      changes,
+    });
+  }
   return success(c, row);
 });
 
@@ -202,6 +244,10 @@ adminDirectorateRoutes.post('/officers/:id/link-token', async (c) => {
   const token = crypto.randomUUID().replace(/-/g, '');
   await c.env.KV.put(`officer-link:${token}`, id, { expirationTtl: 7 * 86400 });
   const url = `https://t.me/${c.env.TELEGRAM_BOT_USERNAME}?start=${token}`;
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'officer.telegram_link_issued', entityType: 'officer', entityId: id,
+    summary: `Issued a Telegram link token for officer ${id}`,
+  });
   return success(c, { url, token });
 });
 
@@ -210,5 +256,9 @@ adminDirectorateRoutes.delete('/officers/:id/telegram', async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
   const id = c.req.param('id');
   await c.env.DB.prepare('UPDATE officers SET telegram_chat_id = NULL WHERE id = ?').bind(id).run();
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'officer.telegram_revoked', entityType: 'officer', entityId: id,
+    summary: `Revoked the Telegram link for officer ${id}`,
+  });
   return success(c, { unlinked: true });
 });

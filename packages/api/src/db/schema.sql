@@ -301,6 +301,30 @@ CREATE TABLE IF NOT EXISTS holidays (
 );
 
 -- ---------------------------------------------------------------------------
+-- Audit log — tamper-evident, append-only record of sensitive mutations.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_log (
+    id            TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    seq           INTEGER NOT NULL,
+    at            TEXT NOT NULL,
+    actor_user_id TEXT,
+    actor_role    TEXT,
+    actor_label   TEXT,
+    action        TEXT NOT NULL,
+    entity_type   TEXT,
+    entity_id     TEXT,
+    summary       TEXT,
+    changes       TEXT,
+    ip            TEXT,
+    prev_hash     TEXT NOT NULL,
+    hash          TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_log(seq);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_user_id);
+
+-- ---------------------------------------------------------------------------
 -- Migration bookkeeping (kept last)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS applied_migrations (

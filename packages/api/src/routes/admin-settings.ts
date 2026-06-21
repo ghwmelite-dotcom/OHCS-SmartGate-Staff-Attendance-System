@@ -4,6 +4,9 @@ import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error, notFound } from '../lib/response';
 import { invalidateSettingsCache, type AppSettings } from '../services/settings';
+import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
+
+const AUDITED_SETTINGS_FIELDS = ['work_start_time', 'late_threshold_time', 'work_end_time', 'reception_override_pin'];
 
 export const adminSettingsRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -37,6 +40,9 @@ adminSettingsRoutes.put('/', zValidator('json', settingsSchema), async (c) => {
     return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
   }
   const body = c.req.valid('json');
+  const before = await c.env.DB.prepare(
+    'SELECT work_start_time, late_threshold_time, work_end_time, reception_override_pin FROM app_settings WHERE id = 1'
+  ).first<Record<string, unknown>>();
   // Empty string = disable overrides (store NULL); digits = store as-is.
   const overridePin = body.reception_override_pin ? body.reception_override_pin : null;
   await c.env.DB.prepare(
@@ -52,5 +58,14 @@ adminSettingsRoutes.put('/', zValidator('json', settingsSchema), async (c) => {
   const row = await c.env.DB.prepare(
     'SELECT work_start_time, late_threshold_time, work_end_time, reception_override_pin, updated_by, updated_at FROM app_settings WHERE id = 1'
   ).first<AppSettings>();
+
+  const changes = diffRecords(before, row as unknown as Record<string, unknown>, AUDITED_SETTINGS_FIELDS);
+  if (Object.keys(changes).length > 0) {
+    await recordAudit(c.env, auditActorFromContext(c), {
+      action: 'settings.update', entityType: 'settings', entityId: '1',
+      summary: 'Updated working-hours / override settings',
+      changes,
+    });
+  }
   return success(c, row);
 });
