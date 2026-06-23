@@ -8,7 +8,7 @@ export async function uploadVisitorPhoto(
   visitorId: string,
   body: ArrayBuffer,
   key: string,
-  column: 'photo_url' | 'id_photo_url',
+  column: 'photo_url' | 'id_photo_url' | 'id_photo_back_url',
   publicUrl: string,
 ): Promise<void> {
   await env.STORAGE.put(key, body, { httpMetadata: { contentType: 'image/jpeg' } });

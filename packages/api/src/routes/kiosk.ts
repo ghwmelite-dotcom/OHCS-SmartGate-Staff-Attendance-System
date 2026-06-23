@@ -5,7 +5,7 @@ import type { Env } from '../types';
 import { success, created, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
 import { KioskCreateVisitorSchema, KioskCheckInSchema, KioskCheckOutSchema } from '../lib/validation';
-import { visitorPhotoKey, visitorIdPhotoKey } from '../lib/photo-key';
+import { visitorPhotoKey, visitorIdPhotoKey, visitorIdPhotoBackKey } from '../lib/photo-key';
 import { uploadVisitorPhoto } from '../lib/photo-upload';
 import { isJpeg } from '../lib/image-magic';
 import { performCheckIn } from '../services/check-in';
@@ -124,6 +124,25 @@ kioskRoutes.post('/visitors/:id/id-photo', async (c) => {
   await c.env.KV.put(`idcheck:${visitorId}`, JSON.stringify(idCheck), { expirationTtl: 900 });
 
   return success(c, { id_photo_url: idPhotoUrl, id_check: idCheck });
+});
+
+// Raw-JPEG ID-document BACK photo upload (Ghana Card). No AI check — the front
+// photo already drives the document gate.
+kioskRoutes.post('/visitors/:id/id-photo-back', async (c) => {
+  if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
+  const visitorId = c.req.param('id');
+  const visitor = await c.env.DB.prepare('SELECT id FROM visitors WHERE id = ?').bind(visitorId).first();
+  if (!visitor) return notFound(c, 'Visitor');
+  if (Number(c.req.header('content-length') ?? '0') > MAX_PHOTO_BYTES) {
+    return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
+  }
+  const buf = await c.req.arrayBuffer();
+  if (buf.byteLength === 0) return error(c, 'EMPTY_BODY', 'No photo data', 400);
+  if (buf.byteLength > MAX_PHOTO_BYTES) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
+  if (!isJpeg(new Uint8Array(buf))) return error(c, 'INVALID_IMAGE', 'Photo must be a JPEG image', 400);
+  const idPhotoBackUrl = `/api/photos/visitors/${visitorId}/id-back`;
+  await uploadVisitorPhoto(c.env, visitorId, buf, visitorIdPhotoBackKey(visitorId), 'id_photo_back_url', idPhotoBackUrl);
+  return success(c, { id_photo_back_url: idPhotoBackUrl });
 });
 
 // Check in — attributed to the kiosk system user, source = 'kiosk'.

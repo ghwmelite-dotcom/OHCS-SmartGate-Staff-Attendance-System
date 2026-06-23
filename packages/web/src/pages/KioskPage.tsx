@@ -8,7 +8,8 @@ import { API_BASE, BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
-import { SmartIdFields } from '@/components/checkin/SmartIdFields';
+import { IdTypeChooser } from '@/components/checkin/IdTypeChooser';
+import { IdDocumentCapture } from '@/components/checkin/IdDocumentCapture';
 import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
 import { suggestDirectorate } from '@/lib/directorate-routing';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
@@ -24,7 +25,6 @@ const visitorSchema = z.object({
   id_type: z.enum(['ghana_card', 'passport', 'drivers_license', 'staff_id', 'other'], {
     errorMap: () => ({ message: 'Select an ID type' }),
   }),
-  id_number: z.string().max(50).optional(),
   purpose_raw: z.string().min(1, 'Purpose of visit is required').max(500),
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
@@ -64,7 +64,7 @@ export function KioskPage() {
 
   const form = useForm<VisitorForm>({
     resolver: zodResolver(visitorSchema),
-    defaultValues: { first_name: '', last_name: '', phone: '', organisation: '', directorate_id: '', host_name: '', id_number: '', purpose_raw: '' },
+    defaultValues: { first_name: '', last_name: '', phone: '', organisation: '', directorate_id: '', host_name: '', purpose_raw: '' },
   });
 
   const [directorates, setDirectorates] = useState<KioskDirectorate[]>([]);
@@ -91,7 +91,6 @@ export function KioskPage() {
         phone: data.phone || '',
         organisation: data.organisation || '',
         id_type: data.id_type,
-        id_number: data.id_number || '',
       });
       setVisitorId(visitor.id);
       setMode('face');
@@ -105,11 +104,12 @@ export function KioskPage() {
     setMode('id');
   }
 
-  async function handleIdCapture(blob: Blob) {
+  async function handleIdComplete({ front, back }: { front: Blob; back?: Blob }) {
     setMode('submitting');
     let verdict: IdCheckVerdict | undefined;
     if (visitorId) {
-      try { verdict = (await kioskApi.uploadIdPhoto(visitorId, blob)).id_check; } catch { /* continue */ }
+      try { verdict = (await kioskApi.uploadIdPhoto(visitorId, front)).id_check; } catch { /* continue */ }
+      if (back) { try { await kioskApi.uploadIdPhotoBack(visitorId, back); } catch { /* best-effort */ } }
     }
     const captured = verdict ?? null;
     setIdCheck(captured);
@@ -323,18 +323,13 @@ export function KioskPage() {
               <FieldWrapper icon={<User className="h-4 w-4" />} label="Who are you visiting? (optional)" error={form.formState.errors.host_name?.message}>
                 <input {...form.register('host_name')} className={fieldCls} placeholder="e.g. Mr. Mensah" />
               </FieldWrapper>
-              <SmartIdFields
+              <IdTypeChooser
                 idType={form.watch('id_type')}
-                idNumber={form.watch('id_number') ?? ''}
                 onIdTypeChange={(v) => {
                   form.setValue('id_type', v as never);
                   if (v) form.clearErrors('id_type');
-                  else form.setValue('id_number', '');
                 }}
-                onIdNumberChange={(v) => form.setValue('id_number', v)}
                 idTypeError={form.formState.errors.id_type?.message}
-                idNumberError={form.formState.errors.id_number?.message}
-                inputClassName={fieldCls}
               />
             </div>
             {submitError && <p className="text-danger text-xs">{submitError}</p>}
@@ -433,7 +428,7 @@ export function KioskPage() {
               </div>
             ) : (
               <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
-                <PhotoCapture title="Photograph Your ID" facingMode="environment" mirror={false} required qualityGuard onCapture={handleIdCapture} onSkip={() => { /* ID photo is mandatory — no skip */ }} />
+                <IdDocumentCapture idType={form.watch('id_type')} required qualityGuard onComplete={handleIdComplete} onSkip={() => { /* ID photo is mandatory — no skip */ }} />
               </div>
             )}
           </div>

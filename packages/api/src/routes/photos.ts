@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import type { Env, SessionData } from '../types';
 import { success, error, notFound } from '../lib/response';
 import { requireRole } from '../lib/require-role';
-import { visitorPhotoKey, visitorIdPhotoKey } from '../lib/photo-key';
+import { visitorPhotoKey, visitorIdPhotoKey, visitorIdPhotoBackKey } from '../lib/photo-key';
 import { uploadVisitorPhoto } from '../lib/photo-upload';
 import { isJpeg } from '../lib/image-magic';
 import { resolveDirectorateScope } from '../lib/directorate-scope';
@@ -70,6 +70,27 @@ photoRoutes.post('/visitors/:id/id-photo', async (c) => {
   return success(c, { id_photo_url: idPhotoUrl });
 });
 
+// Upload visitor ID-document BACK photo (Ghana Card) — accepts raw JPEG body
+photoRoutes.post('/visitors/:id/id-photo-back', async (c) => {
+  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist');
+  if (blocked) return blocked;
+  const visitorId = c.req.param('id');
+  const visitor = await c.env.DB.prepare('SELECT id FROM visitors WHERE id = ?').bind(visitorId).first();
+  if (!visitor) return notFound(c, 'Visitor');
+
+  if (Number(c.req.header('content-length') ?? '0') > MAX_PHOTO_BYTES) {
+    return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
+  }
+  const body = await c.req.arrayBuffer();
+  if (body.byteLength === 0) return error(c, 'EMPTY_BODY', 'No photo data', 400);
+  if (body.byteLength > MAX_PHOTO_BYTES) return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
+  if (!isJpeg(new Uint8Array(body))) return error(c, 'INVALID_IMAGE', 'Photo must be a JPEG image', 400);
+
+  const idPhotoBackUrl = `/api/photos/visitors/${visitorId}/id-back`;
+  await uploadVisitorPhoto(c.env, visitorId, body, visitorIdPhotoBackKey(visitorId), 'id_photo_back_url', idPhotoBackUrl);
+  return success(c, { id_photo_back_url: idPhotoBackUrl });
+});
+
 // Serve visitor face photo from R2 (auth-gated; mounted under /api/*)
 photoRoutes.get('/visitors/:id', async (c) => {
   const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
@@ -91,6 +112,20 @@ photoRoutes.get('/visitors/:id/id', async (c) => {
   const visitorId = c.req.param('id');
   if (!(await canViewVisitorPhoto(c, visitorId))) return notFound(c, 'Photo');
   const object = await c.env.STORAGE.get(visitorIdPhotoKey(visitorId));
+  if (!object) return notFound(c, 'Photo');
+  const headers = new Headers();
+  headers.set('Content-Type', 'image/jpeg');
+  headers.set('Cache-Control', 'private, max-age=3600');
+  return new Response(object.body, { headers });
+});
+
+// Serve visitor ID-document BACK photo from R2 (auth-gated)
+photoRoutes.get('/visitors/:id/id-back', async (c) => {
+  const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
+  if (blocked) return blocked;
+  const visitorId = c.req.param('id');
+  if (!(await canViewVisitorPhoto(c, visitorId))) return notFound(c, 'Photo');
+  const object = await c.env.STORAGE.get(visitorIdPhotoBackKey(visitorId));
   if (!object) return notFound(c, 'Photo');
   const headers = new Headers();
   headers.set('Content-Type', 'image/jpeg');

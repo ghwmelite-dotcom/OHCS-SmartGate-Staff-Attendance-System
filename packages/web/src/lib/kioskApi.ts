@@ -35,7 +35,7 @@ async function kioskRequest<T>(path: string, body: unknown): Promise<T> {
   return json.data as T;
 }
 
-async function kioskUploadPhoto<T>(visitorId: string, kind: 'photo' | 'id-photo', blob: Blob): Promise<T> {
+async function kioskUploadPhoto<T>(visitorId: string, kind: 'photo' | 'id-photo' | 'id-photo-back', blob: Blob): Promise<T> {
   const buf = await blob.arrayBuffer();
   const res = await fetch(`${API_BASE}/kiosk/visitors/${visitorId}/${kind}`, {
     method: 'POST',
@@ -111,6 +111,7 @@ export const kioskApi = {
   createVisitor: (body: Record<string, unknown>) => kioskRequest<KioskVisitor>('/visitors', body),
   uploadFacePhoto: (id: string, blob: Blob) => kioskUploadPhoto<{ photo_url: string }>(id, 'photo', blob),
   uploadIdPhoto: (id: string, blob: Blob) => kioskUploadPhoto<IdPhotoResult>(id, 'id-photo', blob),
+  uploadIdPhotoBack: (id: string, blob: Blob) => kioskUploadPhoto<{ id_photo_back_url: string }>(id, 'id-photo-back', blob),
   checkIn: (body: KioskCheckInBody) => kioskRequest<KioskVisit>('/check-in', body),
   checkOut: (badgeCode: string) => kioskRequest<KioskVisit>('/check-out', { badge_code: badgeCode }),
   getDirectorates: () => kioskGet<KioskDirectorate[]>('/directorates'),

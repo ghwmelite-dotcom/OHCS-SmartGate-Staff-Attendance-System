@@ -7,3 +7,7 @@ export function visitorPhotoKey(visitorId: string): string {
 export function visitorIdPhotoKey(visitorId: string): string {
   return `photos/visitors/${visitorId}-id.jpg`;
 }
+
+export function visitorIdPhotoBackKey(visitorId: string): string {
+  return `photos/visitors/${visitorId}-id-back.jpg`;
+}

@@ -11,7 +11,8 @@ import { cn, getInitials, formatDate } from '@/lib/utils';
 import { BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
-import { SmartIdFields } from '@/components/checkin/SmartIdFields';
+import { IdTypeChooser } from '@/components/checkin/IdTypeChooser';
+import { IdDocumentCapture } from '@/components/checkin/IdDocumentCapture';
 import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
 import { suggestDirectorate } from '@/lib/directorate-routing';
@@ -44,7 +45,6 @@ const newVisitorSchema = z.object({
   email: z.string().email('Invalid email').or(z.literal('')).optional(),
   organisation: z.string().max(200).optional(),
   id_type: z.enum(['ghana_card', 'passport', 'drivers_license', 'staff_id', 'other']).optional(),
-  id_number: z.string().max(50).optional(),
 });
 type NewVisitorForm = z.infer<typeof newVisitorSchema>;
 
@@ -96,7 +96,7 @@ export function CheckInPage() {
   /* ---- New visitor form ---- */
   const newVisitorForm = useForm<NewVisitorForm>({
     resolver: zodResolver(newVisitorSchema),
-    defaultValues: { first_name: '', last_name: '', phone: '', email: '', organisation: '', id_number: '' },
+    defaultValues: { first_name: '', last_name: '', phone: '', email: '', organisation: '' },
   });
 
   const createVisitorMutation = useMutation({
@@ -176,17 +176,24 @@ export function CheckInPage() {
     setStep('id-photo');
   }
 
-  /* ---- ID photo upload ---- */
-  async function handleIdPhotoCapture(blob: Blob) {
+  /* ---- ID photo upload (front, optional back for Ghana Card) ---- */
+  async function handleIdComplete({ front, back }: { front: Blob; back?: Blob }) {
     if (!selectedVisitor) { setStep('check-in'); return; }
     try {
-      const arrayBuffer = await blob.arrayBuffer();
       await fetch(`/api/photos/visitors/${selectedVisitor.id}/id-photo`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'image/jpeg' },
-        body: arrayBuffer,
+        body: await front.arrayBuffer(),
       });
+      if (back) {
+        await fetch(`/api/photos/visitors/${selectedVisitor.id}/id-photo-back`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'image/jpeg' },
+          body: await back.arrayBuffer(),
+        });
+      }
     } catch {
       // ID photo upload failed silently — continue to check-in
     }
@@ -202,7 +209,6 @@ export function CheckInPage() {
       phone: '',
       email: '',
       organisation: '',
-      id_number: '',
     });
     setStep('new-visitor');
   }
@@ -371,15 +377,9 @@ export function CheckInPage() {
               <input {...newVisitorForm.register('organisation')} className={fieldCls} placeholder="e.g. Ministry of Finance" />
             </FieldWrapper>
 
-            <SmartIdFields
+            <IdTypeChooser
               idType={newVisitorForm.watch('id_type')}
-              idNumber={newVisitorForm.watch('id_number') ?? ''}
-              onIdTypeChange={(v) => {
-                newVisitorForm.setValue('id_type', v as never);
-                if (!v) newVisitorForm.setValue('id_number', '');
-              }}
-              onIdNumberChange={(v) => newVisitorForm.setValue('id_number', v)}
-              idNumberError={newVisitorForm.formState.errors.id_number?.message}
+              onIdTypeChange={(v) => newVisitorForm.setValue('id_type', v as never)}
             />
 
             {createVisitorMutation.isError && (
@@ -438,11 +438,11 @@ export function CheckInPage() {
             </p>
           </div>
           <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
-            <PhotoCapture
-              title="Photograph the ID"
-              facingMode="environment"
-              mirror={false}
-              onCapture={handleIdPhotoCapture}
+            <IdDocumentCapture
+              // Prefer the visitor's stored ID type so existing Ghana Card visitors
+              // (whose new-visitor form was never filled) still get front + back.
+              idType={selectedVisitor.id_type ?? newVisitorForm.watch('id_type')}
+              onComplete={handleIdComplete}
               onSkip={() => setStep('check-in')}
             />
           </div>
