@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS directorates (
     name            TEXT NOT NULL,
     abbreviation    TEXT NOT NULL UNIQUE,
     type            TEXT NOT NULL DEFAULT 'directorate' CHECK(type IN ('directorate','secretariat','unit')),
+    -- Expanded, UNCONSTRAINED classification (migration-directorate-org-type.sql).
+    -- The real org-entity type lives here; legacy `type` keeps a CHECK-safe value.
+    -- Reads use COALESCE(org_type, type). Add new types app-side, no migration.
+    org_type        TEXT,
     floor           TEXT,
     wing            TEXT,
     rooms           TEXT,

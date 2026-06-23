@@ -11,6 +11,8 @@ const TYPES = [
   { value: 'directorate', label: 'Directorate', color: 'bg-primary/10 text-primary' },
   { value: 'secretariat', label: 'Secretariat', color: 'bg-accent/10 text-accent-warm' },
   { value: 'unit', label: 'Unit', color: 'bg-info/10 text-info' },
+  { value: 'project_office', label: 'Project Office', color: 'bg-success/10 text-success' },
+  { value: 'partner_org', label: 'Partner Organisation', color: 'bg-foreground/5 text-foreground' },
 ] as const;
 
 interface DirectorateExt extends Directorate {
@@ -26,7 +28,7 @@ interface OfficerExt extends Officer {
 const dirSchema = z.object({
   name: z.string().min(1).max(200),
   abbreviation: z.string().min(1).max(20),
-  type: z.enum(['directorate', 'secretariat', 'unit']),
+  type: z.enum(['directorate', 'secretariat', 'unit', 'project_office', 'partner_org']),
   rooms: z.string().max(200).optional(),
   floor: z.string().max(100).optional(),
   wing: z.string().max(100).optional(),
