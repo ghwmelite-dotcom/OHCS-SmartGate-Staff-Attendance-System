@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { visitorPhotoKey, visitorIdPhotoKey } from './photo-key';
+import { visitorPhotoKey, visitorIdPhotoKey, visitorIdPhotoBackKey } from './photo-key';
 
 describe('visitorPhotoKey', () => {
   it('builds the R2 key for a visitor face photo', () => {
@@ -10,5 +10,11 @@ describe('visitorPhotoKey', () => {
 describe('visitorIdPhotoKey', () => {
   it('builds the R2 key for a visitor ID-document photo', () => {
     expect(visitorIdPhotoKey('abc123')).toBe('photos/visitors/abc123-id.jpg');
+  });
+});
+
+describe('visitorIdPhotoBackKey', () => {
+  it('builds the R2 key for a visitor ID-document BACK photo', () => {
+    expect(visitorIdPhotoBackKey('abc123')).toBe('photos/visitors/abc123-id-back.jpg');
   });
 });
