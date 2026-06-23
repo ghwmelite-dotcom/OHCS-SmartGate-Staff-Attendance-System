@@ -78,8 +78,10 @@ adminDirectorateRoutes.post('/', zValidator('json', createSchema), async (c) => 
       return error(c, 'ABBREVIATION_TAKEN', `Abbreviation "${abbreviation}" is already in use.`, 409);
     }
     // org_type migration not yet applied on this DB — guide instead of 500.
-    if (/no such column.*org_type/i.test(msg)) {
-      return error(c, 'MIGRATION_REQUIRED', 'Run pending migrations (Settings → Database migrations) to enable the new org-entity types, then try again.', 503);
+    // D1 phrases this as "table ... has no column named org_type" on INSERT and
+    // "no such column: org_type" on SELECT/UPDATE — match both.
+    if (/(no such column|has no column named).*org_type/i.test(msg)) {
+      return error(c, 'MIGRATION_REQUIRED', 'The org-type upgrade is not applied to the database yet. Run Settings → Database migrations → "Run pending migrations", then try again.', 503);
     }
     throw err;
   }
@@ -147,8 +149,8 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
       await c.env.DB.prepare(`UPDATE directorates SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (/no such column.*org_type/i.test(msg)) {
-        return error(c, 'MIGRATION_REQUIRED', 'Run pending migrations (Settings → Database migrations) to enable the new org-entity types, then try again.', 503);
+      if (/(no such column|has no column named).*org_type/i.test(msg)) {
+        return error(c, 'MIGRATION_REQUIRED', 'The org-type upgrade is not applied to the database yet. Run Settings → Database migrations → "Run pending migrations", then try again.', 503);
       }
       throw err;
     }
