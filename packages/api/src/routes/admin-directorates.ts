@@ -35,16 +35,38 @@ adminDirectorateRoutes.get('/', async (c) => {
 adminDirectorateRoutes.post('/', zValidator('json', createSchema), async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
   const body = c.req.valid('json');
-  const id = crypto.randomUUID().replace(/-/g, '');
+  const abbreviation = body.abbreviation.toUpperCase();
 
-  await c.env.DB.prepare(
-    'INSERT INTO directorates (id, name, abbreviation, type, rooms, floor, wing) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, body.name, body.abbreviation.toUpperCase(), body.type, body.rooms || null, body.floor || null, body.wing || null).run();
+  // Abbreviation is UNIQUE across ALL directorates (active or not). Pre-check so
+  // the admin gets a clear message instead of a raw D1 UNIQUE-constraint error,
+  // and is pointed at a deactivated entity they can reactivate instead.
+  const clash = await c.env.DB.prepare(
+    'SELECT name, is_active FROM directorates WHERE abbreviation = ?'
+  ).bind(abbreviation).first<{ name: string; is_active: number }>();
+  if (clash) {
+    const hint = clash.is_active
+      ? ''
+      : ' It is currently deactivated — reactivate and edit that entity instead of creating a new one.';
+    return error(c, 'ABBREVIATION_TAKEN', `Abbreviation "${abbreviation}" is already used by "${clash.name}".${hint}`, 409);
+  }
+
+  const id = crypto.randomUUID().replace(/-/g, '');
+  try {
+    await c.env.DB.prepare(
+      'INSERT INTO directorates (id, name, abbreviation, type, rooms, floor, wing) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, body.name, abbreviation, body.type, body.rooms || null, body.floor || null, body.wing || null).run();
+  } catch (err) {
+    // Backstop for the race between the pre-check and the insert.
+    if (/UNIQUE/i.test(err instanceof Error ? err.message : String(err))) {
+      return error(c, 'ABBREVIATION_TAKEN', `Abbreviation "${abbreviation}" is already in use.`, 409);
+    }
+    throw err;
+  }
 
   const row = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first();
   await recordAudit(c.env, auditActorFromContext(c), {
     action: 'directorate.create', entityType: 'directorate', entityId: id,
-    summary: `Created ${body.type} ${body.abbreviation.toUpperCase()} — ${body.name}`,
+    summary: `Created ${body.type} ${abbreviation} — ${body.name}`,
   });
   return created(c, row);
 });
@@ -61,6 +83,16 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
 
   const existing = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first<Record<string, unknown>>();
   if (!existing) return notFound(c, 'Directorate');
+
+  // Reject an abbreviation already held by ANOTHER directorate, with a clear
+  // message instead of a raw UNIQUE-constraint error.
+  if (body.abbreviation !== undefined) {
+    const abbr = body.abbreviation.toUpperCase();
+    const clash = await c.env.DB.prepare(
+      'SELECT name FROM directorates WHERE abbreviation = ? AND id != ?'
+    ).bind(abbr, id).first<{ name: string }>();
+    if (clash) return error(c, 'ABBREVIATION_TAKEN', `Abbreviation "${abbr}" is already used by "${clash.name}".`, 409);
+  }
 
   const fields: string[] = [];
   const values: unknown[] = [];
