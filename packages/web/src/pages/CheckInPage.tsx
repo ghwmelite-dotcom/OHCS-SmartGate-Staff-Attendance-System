@@ -439,7 +439,9 @@ export function CheckInPage() {
           </div>
           <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
             <IdDocumentCapture
-              idType={newVisitorForm.watch('id_type')}
+              // Prefer the visitor's stored ID type so existing Ghana Card visitors
+              // (whose new-visitor form was never filled) still get front + back.
+              idType={selectedVisitor.id_type ?? newVisitorForm.watch('id_type')}
               onComplete={handleIdComplete}
               onSkip={() => setStep('check-in')}
             />
