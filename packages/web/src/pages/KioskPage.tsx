@@ -132,6 +132,7 @@ export function KioskPage() {
   }
 
   async function handleFaceCapture(blob: Blob) {
+    setMode('submitting'); // immediate feedback while the photo + check-in complete
     if (visitorId) { try { await kioskApi.uploadFacePhoto(visitorId, blob); } catch { /* continue */ } }
     await finishCheckIn(overrideApproved ? overridePin : undefined, idCheck);
   }
@@ -183,6 +184,7 @@ export function KioskPage() {
         setIdBlocked(true);
         if (isOverride) {
           setOverrideApproved(false); // the PIN was wrong — make them re-enter
+          setShowOverride(true); // keep the PIN panel open so the error is visible
           setOverrideError('Incorrect PIN — please ask reception to assist at the desk.');
         }
         setMode('form'); // back to the form, where the inline block panel shows
