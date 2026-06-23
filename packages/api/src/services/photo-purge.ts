@@ -1,6 +1,6 @@
 import type { Env } from '../types';
 import { getAppSettings } from './settings';
-import { visitorPhotoKey, visitorIdPhotoKey } from '../lib/photo-key';
+import { visitorPhotoKey, visitorIdPhotoKey, visitorIdPhotoBackKey } from '../lib/photo-key';
 
 /**
  * Visitor photo auto-purge.
@@ -39,7 +39,7 @@ export async function purgeExpiredVisitorPhotos(env: Env): Promise<PhotoPurgeRes
   // recent checkout (or, lacking any checkout, own created_at) is older than cutoff.
   const eligible = await env.DB.prepare(
     `SELECT v.id FROM visitors v
-      WHERE (v.photo_url IS NOT NULL OR v.id_photo_url IS NOT NULL)
+      WHERE (v.photo_url IS NOT NULL OR v.id_photo_url IS NOT NULL OR v.id_photo_back_url IS NOT NULL)
         AND NOT EXISTS (SELECT 1 FROM visits w WHERE w.visitor_id = v.id AND w.status = 'checked_in')
         AND COALESCE((SELECT MAX(check_out_at) FROM visits w WHERE w.visitor_id = v.id), v.created_at) < ?
       LIMIT ${BATCH_LIMIT}`
@@ -56,9 +56,10 @@ export async function purgeExpiredVisitorPhotos(env: Env): Promise<PhotoPurgeRes
       // uploaded or was already purged.
       await env.STORAGE.delete(visitorPhotoKey(id));
       await env.STORAGE.delete(visitorIdPhotoKey(id));
-      photosDeleted += 2;
+      await env.STORAGE.delete(visitorIdPhotoBackKey(id));
+      photosDeleted += 3;
       await env.DB.prepare(
-        'UPDATE visitors SET photo_url = NULL, id_photo_url = NULL WHERE id = ?'
+        'UPDATE visitors SET photo_url = NULL, id_photo_url = NULL, id_photo_back_url = NULL WHERE id = ?'
       ).bind(id).run();
       visitorsScrubbed += 1;
     } catch (err) {
