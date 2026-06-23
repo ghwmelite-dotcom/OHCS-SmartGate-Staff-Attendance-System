@@ -439,7 +439,7 @@ export function CheckInPage() {
           </div>
           <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
             <IdDocumentCapture
-              idType={newVisitorForm.getValues('id_type')}
+              idType={newVisitorForm.watch('id_type')}
               onComplete={handleIdComplete}
               onSkip={() => setStep('check-in')}
             />

@@ -428,7 +428,7 @@ export function KioskPage() {
               </div>
             ) : (
               <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
-                <IdDocumentCapture idType={form.getValues('id_type')} required qualityGuard onComplete={handleIdComplete} onSkip={() => { /* ID photo is mandatory — no skip */ }} />
+                <IdDocumentCapture idType={form.watch('id_type')} required qualityGuard onComplete={handleIdComplete} onSkip={() => { /* ID photo is mandatory — no skip */ }} />
               </div>
             )}
           </div>
