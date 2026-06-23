@@ -12,10 +12,26 @@ function requireSuperadmin(c: { get: (key: 'session') => SessionData }) {
   return c.get('session').role === 'superadmin';
 }
 
+// Expanded org-entity types. Stored in the unconstrained `org_type` column;
+// adding more here needs no DB migration (see migration-directorate-org-type.sql).
+const ORG_TYPES = ['directorate', 'secretariat', 'unit', 'project_office', 'partner_org'] as const;
+// Values the legacy directorates.type CHECK still accepts; anything else is
+// stored as 'unit' in that column purely to satisfy the un-droppable CHECK.
+const LEGACY_TYPES = new Set(['directorate', 'secretariat', 'unit']);
+const legacyTypeFor = (t: string): string => (LEGACY_TYPES.has(t) ? t : 'unit');
+
+// Present the effective type to clients: the real org_type, falling back to the
+// legacy column for rows created before org_type existed.
+function withEffectiveType<T extends Record<string, unknown>>(row: T | null): T | null {
+  if (!row) return row;
+  const orgType = row.org_type as string | null | undefined;
+  return { ...row, type: orgType ?? row.type };
+}
+
 const createSchema = z.object({
   name: z.string().min(1).max(200).trim(),
   abbreviation: z.string().min(1).max(20).trim(),
-  type: z.enum(['directorate', 'secretariat', 'unit']),
+  type: z.enum(ORG_TYPES),
   rooms: z.string().max(200).optional().or(z.literal('')),
   floor: z.string().max(100).optional().or(z.literal('')),
   wing: z.string().max(100).optional().or(z.literal('')),
@@ -28,8 +44,8 @@ adminDirectorateRoutes.get('/', async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
   const rows = await c.env.DB.prepare(
     'SELECT * FROM directorates ORDER BY is_active DESC, abbreviation'
-  ).all();
-  return success(c, rows.results ?? []);
+  ).all<Record<string, unknown>>();
+  return success(c, (rows.results ?? []).map(withEffectiveType));
 });
 
 adminDirectorateRoutes.post('/', zValidator('json', createSchema), async (c) => {
@@ -53,22 +69,27 @@ adminDirectorateRoutes.post('/', zValidator('json', createSchema), async (c) => 
   const id = crypto.randomUUID().replace(/-/g, '');
   try {
     await c.env.DB.prepare(
-      'INSERT INTO directorates (id, name, abbreviation, type, rooms, floor, wing) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(id, body.name, abbreviation, body.type, body.rooms || null, body.floor || null, body.wing || null).run();
+      'INSERT INTO directorates (id, name, abbreviation, type, org_type, rooms, floor, wing) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, body.name, abbreviation, legacyTypeFor(body.type), body.type, body.rooms || null, body.floor || null, body.wing || null).run();
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     // Backstop for the race between the pre-check and the insert.
-    if (/UNIQUE/i.test(err instanceof Error ? err.message : String(err))) {
+    if (/UNIQUE/i.test(msg)) {
       return error(c, 'ABBREVIATION_TAKEN', `Abbreviation "${abbreviation}" is already in use.`, 409);
+    }
+    // org_type migration not yet applied on this DB — guide instead of 500.
+    if (/no such column.*org_type/i.test(msg)) {
+      return error(c, 'MIGRATION_REQUIRED', 'Run pending migrations (Settings → Database migrations) to enable the new org-entity types, then try again.', 503);
     }
     throw err;
   }
 
-  const row = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first();
+  const row = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first<Record<string, unknown>>();
   await recordAudit(c.env, auditActorFromContext(c), {
     action: 'directorate.create', entityType: 'directorate', entityId: id,
     summary: `Created ${body.type} ${abbreviation} — ${body.name}`,
   });
-  return created(c, row);
+  return created(c, withEffectiveType(row));
 });
 
 const updateSchema = createSchema.partial().extend({
@@ -98,7 +119,11 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
   const values: unknown[] = [];
   if (body.name !== undefined) { fields.push('name = ?'); values.push(body.name); }
   if (body.abbreviation !== undefined) { fields.push('abbreviation = ?'); values.push(body.abbreviation.toUpperCase()); }
-  if (body.type !== undefined) { fields.push('type = ?'); values.push(body.type); }
+  if (body.type !== undefined) {
+    // Real value → org_type; CHECK-safe value → legacy type column.
+    fields.push('type = ?'); values.push(legacyTypeFor(body.type));
+    fields.push('org_type = ?'); values.push(body.type);
+  }
   if (body.rooms !== undefined) { fields.push('rooms = ?'); values.push(body.rooms || null); }
   if (body.floor !== undefined) { fields.push('floor = ?'); values.push(body.floor || null); }
   if (body.wing !== undefined) { fields.push('wing = ?'); values.push(body.wing || null); }
@@ -118,11 +143,19 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
 
   if (fields.length > 0) {
     values.push(id);
-    await c.env.DB.prepare(`UPDATE directorates SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
+    try {
+      await c.env.DB.prepare(`UPDATE directorates SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/no such column.*org_type/i.test(msg)) {
+        return error(c, 'MIGRATION_REQUIRED', 'Run pending migrations (Settings → Database migrations) to enable the new org-entity types, then try again.', 503);
+      }
+      throw err;
+    }
   }
 
   const row = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first<Record<string, unknown>>();
-  const changes = diffRecords(existing, row, ['name', 'abbreviation', 'type', 'rooms', 'floor', 'wing', 'is_active', 'reception_officer_id']);
+  const changes = diffRecords(existing, row, ['name', 'abbreviation', 'type', 'org_type', 'rooms', 'floor', 'wing', 'is_active', 'reception_officer_id']);
   if (Object.keys(changes).length > 0) {
     const onlyPrimary = Object.keys(changes).length === 1 && !!changes.reception_officer_id;
     await recordAudit(c.env, auditActorFromContext(c), {
@@ -134,7 +167,7 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
       changes,
     });
   }
-  return success(c, row);
+  return success(c, withEffectiveType(row));
 });
 
 // List a directorate's receiver team with link + primary state (superadmin).

@@ -30,6 +30,7 @@ import auditLog from './migration-audit-log.sql';
 import auditLogReset from './migration-audit-log-reset.sql';
 import sessionEpoch from './migration-session-epoch.sql';
 import officerOverridePin from './migration-officer-override-pin.sql';
+import directorateOrgType from './migration-directorate-org-type.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -64,6 +65,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-audit-log-reset.sql', sql: auditLogReset },
   { filename: 'migration-session-epoch.sql', sql: sessionEpoch },
   { filename: 'migration-officer-override-pin.sql', sql: officerOverridePin },
+  { filename: 'migration-directorate-org-type.sql', sql: directorateOrgType },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {
