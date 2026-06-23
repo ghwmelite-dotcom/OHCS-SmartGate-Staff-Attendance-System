@@ -68,6 +68,10 @@ export function CheckInPage() {
   const [selectedVisitor, setSelectedVisitor] = useState<Visitor | null>(null);
   const [createdVisit, setCreatedVisit] = useState<Visit | null>(null);
   const [queuedOffline, setQueuedOffline] = useState(false);
+  // ID photo(s) captured inline in the new-visitor form (optional). When set, the
+  // separate id-photo step is skipped after the selfie.
+  const [newIdBlobs, setNewIdBlobs] = useState<{ front: Blob; back?: Blob } | null>(null);
+  const [idCapturedInline, setIdCapturedInline] = useState(false);
 
   /* ---- Data queries ---- */
   const { data: searchResults, isFetching: isSearching } = useQuery({
@@ -101,13 +105,31 @@ export function CheckInPage() {
 
   const createVisitorMutation = useMutation({
     mutationFn: (data: NewVisitorForm) => api.post<Visitor>('/visitors', data),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       const visitor = res.data;
-      if (visitor) {
-        setSelectedVisitor(visitor);
-        setStep('photo');
-        queryClient.invalidateQueries({ queryKey: ['visitors'] });
+      if (!visitor) return;
+      setSelectedVisitor(visitor);
+      // Upload the inline-captured ID photo(s) now that the visitor exists, then
+      // skip the separate id-photo step after the selfie.
+      if (newIdBlobs) {
+        try {
+          await fetch(`/api/photos/visitors/${visitor.id}/id-photo`, {
+            method: 'POST', credentials: 'include', headers: { 'Content-Type': 'image/jpeg' },
+            body: await newIdBlobs.front.arrayBuffer(),
+          });
+          if (newIdBlobs.back) {
+            await fetch(`/api/photos/visitors/${visitor.id}/id-photo-back`, {
+              method: 'POST', credentials: 'include', headers: { 'Content-Type': 'image/jpeg' },
+              body: await newIdBlobs.back.arrayBuffer(),
+            });
+          }
+        } catch {
+          // best-effort — never block registration on a photo upload
+        }
+        setIdCapturedInline(true);
       }
+      setStep('photo');
+      queryClient.invalidateQueries({ queryKey: ['visitors'] });
     },
   });
 
@@ -155,6 +177,9 @@ export function CheckInPage() {
   /* ---- Select existing visitor ---- */
   function selectVisitor(visitor: Visitor) {
     setSelectedVisitor(visitor);
+    // Existing visitors go through the separate id-photo step (no inline capture).
+    setNewIdBlobs(null);
+    setIdCapturedInline(false);
     setStep('photo');
   }
 
@@ -171,9 +196,11 @@ export function CheckInPage() {
       });
       queryClient.invalidateQueries({ queryKey: ['visitors'] });
     } catch {
-      // Photo upload failed silently — continue to check-in
+      // Photo upload failed silently — continue
     }
-    setStep('id-photo');
+    // New visitors captured their ID inline during registration → skip the separate
+    // step. Existing visitors still photograph their ID here.
+    setStep(idCapturedInline ? 'check-in' : 'id-photo');
   }
 
   /* ---- ID photo upload (front, optional back for Ghana Card) ---- */
@@ -210,6 +237,8 @@ export function CheckInPage() {
       email: '',
       organisation: '',
     });
+    setNewIdBlobs(null);
+    setIdCapturedInline(false);
     setStep('new-visitor');
   }
 
@@ -219,6 +248,8 @@ export function CheckInPage() {
     setSelectedVisitor(null);
     setCreatedVisit(null);
     setQueuedOffline(false);
+    setNewIdBlobs(null);
+    setIdCapturedInline(false);
     newVisitorForm.reset();
     checkInForm.reset();
   }
@@ -379,8 +410,31 @@ export function CheckInPage() {
 
             <IdTypeChooser
               idType={newVisitorForm.watch('id_type')}
-              onIdTypeChange={(v) => newVisitorForm.setValue('id_type', v as never)}
+              onIdTypeChange={(v) => {
+                newVisitorForm.setValue('id_type', v as never);
+                setNewIdBlobs(null); // changing the type discards any captured photo
+              }}
             />
+
+            {/* Inline ID photo capture — optional; appears once an ID type is chosen. */}
+            {newVisitorForm.watch('id_type') && (
+              <div className="rounded-xl border border-border bg-background p-3">
+                {newIdBlobs ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="inline-flex items-center gap-2 text-[13px] text-success font-medium">
+                      <CheckCircle2 className="h-4 w-4" /> ID photo{newIdBlobs.back ? 's' : ''} captured
+                    </span>
+                    <button type="button" onClick={() => setNewIdBlobs(null)} className="text-[13px] text-muted hover:text-foreground underline">Retake</button>
+                  </div>
+                ) : (
+                  <IdDocumentCapture
+                    idType={newVisitorForm.watch('id_type')}
+                    onComplete={(r) => setNewIdBlobs(r)}
+                    onSkip={() => { /* optional at reception — registering without it is fine */ }}
+                  />
+                )}
+              </div>
+            )}
 
             {createVisitorMutation.isError && (
               <p className="text-danger text-xs">

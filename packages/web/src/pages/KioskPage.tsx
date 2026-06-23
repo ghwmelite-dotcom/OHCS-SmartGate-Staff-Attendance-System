@@ -29,7 +29,14 @@ const visitorSchema = z.object({
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
 
-type Mode = 'welcome' | 'form' | 'face' | 'id' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-confirm' | 'checkout-done';
+type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-confirm' | 'checkout-done';
+
+// Mirror of the server's isBlockingVerdict (lib/id-check.ts): only a CONFIDENT
+// not_document blocks. document / indeterminate / low-confidence all pass.
+function clientIsBlocking(v: IdCheckVerdict | null | undefined): boolean {
+  if (!v || v.verdict !== 'not_document') return false;
+  return v.confidence == null || v.confidence >= 0.55;
+}
 
 // Short banner/label for a closed office, by reason.
 function officeBannerText(o: KioskOfficeStatus): string {
@@ -49,8 +56,12 @@ export function KioskPage() {
   const [visitorId, setVisitorId] = useState<string | null>(null);
   const [createdVisit, setCreatedVisit] = useState<KioskVisit | null>(null);
   const [idCheck, setIdCheck] = useState<IdCheckVerdict | null>(null);
+  // ID photo(s) captured inline in the details form, uploaded on "Continue".
+  const [idBlobs, setIdBlobs] = useState<{ front: Blob; back?: Blob } | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [idBlocked, setIdBlocked] = useState(false);
+  // Set once reception approves an override inline; carried to the final check-in.
+  const [overrideApproved, setOverrideApproved] = useState(false);
   const [showOverride, setShowOverride] = useState(false);
   const [overridePin, setOverridePin] = useState('');
   const [overrideError, setOverrideError] = useState<string | null>(null);
@@ -83,16 +94,37 @@ export function KioskPage() {
   }, [mode]);
 
   async function onSubmitForm(data: VisitorForm) {
+    // The ID photo is captured inline before this point; the submit button is
+    // disabled until it exists, so this guard is belt-and-braces.
+    if (!idBlobs) return;
     setSubmitError(null);
     try {
-      const visitor = await kioskApi.createVisitor({
-        first_name: data.first_name,
-        last_name: data.last_name,
-        phone: data.phone || '',
-        organisation: data.organisation || '',
-        id_type: data.id_type,
-      });
-      setVisitorId(visitor.id);
+      // Create the visitor once; on a retake-after-block re-submit we reuse the id.
+      let id = visitorId;
+      if (!id) {
+        const visitor = await kioskApi.createVisitor({
+          first_name: data.first_name,
+          last_name: data.last_name,
+          phone: data.phone || '',
+          organisation: data.organisation || '',
+          id_type: data.id_type,
+        });
+        id = visitor.id;
+        setVisitorId(id);
+      }
+      // Upload the ID photo(s) now that the visitor exists. The front drives the
+      // AI document gate; the back (Ghana Card) is best-effort.
+      let verdict: IdCheckVerdict | undefined;
+      try { verdict = (await kioskApi.uploadIdPhoto(id, idBlobs.front)).id_check; } catch { /* continue */ }
+      if (idBlobs.back) { try { await kioskApi.uploadIdPhotoBack(id, idBlobs.back); } catch { /* best-effort */ } }
+      const captured = verdict ?? null;
+      setIdCheck(captured);
+      // Surface a bad-ID block right here in the form (unless reception already
+      // approved an override). The server re-checks at check-in regardless.
+      if (clientIsBlocking(captured) && !overrideApproved) {
+        setIdBlocked(true);
+        return;
+      }
       setMode('face');
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Could not register. Please try again.');
@@ -101,26 +133,25 @@ export function KioskPage() {
 
   async function handleFaceCapture(blob: Blob) {
     if (visitorId) { try { await kioskApi.uploadFacePhoto(visitorId, blob); } catch { /* continue */ } }
-    setMode('id');
+    await finishCheckIn(overrideApproved ? overridePin : undefined, idCheck);
   }
 
-  async function handleIdComplete({ front, back }: { front: Blob; back?: Blob }) {
-    setMode('submitting');
-    let verdict: IdCheckVerdict | undefined;
-    if (visitorId) {
-      try { verdict = (await kioskApi.uploadIdPhoto(visitorId, front)).id_check; } catch { /* continue */ }
-      if (back) { try { await kioskApi.uploadIdPhotoBack(visitorId, back); } catch { /* best-effort */ } }
-    }
-    const captured = verdict ?? null;
-    setIdCheck(captured);
-    await finishCheckIn(undefined, captured);
+  // Reception approves an override inline (in the form's block panel); the PIN is
+  // carried to the final check-in, where the server validates it.
+  function approveOverrideInline() {
+    if (overridePin.length < 4) return;
+    setOverrideApproved(true);
+    setIdBlocked(false);
+    setShowOverride(false);
+    setOverrideError(null);
+    setMode('face');
   }
 
   /**
    * Submits the check-in. A 422 ID_NOT_VERIFIED from the AI document gate is handled
-   * distinctly: we stay on the `id` step and surface the block panel so the visitor can
-   * retake or request a reception override. All other failures fall back to the generic
-   * success-screen error path.
+   * distinctly: we return to the `form` step and surface the inline block panel so the
+   * visitor can retake or request a reception override. All other failures fall back to
+   * the generic success-screen error path.
    */
   async function finishCheckIn(overridePinArg?: string, verdict?: IdCheckVerdict | null) {
     if (!visitorId || checkingInRef.current) return;
@@ -151,9 +182,10 @@ export function KioskPage() {
       if (status === 422 && code === 'ID_NOT_VERIFIED') {
         setIdBlocked(true);
         if (isOverride) {
+          setOverrideApproved(false); // the PIN was wrong — make them re-enter
           setOverrideError('Incorrect PIN — please ask reception to assist at the desk.');
         }
-        setMode('id'); // stay on the ID step
+        setMode('form'); // back to the form, where the inline block panel shows
       } else if (status === 423 && code === 'OFFICE_CLOSED') {
         setOfficeClosedMsg(e instanceof Error ? e.message : 'The office is currently closed.');
         if (isOverride) {
@@ -178,8 +210,10 @@ export function KioskPage() {
     setShowOverride(false);
     setOverridePin('');
     setOverrideError(null);
+    setOverrideApproved(false);
     setIdCheck(null);
-    setMode('id');
+    setIdBlobs(null); // clears the captured preview → re-renders the inline camera
+    setMode('form');
   }
 
   function resetAll() {
@@ -187,8 +221,10 @@ export function KioskPage() {
     setVisitorId(null);
     setCreatedVisit(null);
     setIdCheck(null);
+    setIdBlobs(null);
     setSubmitError(null);
     setIdBlocked(false);
+    setOverrideApproved(false);
     setShowOverride(false);
     setOverridePin('');
     setOverrideError(null);
@@ -236,16 +272,15 @@ export function KioskPage() {
         <div className="ghana-flag-bar -mt-6 -mx-6 mb-5" />
         <KioskHeader />
 
-        {(mode === 'form' || mode === 'face' || mode === 'id' || mode === 'submitting' || mode === 'success') && (
+        {(mode === 'form' || mode === 'face' || mode === 'submitting' || mode === 'success') && (
           <div className="mt-4 flex">
             <StepIndicator
               steps={[
                 { key: 'form', label: 'Details' },
                 { key: 'face', label: 'Photo' },
-                { key: 'id', label: 'ID' },
                 { key: 'success', label: 'Done' },
               ]}
-              currentIdx={mode === 'form' ? 0 : mode === 'face' ? 1 : mode === 'id' || mode === 'submitting' ? 2 : 3}
+              currentIdx={mode === 'form' ? 0 : mode === 'face' || mode === 'submitting' ? 1 : 2}
             />
           </div>
         )}
@@ -328,15 +363,80 @@ export function KioskPage() {
                 onIdTypeChange={(v) => {
                   form.setValue('id_type', v as never);
                   if (v) form.clearErrors('id_type');
+                  // Changing the ID type discards any photo captured for the old type.
+                  setIdBlobs(null);
+                  setIdBlocked(false);
+                  setOverrideApproved(false);
                 }}
                 idTypeError={form.formState.errors.id_type?.message}
               />
+
+              {/* Inline ID photo capture — appears once an ID type is chosen. */}
+              {form.watch('id_type') && (
+                <div className="rounded-xl border border-border bg-background/40 p-3">
+                  {idBlocked ? (
+                    <div className="space-y-3">
+                      <div className="flex items-start gap-3">
+                        <div className="w-9 h-9 shrink-0 bg-danger/10 rounded-full flex items-center justify-center">
+                          <ShieldAlert className="h-4.5 w-4.5 text-danger" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-semibold text-foreground">That doesn't look like a valid ID</h3>
+                          <p className="text-[13px] text-muted mt-0.5">Please retake — fit the whole ID in the frame with good lighting.</p>
+                        </div>
+                      </div>
+                      {!showOverride ? (
+                        <div className="flex flex-col gap-2">
+                          <button type="button" onClick={retakeId} className="w-full h-11 bg-primary text-white text-sm font-semibold rounded-xl active:scale-[0.99]">
+                            Retake Photo
+                          </button>
+                          <button type="button" onClick={() => { setShowOverride(true); setOverrideError(null); }} className="w-full h-10 text-sm font-medium text-muted border border-border rounded-xl hover:text-foreground hover:border-primary/30 transition-all">
+                            Reception assistance
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-[13px] text-muted">Ask the reception officer to enter the override PIN.</p>
+                          <input
+                            type="password" inputMode="numeric" autoComplete="off" pattern="\d*" maxLength={8}
+                            value={overridePin}
+                            onChange={(e) => setOverridePin(e.currentTarget.value.replace(/\D/g, '').slice(0, 8))}
+                            className={fieldCls} placeholder="Reception PIN"
+                          />
+                          {overrideError && <p className="text-danger text-xs">{overrideError}</p>}
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => { setShowOverride(false); setOverridePin(''); setOverrideError(null); }} className="h-10 px-4 text-sm text-muted">Back</button>
+                            <button type="button" onClick={approveOverrideInline} disabled={overridePin.length < 4} className="flex-1 h-10 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
+                              Approve
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : idBlobs ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="inline-flex items-center gap-2 text-[13px] text-success font-medium">
+                        <CheckCircle2 className="h-4 w-4" /> ID photo{idBlobs.back ? 's' : ''} captured
+                      </span>
+                      <button type="button" onClick={() => setIdBlobs(null)} className="text-[13px] text-muted hover:text-foreground underline">Retake</button>
+                    </div>
+                  ) : (
+                    <IdDocumentCapture
+                      idType={form.watch('id_type')}
+                      required
+                      qualityGuard
+                      onComplete={(r) => setIdBlobs(r)}
+                      onSkip={() => { /* ID photo is required — no skip */ }}
+                    />
+                  )}
+                </div>
+              )}
             </div>
             {submitError && <p className="text-danger text-xs">{submitError}</p>}
             <div className="flex gap-3">
               <button type="button" onClick={resetAll} className="h-14 px-4 text-sm text-muted">Cancel</button>
-              <button type="submit" disabled={form.formState.isSubmitting} className="flex-1 h-14 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
-                {form.formState.isSubmitting ? 'Registering…' : 'Continue to Photo'}
+              <button type="submit" disabled={form.formState.isSubmitting || !idBlobs || idBlocked} className="flex-1 h-14 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
+                {form.formState.isSubmitting ? 'Uploading…' : 'Continue to Photo'}
               </button>
             </div>
           </form>
@@ -349,88 +449,8 @@ export function KioskPage() {
               <p className="text-sm text-muted mt-0.5">Look at the camera and capture a clear photo</p>
             </div>
             <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
-              <PhotoCapture title="Take Your Photo" facingMode="user" required onCapture={handleFaceCapture} onSkip={() => setMode('id')} />
+              <PhotoCapture title="Take Your Photo" facingMode="user" required onCapture={handleFaceCapture} onSkip={() => { /* selfie is required — no skip */ }} />
             </div>
-          </div>
-        )}
-
-        {mode === 'id' && (
-          <div className="mt-6 space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">Photograph Your ID</h2>
-              <p className="text-sm text-muted mt-0.5">Place your ID in the frame and capture it</p>
-            </div>
-            {idBlocked ? (
-              <div className="bg-accent/5 rounded-2xl border border-danger/30 shadow-sm p-6 space-y-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 shrink-0 bg-danger/10 rounded-full flex items-center justify-center">
-                    <ShieldAlert className="h-5 w-5 text-danger" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">That doesn't look like a valid ID</h3>
-                    <p className="text-[13px] text-muted mt-1">
-                      Please retake — fit the whole ID in the frame with good lighting.
-                    </p>
-                  </div>
-                </div>
-
-                {!showOverride ? (
-                  <div className="flex flex-col gap-2">
-                    <button
-                      onClick={retakeId}
-                      className="w-full h-12 bg-primary text-white text-sm font-semibold rounded-xl inline-flex items-center justify-center gap-2 active:scale-[0.99]"
-                    >
-                      Retake Photo
-                    </button>
-                    <button
-                      onClick={() => { setShowOverride(true); setOverrideError(null); }}
-                      className="w-full h-11 text-sm font-medium text-muted border border-border rounded-xl hover:text-foreground hover:border-primary/30 transition-all"
-                    >
-                      Reception assistance
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <p className="text-[13px] text-muted">
-                      Ask the reception officer to enter the override PIN.
-                    </p>
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      pattern="\d*"
-                      maxLength={8}
-                      value={overridePin}
-                      onChange={(e) => setOverridePin(e.currentTarget.value.replace(/\D/g, '').slice(0, 8))}
-                      className={fieldCls}
-                      placeholder="Reception PIN"
-                      autoFocus
-                    />
-                    {overrideError && <p className="text-danger text-xs">{overrideError}</p>}
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => { setShowOverride(false); setOverridePin(''); setOverrideError(null); }}
-                        className="h-11 px-4 text-sm text-muted"
-                      >
-                        Back
-                      </button>
-                      <button
-                        onClick={() => finishCheckIn(overridePin)}
-                        disabled={overrideSubmitting || overridePin.length < 4}
-                        className="flex-1 h-11 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50 inline-flex items-center justify-center gap-2"
-                      >
-                        {overrideSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        {overrideSubmitting ? 'Verifying…' : 'Approve'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
-                <IdDocumentCapture idType={form.watch('id_type')} required qualityGuard onComplete={handleIdComplete} onSkip={() => { /* ID photo is mandatory — no skip */ }} />
-              </div>
-            )}
           </div>
         )}
 
