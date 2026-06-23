@@ -5,11 +5,13 @@ import { visitorPhotoKey, visitorIdPhotoKey, visitorIdPhotoBackKey } from '../li
 /**
  * Visitor photo auto-purge.
  *
- * Deletes the two sensitive PII objects per visitor — the ID-document photo and
- * the face photo — from R2 a configurable number of days (default 30) after the
- * visitor's last checkout. The visit/visitor records (name, time, purpose) are
- * KEPT as the audit trail; only the two R2 objects are removed and the two URL
- * columns nulled.
+ * Deletes the sensitive PII objects per visitor — the ID-document front photo, the
+ * ID-document back photo (Ghana Card), and the face photo — from R2 a configurable
+ * number of days (default 30) after the visitor's last checkout. The visit/visitor
+ * records (name, time, purpose) are KEPT as the audit trail; only the R2 objects are
+ * removed and the photo URL columns nulled. `photos_deleted` counts R2 delete calls
+ * (three per scrubbed visitor), not objects that were actually present — a delete on a
+ * missing key is a harmless no-op.
  *
  * Run daily by the 02:00 UTC maintenance cron, and on-demand by the superadmin
  * endpoint POST /api/admin/maintenance/purge-photos.
