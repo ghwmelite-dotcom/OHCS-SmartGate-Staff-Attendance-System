@@ -37,16 +37,36 @@ chooser:
 - Props reduce to `{ idType, onIdTypeChange, idTypeError }`.
 - Renamed to `IdTypeChooser` (file `IdTypeChooser.tsx`); both pages updated to import it.
 
+### Capture-sequence helper (pure, unit-tested)
+`packages/web/src/lib/id-capture.ts`. A pure function holds the only branching logic so
+it can be unit-tested in the existing web vitest setup (which has **no** React Testing
+Library / jsdom — component tests are not an established pattern here):
+```ts
+export type IdCaptureSide = 'single' | 'front' | 'back';
+export interface IdCaptureStep { side: IdCaptureSide; title: string; }
+export function idCaptureSteps(idType: string | undefined): IdCaptureStep[] {
+  if (idType === 'ghana_card') {
+    return [
+      { side: 'front', title: 'Front of Ghana Card' },
+      { side: 'back',  title: 'Back of Ghana Card' },
+    ];
+  }
+  return [{ side: 'single', title: 'Photograph the ID' }];
+}
+```
+
 ### New `IdDocumentCapture` component
 `packages/web/src/components/checkin/IdDocumentCapture.tsx`. Wraps the existing
 single-shot `PhotoCapture` (which stays single-purpose and **unchanged**):
-- Given `idType`, orchestrates the capture sequence:
-  - `ghana_card`: shot 1 titled "Front of Ghana Card" → shot 2 titled "Back of Ghana Card".
-  - else: one shot titled "Photograph the ID".
-- Collects blobs and calls `onComplete(front: Blob, back?: Blob)`.
-- Switching ID type before completion resets collected blobs.
-- For the kiosk, the front shot keeps `required` + `qualityGuard`; the back shot keeps
-  `qualityGuard` (best-effort, no hard block — see Edge cases).
+- Calls `idCaptureSteps(idType)` and steps through the returned shots in order, showing
+  each step's `title` on `PhotoCapture`.
+- Collects blobs keyed by side and, once all steps are captured, calls
+  `onComplete({ front, back })` where `back` is `undefined` for the single-shot path
+  (the `'single'` blob is passed as `front`).
+- Switching ID type before completion resets collected blobs (parent re-keys via React
+  `key={idType}` so the component remounts cleanly).
+- For the kiosk, every shot keeps `required` + `qualityGuard`; failed *upload* of the
+  back is still non-blocking at the network layer (see Edge cases).
 
 ### Page wiring
 - Kiosk `handleIdCapture` → becomes `handleIdComplete(front, back?)`: upload front
@@ -110,7 +130,17 @@ JPEG-validated, 500KB cap, same auth + rate-limit as their front counterparts:
 
 ## Testing
 
-- **API (vitest)**: new back-photo endpoints — happy path, non-JPEG reject, oversize
-  reject, visitor-not-found; migration registered in `migrations-index`.
-- **Web**: `IdDocumentCapture` — two-shot sequencing for `ghana_card`, single shot for
-  others, type-change reset; `IdTypeChooser` — selection and clear.
+The repo's vitest suites cover **pure functions and schemas** — there is no HTTP route
+harness (API) and no React Testing Library / jsdom (web). Tests target the unit-testable
+pieces; endpoints, page wiring, and the camera UI are validated by `type-check` plus the
+project's standard Playwright kiosk verification.
+
+- **API (vitest)**: extend `packages/api/src/lib/photo-key.test.ts` with a case for
+  `visitorIdPhotoBackKey('abc123') === 'photos/visitors/abc123-id-back.jpg'`.
+- **Web (vitest)**: new `packages/web/src/lib/id-capture.test.ts` — `idCaptureSteps`
+  returns two steps (front, back) for `ghana_card` and one `single` step for every other
+  type (`passport`, `undefined`, etc.).
+- **Type safety**: `uploadVisitorPhoto`'s `column` union widened to include
+  `'id_photo_back_url'`; `type-check` (`tsc`) must pass for both packages.
+- **Manual verification**: Playwright run of the kiosk Ghana-Card path (front→back) and a
+  passport path (single), per the verify-kiosk-form practice.
