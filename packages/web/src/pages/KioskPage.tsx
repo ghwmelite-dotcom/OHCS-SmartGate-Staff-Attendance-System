@@ -9,7 +9,7 @@ import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
 import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
-import { suggestDirectorate } from '@/lib/directorate-routing';
+import { suggestDirectorate, groupDirectorates } from '@/lib/directorate-routing';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
 import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert } from 'lucide-react';
 
@@ -271,9 +271,13 @@ export function KioskPage() {
               />
               <FieldWrapper icon={<Building2 className="h-4 w-4" />} label="Directorate" error={form.formState.errors.directorate_id?.message}>
                 <select {...form.register('directorate_id')} className={fieldCls}>
-                  <option value="">Select directorate...</option>
-                  {directorates.map((d) => (
-                    <option key={d.id} value={d.id}>{d.abbreviation} — {d.name}</option>
+                  <option value="">Select office...</option>
+                  {groupDirectorates(directorates).map(({ label, items }) => (
+                    <optgroup key={label} label={label}>
+                      {items.map((d) => (
+                        <option key={d.id} value={d.id}>{d.abbreviation} — {d.name}</option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </FieldWrapper>
