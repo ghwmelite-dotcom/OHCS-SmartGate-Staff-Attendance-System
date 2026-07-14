@@ -138,6 +138,17 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     ],
   },
 
+  // ── HOS-SEC — Head of Service Secretariat ────────────────────────────────
+  {
+    abbreviation: 'HOS-SEC',
+    room: '2nd Floor',
+    keywords: [
+      'head of service', 'head of civil service', 'hos', 'hcs',
+      'head of service secretariat', 'hos secretariat',
+      'head of the civil service',
+    ],
+  },
+
   // ── CD-SEC — Chief Director's office ─────────────────────────────────────
   {
     abbreviation: 'CD-SEC',

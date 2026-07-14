@@ -33,6 +33,7 @@ import officerOverridePin from './migration-officer-override-pin.sql';
 import directorateOrgType from './migration-directorate-org-type.sql';
 import visitorIdPhotoBack from './migration-visitor-id-photo-back.sql';
 import annexOrgEntities from './migration-annex-org-entities.sql';
+import hosSecretariat from './migration-hos-secretariat.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -70,6 +71,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-directorate-org-type.sql', sql: directorateOrgType },
   { filename: 'migration-visitor-id-photo-back.sql', sql: visitorIdPhotoBack },
   { filename: 'migration-annex-org-entities.sql', sql: annexOrgEntities },
+  { filename: 'migration-hos-secretariat.sql', sql: hosSecretariat },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {
