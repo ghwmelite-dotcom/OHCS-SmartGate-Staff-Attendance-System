@@ -14,7 +14,7 @@ import { FieldWrapper } from '@/components/checkin/FieldWrapper';
 import { IdDocumentCapture } from '@/components/checkin/IdDocumentCapture';
 import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
-import { suggestDirectorate } from '@/lib/directorate-routing';
+import { suggestDirectorate, groupDirectorates } from '@/lib/directorate-routing';
 import { toast } from '@/stores/toast';
 import { playCheckInChime } from '@/lib/sounds';
 import {
@@ -498,9 +498,13 @@ export function CheckInPage() {
             {/* 2. DIRECTORATE — auto-filled or manual */}
             <FieldWrapper icon={<Building2 className="h-4 w-4" />} label="Directorate">
               <select {...checkInForm.register('directorate_id')} className={fieldCls}>
-                <option value="">Select directorate...</option>
-                {directorates.map((d) => (
-                  <option key={d.id} value={d.id}>{d.abbreviation} — {d.name}</option>
+                <option value="">Select office...</option>
+                {groupDirectorates(directorates).map(({ label, items }) => (
+                  <optgroup key={label} label={label}>
+                    {items.map((d) => (
+                      <option key={d.id} value={d.id}>{d.abbreviation} — {d.name}</option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </FieldWrapper>

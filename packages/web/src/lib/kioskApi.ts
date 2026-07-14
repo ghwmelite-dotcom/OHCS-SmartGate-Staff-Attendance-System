@@ -72,6 +72,8 @@ export interface KioskDirectorate {
   id: string;
   name: string;
   abbreviation: string;
+  type: string;
+  org_type: string | null;
 }
 
 export type OfficeStatusReason = 'open' | 'before_hours' | 'after_hours' | 'weekend' | 'holiday';

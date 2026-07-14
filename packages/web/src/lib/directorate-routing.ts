@@ -14,6 +14,34 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
   { keywords: ['audit', 'fraud', 'internal audit', 'compliance', 'risk'], abbreviation: 'IAU', room: '' },
 ];
 
+type GroupableDir = { id: string; name: string; abbreviation: string; type: string; org_type?: string | null };
+
+const CATEGORY_LABELS: Record<string, string> = {
+  directorate: 'Directorates',
+  unit: 'Units',
+};
+const CATEGORY_ORDER = ['directorate', 'unit'];
+
+export function groupDirectorates<T extends GroupableDir>(
+  directorates: T[]
+): Array<{ label: string; items: T[] }> {
+  const buckets = new Map<string, T[]>();
+  for (const d of directorates) {
+    const key = d.org_type ?? d.type;
+    const bucket = buckets.get(key) ?? [];
+    bucket.push(d);
+    buckets.set(key, bucket);
+  }
+  const result: Array<{ label: string; items: T[] }> = [];
+  for (const key of CATEGORY_ORDER) {
+    const items = buckets.get(key);
+    if (items?.length) { result.push({ label: CATEGORY_LABELS[key] ?? key, items }); buckets.delete(key); }
+  }
+  const others = [...buckets.values()].flat();
+  if (others.length) result.push({ label: 'Other Offices', items: others });
+  return result;
+}
+
 export function suggestDirectorate(purpose: string, directorates: DirectorateOption[]): DirectorateOption | null {
   if (!purpose || purpose.length < 3) return null;
   const lower = purpose.toLowerCase();

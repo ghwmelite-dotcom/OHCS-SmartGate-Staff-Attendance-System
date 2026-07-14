@@ -122,6 +122,8 @@ export interface Directorate {
   id: string;
   name: string;
   abbreviation: string;
+  type: string;
+  org_type: string | null;
   floor: string | null;
   wing: string | null;
   is_active: number;
