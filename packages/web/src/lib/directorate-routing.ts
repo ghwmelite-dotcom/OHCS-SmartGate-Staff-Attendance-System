@@ -10,7 +10,7 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
   // ── CMD — career, postings, leave, retirement ─────────────────────────────
   {
     abbreviation: 'CMD',
-    room: 'Rm 34, 1st Floor',
+    room: 'Room 3, 2nd Fl · Deputy: Room 34, 1st Fl',
     keywords: [
       'promotion', 'posting', 'transfer', 'career', 'succession',
       'occupational health', 'confirmation', 'appointment letter',
@@ -24,7 +24,7 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
   // ── RTDD — recruitment, training, exams ──────────────────────────────────
   {
     abbreviation: 'RTDD',
-    room: 'Rm 9 & 11, 2nd Floor',
+    room: 'Room 11, 2nd Fl · Deputy: Room 9, 2nd Fl',
     keywords: [
       'recruit', 'recruitment', 'job', 'vacancy', 'apply', 'application',
       'hiring', 'training', 'workshop', 'study leave', 'scholarship',
@@ -37,7 +37,7 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
   // ── RSIMD — e-SPAR / salary system, ICT, data ────────────────────────────
   {
     abbreviation: 'RSIMD',
-    room: 'Rm 19 & 21, 1st Floor',
+    room: 'Room 7, 2nd Fl · Deputy: Room 19, 1st Fl',
     keywords: [
       'salary', 'e-spar', 'espar', 'spar', 'payroll', 'ict',
       'it support', 'computer', 'software', 'technology', 'research',
@@ -50,7 +50,7 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
   // ── PBMED — performance, planning, evaluation ─────────────────────────────
   {
     abbreviation: 'PBMED',
-    room: 'Rm 31, 1st Floor',
+    room: 'Room 5, 2nd Fl · Deputy: Room 31, 1st Fl',
     keywords: [
       'performance', 'appraisal', 'monitoring', 'evaluation',
       'service delivery', 'client service', 'development plan',
@@ -63,7 +63,7 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
   // ── F&A — finance, transport, facilities (not procurement / stores) ───────
   {
     abbreviation: 'F&A',
-    room: 'Rm 35, 1st Floor',
+    room: 'Room 10, 2nd Fl · Deputy: Room 35, 1st Fl',
     keywords: [
       'budget', 'finance', 'financial', 'payment', 'invoice', 'vehicle',
       'transport', 'logistics', 'asset', 'utility', 'catering',
