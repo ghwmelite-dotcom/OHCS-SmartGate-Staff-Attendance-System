@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { CheckCircle2, Building2 } from 'lucide-react';
 import { ROUTING_KEYWORDS, suggestDirectorate, type DirectorateOption } from '@/lib/directorate-routing';
 
@@ -7,8 +8,10 @@ export function PurposeRoutingHint({ purpose, directorates, currentDirectorateId
   currentDirectorateId: string;
   onAccept: (id: string) => void;
 }) {
+  const [dismissedId, setDismissedId] = useState<string | null>(null);
   const suggestion = suggestDirectorate(purpose, directorates);
-  if (!suggestion) return null;
+
+  if (!suggestion || suggestion.id === dismissedId) return null;
 
   const route = ROUTING_KEYWORDS.find(r => r.abbreviation === suggestion.abbreviation);
   const alreadySelected = currentDirectorateId === suggestion.id;
@@ -33,13 +36,22 @@ export function PurposeRoutingHint({ purpose, directorates, currentDirectorateId
           {route?.room ? <span className="text-muted"> ({route.room})</span> : ''}
         </span>
       </div>
-      <button
-        type="button"
-        onClick={() => onAccept(suggestion.id)}
-        className="h-7 px-3 text-[12px] font-semibold bg-accent text-white rounded-lg hover:brightness-110 transition-all shrink-0"
-      >
-        Accept
-      </button>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <button
+          type="button"
+          onClick={() => setDismissedId(suggestion.id)}
+          className="h-7 px-3 text-[12px] font-medium text-muted border border-border rounded-lg hover:text-foreground hover:border-primary/30 transition-all"
+        >
+          Deny
+        </button>
+        <button
+          type="button"
+          onClick={() => onAccept(suggestion.id)}
+          className="h-7 px-3 text-[12px] font-semibold bg-accent text-white rounded-lg hover:brightness-110 transition-all"
+        >
+          Accept
+        </button>
+      </div>
     </div>
   );
 }

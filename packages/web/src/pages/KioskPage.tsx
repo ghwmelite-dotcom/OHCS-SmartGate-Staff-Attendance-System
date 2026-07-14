@@ -3,13 +3,11 @@ import QRCode from 'qrcode';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { kioskApi, KioskApiError, type KioskVisit, type KioskDirectorate, type IdCheckVerdict, type KioskOfficeStatus } from '@/lib/kioskApi';
+import { kioskApi, KioskApiError, type KioskVisit, type KioskDirectorate, type KioskOfficeStatus } from '@/lib/kioskApi';
 import { API_BASE, BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
-import { IdTypeChooser } from '@/components/checkin/IdTypeChooser';
-import { IdDocumentCapture } from '@/components/checkin/IdDocumentCapture';
 import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
 import { suggestDirectorate } from '@/lib/directorate-routing';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
@@ -22,21 +20,11 @@ const visitorSchema = z.object({
   organisation: z.string().max(200).optional(),
   directorate_id: z.string().min(1, 'Select a directorate'),
   host_name: z.string().max(100).optional(),
-  id_type: z.enum(['ghana_card', 'passport', 'drivers_license', 'staff_id', 'other'], {
-    errorMap: () => ({ message: 'Select an ID type' }),
-  }),
   purpose_raw: z.string().min(1, 'Purpose of visit is required').max(500),
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
 
 type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-confirm' | 'checkout-done';
-
-// Mirror of the server's isBlockingVerdict (lib/id-check.ts): only a CONFIDENT
-// not_document blocks. document / indeterminate / low-confidence all pass.
-function clientIsBlocking(v: IdCheckVerdict | null | undefined): boolean {
-  if (!v || v.verdict !== 'not_document') return false;
-  return v.confidence == null || v.confidence >= 0.55;
-}
 
 // Short banner/label for a closed office, by reason.
 function officeBannerText(o: KioskOfficeStatus): string {
@@ -55,14 +43,7 @@ export function KioskPage() {
   const [mode, setMode] = useState<Mode>('welcome');
   const [visitorId, setVisitorId] = useState<string | null>(null);
   const [createdVisit, setCreatedVisit] = useState<KioskVisit | null>(null);
-  const [idCheck, setIdCheck] = useState<IdCheckVerdict | null>(null);
-  // ID photo(s) captured inline in the details form, uploaded on "Continue".
-  const [idBlobs, setIdBlobs] = useState<{ front: Blob; back?: Blob } | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [idBlocked, setIdBlocked] = useState(false);
-  // Set once reception approves an override inline; carried to the final check-in.
-  const [overrideApproved, setOverrideApproved] = useState(false);
-  const [showOverride, setShowOverride] = useState(false);
   const [overridePin, setOverridePin] = useState('');
   const [overrideError, setOverrideError] = useState<string | null>(null);
   const [overrideSubmitting, setOverrideSubmitting] = useState(false);
@@ -94,12 +75,8 @@ export function KioskPage() {
   }, [mode]);
 
   async function onSubmitForm(data: VisitorForm) {
-    // The ID photo is captured inline before this point; the submit button is
-    // disabled until it exists, so this guard is belt-and-braces.
-    if (!idBlobs) return;
     setSubmitError(null);
     try {
-      // Create the visitor once; on a retake-after-block re-submit we reuse the id.
       let id = visitorId;
       if (!id) {
         const visitor = await kioskApi.createVisitor({
@@ -107,23 +84,9 @@ export function KioskPage() {
           last_name: data.last_name,
           phone: data.phone || '',
           organisation: data.organisation || '',
-          id_type: data.id_type,
         });
         id = visitor.id;
         setVisitorId(id);
-      }
-      // Upload the ID photo(s) now that the visitor exists. The front drives the
-      // AI document gate; the back (Ghana Card) is best-effort.
-      let verdict: IdCheckVerdict | undefined;
-      try { verdict = (await kioskApi.uploadIdPhoto(id, idBlobs.front)).id_check; } catch { /* continue */ }
-      if (idBlobs.back) { try { await kioskApi.uploadIdPhotoBack(id, idBlobs.back); } catch { /* best-effort */ } }
-      const captured = verdict ?? null;
-      setIdCheck(captured);
-      // Surface a bad-ID block right here in the form (unless reception already
-      // approved an override). The server re-checks at check-in regardless.
-      if (clientIsBlocking(captured) && !overrideApproved) {
-        setIdBlocked(true);
-        return;
       }
       setMode('face');
     } catch (e) {
@@ -132,29 +95,12 @@ export function KioskPage() {
   }
 
   async function handleFaceCapture(blob: Blob) {
-    setMode('submitting'); // immediate feedback while the photo + check-in complete
+    setMode('submitting');
     if (visitorId) { try { await kioskApi.uploadFacePhoto(visitorId, blob); } catch { /* continue */ } }
-    await finishCheckIn(overrideApproved ? overridePin : undefined, idCheck);
+    await finishCheckIn();
   }
 
-  // Reception approves an override inline (in the form's block panel); the PIN is
-  // carried to the final check-in, where the server validates it.
-  function approveOverrideInline() {
-    if (overridePin.length < 4) return;
-    setOverrideApproved(true);
-    setIdBlocked(false);
-    setShowOverride(false);
-    setOverrideError(null);
-    setMode('face');
-  }
-
-  /**
-   * Submits the check-in. A 422 ID_NOT_VERIFIED from the AI document gate is handled
-   * distinctly: we return to the `form` step and surface the inline block panel so the
-   * visitor can retake or request a reception override. All other failures fall back to
-   * the generic success-screen error path.
-   */
-  async function finishCheckIn(overridePinArg?: string, verdict?: IdCheckVerdict | null) {
+  async function finishCheckIn(overridePinArg?: string) {
     if (!visitorId || checkingInRef.current) return;
     checkingInRef.current = true;
     setSubmitError(null);
@@ -171,24 +117,14 @@ export function KioskPage() {
         directorate_id: form.getValues('directorate_id'),
         host_name_manual: form.getValues('host_name'),
         purpose_raw: form.getValues('purpose_raw'),
-        id_check: (verdict ?? idCheck) ?? undefined,
         ...(overridePinArg ? { reception_override_pin: overridePinArg } : {}),
       });
       setCreatedVisit(visit);
-      setIdBlocked(false);
       setMode('success');
     } catch (e) {
       const code = e instanceof KioskApiError ? e.code : null;
       const status = e instanceof KioskApiError ? e.status : 0;
-      if (status === 422 && code === 'ID_NOT_VERIFIED') {
-        setIdBlocked(true);
-        if (isOverride) {
-          setOverrideApproved(false); // the PIN was wrong — make them re-enter
-          setShowOverride(true); // keep the PIN panel open so the error is visible
-          setOverrideError('Incorrect PIN — please ask reception to assist at the desk.');
-        }
-        setMode('form'); // back to the form, where the inline block panel shows
-      } else if (status === 423 && code === 'OFFICE_CLOSED') {
+      if (status === 423 && code === 'OFFICE_CLOSED') {
         setOfficeClosedMsg(e instanceof Error ? e.message : 'The office is currently closed.');
         if (isOverride) {
           setOverrideError('Incorrect PIN — please ask reception to assist at the desk.');
@@ -207,27 +143,11 @@ export function KioskPage() {
     }
   }
 
-  function retakeId() {
-    setIdBlocked(false);
-    setShowOverride(false);
-    setOverridePin('');
-    setOverrideError(null);
-    setOverrideApproved(false);
-    setIdCheck(null);
-    setIdBlobs(null); // clears the captured preview → re-renders the inline camera
-    setMode('form');
-  }
-
   function resetAll() {
     form.reset();
     setVisitorId(null);
     setCreatedVisit(null);
-    setIdCheck(null);
-    setIdBlobs(null);
     setSubmitError(null);
-    setIdBlocked(false);
-    setOverrideApproved(false);
-    setShowOverride(false);
     setOverridePin('');
     setOverrideError(null);
     setOfficeClosedMsg(null);
@@ -360,85 +280,12 @@ export function KioskPage() {
               <FieldWrapper icon={<User className="h-4 w-4" />} label="Who are you visiting? (optional)" error={form.formState.errors.host_name?.message}>
                 <input {...form.register('host_name')} className={fieldCls} placeholder="e.g. Mr. Mensah" />
               </FieldWrapper>
-              <IdTypeChooser
-                idType={form.watch('id_type')}
-                onIdTypeChange={(v) => {
-                  form.setValue('id_type', v as never);
-                  if (v) form.clearErrors('id_type');
-                  // Changing the ID type discards any photo captured for the old type.
-                  setIdBlobs(null);
-                  setIdBlocked(false);
-                  setOverrideApproved(false);
-                }}
-                idTypeError={form.formState.errors.id_type?.message}
-              />
-
-              {/* Inline ID photo capture — appears once an ID type is chosen. */}
-              {form.watch('id_type') && (
-                <div className="rounded-xl border border-border bg-background/40 p-3">
-                  {idBlocked ? (
-                    <div className="space-y-3">
-                      <div className="flex items-start gap-3">
-                        <div className="w-9 h-9 shrink-0 bg-danger/10 rounded-full flex items-center justify-center">
-                          <ShieldAlert className="h-4.5 w-4.5 text-danger" />
-                        </div>
-                        <div>
-                          <h3 className="text-sm font-semibold text-foreground">That doesn't look like a valid ID</h3>
-                          <p className="text-[13px] text-muted mt-0.5">Please retake — fit the whole ID in the frame with good lighting.</p>
-                        </div>
-                      </div>
-                      {!showOverride ? (
-                        <div className="flex flex-col gap-2">
-                          <button type="button" onClick={retakeId} className="w-full h-11 bg-primary text-white text-sm font-semibold rounded-xl active:scale-[0.99]">
-                            Retake Photo
-                          </button>
-                          <button type="button" onClick={() => { setShowOverride(true); setOverrideError(null); }} className="w-full h-10 text-sm font-medium text-muted border border-border rounded-xl hover:text-foreground hover:border-primary/30 transition-all">
-                            Reception assistance
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <p className="text-[13px] text-muted">Ask the reception officer to enter the override PIN.</p>
-                          <input
-                            type="password" inputMode="numeric" autoComplete="off" pattern="\d*" maxLength={8}
-                            value={overridePin}
-                            onChange={(e) => setOverridePin(e.currentTarget.value.replace(/\D/g, '').slice(0, 8))}
-                            className={fieldCls} placeholder="Reception PIN"
-                          />
-                          {overrideError && <p className="text-danger text-xs">{overrideError}</p>}
-                          <div className="flex gap-2">
-                            <button type="button" onClick={() => { setShowOverride(false); setOverridePin(''); setOverrideError(null); }} className="h-10 px-4 text-sm text-muted">Back</button>
-                            <button type="button" onClick={approveOverrideInline} disabled={overridePin.length < 4} className="flex-1 h-10 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
-                              Approve
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : idBlobs ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="inline-flex items-center gap-2 text-[13px] text-success font-medium">
-                        <CheckCircle2 className="h-4 w-4" /> ID photo{idBlobs.back ? 's' : ''} captured
-                      </span>
-                      <button type="button" onClick={() => setIdBlobs(null)} className="text-[13px] text-muted hover:text-foreground underline">Retake</button>
-                    </div>
-                  ) : (
-                    <IdDocumentCapture
-                      idType={form.watch('id_type')}
-                      required
-                      qualityGuard
-                      onComplete={(r) => setIdBlobs(r)}
-                      onSkip={() => { /* ID photo is required — no skip */ }}
-                    />
-                  )}
-                </div>
-              )}
             </div>
             {submitError && <p className="text-danger text-xs">{submitError}</p>}
             <div className="flex gap-3">
               <button type="button" onClick={resetAll} className="h-14 px-4 text-sm text-muted">Cancel</button>
-              <button type="submit" disabled={form.formState.isSubmitting || !idBlobs || idBlocked} className="flex-1 h-14 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
-                {form.formState.isSubmitting ? 'Uploading…' : 'Continue to Photo'}
+              <button type="submit" disabled={form.formState.isSubmitting} className="flex-1 h-14 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
+                {form.formState.isSubmitting ? 'Saving…' : 'Continue to Photo'}
               </button>
             </div>
           </form>
@@ -516,19 +363,6 @@ export function KioskPage() {
                 </div>
                 <KioskBadgeQr badgeCode={createdVisit.badge_code} />
                 <p className="text-sm font-mono font-bold text-accent">{createdVisit.badge_code}</p>
-                {(() => {
-                  const declared = form.getValues('id_type');
-                  const flagged = idCheck && (
-                    idCheck.verdict === 'not_document' ||
-                    (idCheck.detected_type && idCheck.detected_type !== 'none' && declared && idCheck.detected_type !== declared)
-                  );
-                  return flagged ? (
-                    <p className="text-[13px] text-accent-warm bg-accent/10 border border-accent/20 rounded-xl px-3 py-2 inline-flex items-start gap-1.5 text-left">
-                      <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
-                      <span>ID photo looks unclear or doesn't match the chosen ID type — please verify with reception.</span>
-                    </p>
-                  ) : null;
-                })()}
                 <button onClick={resetAll} className="h-12 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Done</button>
               </div>
             ) : (
