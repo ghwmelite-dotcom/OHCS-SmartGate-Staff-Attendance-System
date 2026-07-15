@@ -12,6 +12,7 @@ interface AuditEntry {
   actor_user_id: string | null;
   actor_role: string | null;
   actor_label: string | null;
+  actor_name: string | null;
   action: string;
   entity_type: string | null;
   entity_id: string | null;
@@ -23,6 +24,44 @@ interface AuditPage { entries: AuditEntry[]; nextCursor: number | null }
 interface VerifyResult { ok: boolean; checked: number; brokenAtSeq: number | null }
 
 const ENTITY_TYPES = ['', 'user', 'directorate', 'officer', 'holiday', 'settings', 'visit', 'migration'];
+
+const ROLE_COLOURS: Record<string, string> = {
+  superadmin: 'bg-accent/20 text-accent-warm',
+  admin: 'bg-primary/15 text-primary',
+  reception: 'bg-success/15 text-success',
+  staff: 'bg-muted/30 text-foreground',
+};
+
+function actorInitial(name: string | null): string {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  return parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : name[0].toUpperCase();
+}
+
+function ActorCell({ name, role }: { name: string | null; role: string | null }) {
+  const display = name ?? 'system';
+  const isSystem = !name;
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className={cn(
+        'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold',
+        isSystem ? 'bg-muted/20 text-muted' : 'bg-primary/15 text-primary',
+      )}>
+        {actorInitial(name)}
+      </span>
+      <div className="min-w-0">
+        <p className="text-[13px] font-semibold text-foreground leading-tight truncate">{display}</p>
+        {role && (
+          <span className={cn('inline-block mt-0.5 text-[10px] font-bold px-1.5 py-0 rounded-md leading-5', ROLE_COLOURS[role] ?? 'bg-muted/20 text-muted')}>
+            {role}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function actionColor(action: string): string {
   if (action.includes('deactivate') || action.includes('delete') || action.includes('remove')) return 'bg-danger/10 text-danger';
@@ -121,9 +160,8 @@ export function AuditLogTab() {
                   <tr className={cn('hover:bg-background-warm/50 transition-colors', hasChanges && 'cursor-pointer')}
                     onClick={() => hasChanges && setExpanded(isOpen ? null : e.id)}>
                     <td className="px-6 py-3 text-[13px] text-muted whitespace-nowrap font-mono">{new Date(e.at).toLocaleString('en-GB')}</td>
-                    <td className="px-6 py-3 text-[13px] text-foreground">
-                      <span className="font-medium">{e.actor_label ?? 'system'}</span>
-                      {e.actor_role && <span className="text-muted"> · {e.actor_role}</span>}
+                    <td className="px-6 py-3">
+                      <ActorCell name={e.actor_name ?? e.actor_label} role={e.actor_role} />
                     </td>
                     <td className="px-6 py-3">
                       <span className={cn('inline-flex items-center gap-1 h-6 px-2 text-[11px] font-bold rounded-lg font-mono', actionColor(e.action))}>
