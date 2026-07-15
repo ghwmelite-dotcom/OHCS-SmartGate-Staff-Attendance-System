@@ -29,7 +29,7 @@ export const KioskCreateVisitorSchema = z.object({
   last_name: z.string().min(1).max(100).trim(),
   phone: z.string().regex(/^(\+233|0)\d{9}$/, 'Invalid Ghana phone number (e.g. 0241234567 or +233241234567)'),
   organisation: z.string().max(200).optional().or(z.literal('')),
-  id_type: idTypeSchema,
+  id_type: idTypeSchema.optional(),
   id_number: z.string().max(50).optional().or(z.literal('')),
 });
 
