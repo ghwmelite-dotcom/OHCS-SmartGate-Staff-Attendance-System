@@ -2,21 +2,21 @@ import { describe, it, expect } from 'vitest';
 import { KioskCreateVisitorSchema, KioskCheckInSchema } from './validation';
 
 describe('KioskCreateVisitorSchema', () => {
-  const ok = { first_name: 'Ama', last_name: 'B', phone: '0241234567', id_type: 'ghana_card' };
-  it('accepts a valid payload (organisation + id_number optional)', () => {
+  const ok = { first_name: 'Ama', last_name: 'B', phone: '0241234567' };
+  it('accepts a valid payload (id_type, organisation, id_number all optional)', () => {
     expect(KioskCreateVisitorSchema.safeParse(ok).success).toBe(true);
   });
+  it('accepts a payload with an id_type', () => {
+    expect(KioskCreateVisitorSchema.safeParse({ ...ok, id_type: 'ghana_card' }).success).toBe(true);
+  });
   it('rejects missing phone', () => {
-    expect(KioskCreateVisitorSchema.safeParse({ first_name: 'Ama', last_name: 'B', id_type: 'ghana_card' }).success).toBe(false);
+    expect(KioskCreateVisitorSchema.safeParse({ first_name: 'Ama', last_name: 'B' }).success).toBe(false);
   });
   it('rejects empty phone', () => {
     expect(KioskCreateVisitorSchema.safeParse({ ...ok, phone: '' }).success).toBe(false);
   });
   it('rejects a malformed phone', () => {
     expect(KioskCreateVisitorSchema.safeParse({ ...ok, phone: '12345' }).success).toBe(false);
-  });
-  it('rejects missing id_type', () => {
-    expect(KioskCreateVisitorSchema.safeParse({ first_name: 'Ama', last_name: 'B', phone: '0241234567' }).success).toBe(false);
   });
 });
 
