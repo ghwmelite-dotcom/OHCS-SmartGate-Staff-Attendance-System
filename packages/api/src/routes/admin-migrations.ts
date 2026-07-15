@@ -25,27 +25,13 @@ adminMigrationsRoutes.post('/run', async (c) => {
       continue;
     }
 
-    // Strip whole-line `--` comments BEFORE splitting on `;\n`. The previous
-    // approach split first and then filtered chunks starting with `--`, which
-    // silently dropped any statement that shared a chunk with leading
-    // comments (i.e. nearly every migration in this repo).
-    const cleaned = m.sql
-      .split('\n')
-      .filter((line) => !line.trim().startsWith('--'))
-      .join('\n');
-
-    const statements = cleaned
-      .split(/;\s*\n/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-
     try {
-      // Apply the whole file atomically. D1 `batch` runs all statements in an
-      // implicit transaction (and accepts DDL like CREATE INDEX / ALTER TABLE),
-      // so a partial failure rolls back the entire migration file rather than
-      // leaving it half-applied. The applied_migrations bookkeeping INSERT stays
-      // OUTSIDE the batch and runs only after it succeeds.
-      await c.env.DB.batch(statements.map((s) => c.env.DB.prepare(s)));
+      // exec() passes the raw SQL string to SQLite in one shot — all statements
+      // run sequentially in a single implicit transaction and each statement sees
+      // the committed state of its predecessors. This avoids the per-statement
+      // FK ordering issues that can arise with batch(). The applied_migrations
+      // bookkeeping INSERT stays OUTSIDE exec() and runs only after it succeeds.
+      await c.env.DB.exec(m.sql);
       const hash = await sha256Hex(m.sql);
       await c.env.DB.prepare(
         'INSERT INTO applied_migrations (filename, hash) VALUES (?, ?)'
