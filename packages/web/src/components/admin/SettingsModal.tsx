@@ -203,6 +203,12 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
 
           {canEdit && (
             <div className="border-t border-border pt-4">
+              <PurgeTestVisitsSection />
+            </div>
+          )}
+
+          {canEdit && (
+            <div className="border-t border-border pt-4">
               <RestoreSection />
             </div>
           )}
@@ -558,6 +564,159 @@ function GoLiveReadinessSection() {
       )}
       {m.error instanceof Error && (
         <p className="text-[12px] text-danger mt-2">{m.error.message}</p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Purge test/demo visitor check-ins
+// ---------------------------------------------------------------------------
+interface PurgePreview { visits: number; orphaned_visitors: number; notifications: number }
+interface PurgeResult { ok: boolean; deleted: { visits: number; visitors: number; photos: number }; backup: { date: string } }
+
+function PurgeTestVisitsSection() {
+  const qc = useQueryClient();
+  const today = new Date().toISOString().slice(0, 10);
+  const [armed, setArmed] = useState(false);
+  const [phrase, setPhrase] = useState('');
+  const [pin, setPin] = useState('');
+  const [beforeDate, setBeforeDate] = useState(today);
+  const [preview, setPreview] = useState<PurgePreview | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const reset = () => { setPhrase(''); setPin(''); };
+
+  const previewM = useMutation({
+    mutationFn: () => api.get<PurgePreview>(`/admin/maintenance/purge-test-visits/preview?before_date=${beforeDate}`),
+    onSuccess: (r) => setPreview(r.data ?? null),
+  });
+
+  const m = useMutation({
+    mutationFn: () => api.post<PurgeResult>('/admin/maintenance/purge-test-visits', { confirm: 'PURGE', pin, before_date: beforeDate }),
+    onSuccess: (r) => {
+      const d = r.data;
+      setResult({
+        ok: true,
+        text: d
+          ? `Purged ${d.deleted.visits} visit${d.deleted.visits !== 1 ? 's' : ''}, ` +
+            `${d.deleted.visitors} visitor${d.deleted.visitors !== 1 ? 's' : ''}, ` +
+            `${d.deleted.photos} photo slots. Backup saved (${d.backup.date}).`
+          : 'Purge complete.',
+      });
+      setArmed(false);
+      setPreview(null);
+      reset();
+      ['visits', 'notifications', 'audit'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    },
+    onError: (e) => setResult({ ok: false, text: e instanceof Error ? e.message : 'Purge failed.' }),
+  });
+
+  const canSubmit = phrase === 'PURGE' && pin.length >= 4 && !m.isPending;
+
+  return (
+    <div className="rounded-xl border border-danger/30 bg-danger/[0.03] p-4">
+      <div className="flex items-center gap-2 mb-1">
+        <Trash2 className="h-4 w-4 text-danger" />
+        <label className="text-[13px] font-semibold text-danger">Danger zone — Purge test visits</label>
+      </div>
+      <p className="text-[11px] text-muted mb-3">
+        Permanently deletes visitor check-in records (and their associated notifications and photos) on or before
+        the chosen date. Officers, staff users, directorates, and system config are untouched. A backup is saved
+        first, but deleted R2 photos <strong>cannot be recovered</strong>.
+      </p>
+
+      <div className="mb-3 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="text-[12px] font-medium text-foreground shrink-0">Delete visits on or before</label>
+          <input
+            type="date"
+            value={beforeDate}
+            max={today}
+            onChange={(e) => { setBeforeDate(e.target.value); setPreview(null); }}
+            className="h-8 px-2 rounded-lg border border-border bg-background text-[13px] font-mono"
+          />
+          <button
+            onClick={() => previewM.mutate()}
+            disabled={previewM.isPending || !beforeDate}
+            className="inline-flex items-center gap-1.5 h-8 px-2.5 border border-border text-foreground text-[12px] font-medium rounded-lg hover:bg-background transition-colors disabled:opacity-50"
+          >
+            {previewM.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
+            Preview impact
+          </button>
+        </div>
+
+        {preview && (
+          <div className="rounded-lg border border-border bg-background/60 p-3 text-[12px]">
+            <p className="font-semibold text-danger mb-1">Would delete (on or before {beforeDate}):</p>
+            <ul className="text-foreground space-y-0.5">
+              <li>{preview.visits} visit{preview.visits !== 1 ? 's' : ''}</li>
+              <li>{preview.orphaned_visitors} visitor record{preview.orphaned_visitors !== 1 ? 's' : ''} with no remaining visits</li>
+              <li>{preview.notifications} linked notification{preview.notifications !== 1 ? 's' : ''}</li>
+            </ul>
+            {preview.visits === 0 && (
+              <p className="text-muted mt-1">Nothing to purge on or before this date.</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {!armed ? (
+        <button
+          onClick={() => { setResult(null); setArmed(true); }}
+          className="inline-flex items-center gap-1.5 h-9 px-3 border border-danger/40 text-danger text-[13px] font-semibold rounded-lg hover:bg-danger/10 transition-colors"
+        >
+          <Trash2 className="h-3.5 w-3.5" /> Purge test visits…
+        </button>
+      ) : (
+        <div className="space-y-2.5">
+          <div>
+            <label className="block text-[12px] font-medium text-foreground mb-1">
+              Type <span className="font-mono font-bold text-danger">PURGE</span> to confirm
+            </label>
+            <input
+              type="text"
+              autoComplete="off"
+              value={phrase}
+              onChange={(e) => setPhrase(e.target.value.toUpperCase())}
+              placeholder="PURGE"
+              className="w-full h-10 px-3 rounded-xl border border-border bg-background text-[14px] font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-danger/20 focus:border-danger"
+            />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-foreground mb-1">Re-enter your PIN</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 12))}
+              placeholder="Your login PIN"
+              className="w-full h-10 px-3 rounded-xl border border-border bg-background text-[14px] font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-danger/20 focus:border-danger"
+            />
+          </div>
+          <div className="flex items-center gap-2 pt-0.5">
+            <button
+              onClick={() => { setResult(null); m.mutate(); }}
+              disabled={!canSubmit}
+              className="inline-flex items-center gap-1.5 h-9 px-3 bg-danger text-white text-[13px] font-semibold rounded-lg hover:bg-danger/90 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {m.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              {m.isPending ? 'Purging…' : 'Permanently purge'}
+            </button>
+            <button
+              onClick={() => { setArmed(false); reset(); }}
+              disabled={m.isPending}
+              className="h-9 px-3 text-[13px] font-medium text-muted hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {result && (
+        <p className={`text-[12px] mt-2 ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</p>
       )}
     </div>
   );
