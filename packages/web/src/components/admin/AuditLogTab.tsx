@@ -35,9 +35,9 @@ const ROLE_COLOURS: Record<string, string> = {
 function actorInitial(name: string | null): string {
   if (!name) return '?';
   const parts = name.trim().split(/\s+/);
-  return parts.length >= 2
-    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-    : name[0].toUpperCase();
+  const first = parts[0]?.[0] ?? '?';
+  const last = parts.length >= 2 ? (parts[parts.length - 1]?.[0] ?? '') : '';
+  return (parts.length >= 2 ? first + last : first).toUpperCase();
 }
 
 function ActorCell({ name, role }: { name: string | null; role: string | null }) {
