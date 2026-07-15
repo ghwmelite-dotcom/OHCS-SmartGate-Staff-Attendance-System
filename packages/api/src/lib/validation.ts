@@ -57,6 +57,10 @@ export const KioskCheckOutSchema = z.object({
   badge_code: z.string().min(1).max(40),
 });
 
+export const KioskCheckOutByPinSchema = z.object({
+  pin: z.string().length(6).regex(/^\d{6}$/, 'PIN must be 6 digits'),
+});
+
 // Mirrors IdCheckVerdict (lib/id-check.ts). Echoed back from the id-photo
 // response so the verdict survives even if the visitor lingers past the
 // idcheck:* KV TTL (900s). Non-blocking and best-effort — fields are loose.

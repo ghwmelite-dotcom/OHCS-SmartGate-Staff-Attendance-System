@@ -29,6 +29,12 @@ export type CheckInOutcome =
 // base36 (8 chars, zero-padded), uppercased — no lossy `.slice(0,4)` truncation.
 // 40 bits of entropy makes per-badge collisions astronomically unlikely while
 // keeping the suffix `[0-9A-Z]` so the scanner regex still matches.
+// Six-digit numeric PIN for phone-free kiosk checkout (100000–999999).
+export function generateCheckoutPin(): string {
+  const n = (crypto.getRandomValues(new Uint32Array(1))[0]! % 900000) + 100000;
+  return String(n);
+}
+
 export function generateBadgeCode(timestamp: number, rand: Uint8Array): string {
   let n = 0;
   // Use up to 5 bytes (40 bits) — stays within Number's exact-integer range.
@@ -65,16 +71,17 @@ export async function performCheckIn(
 
   const visitId = crypto.randomUUID().replace(/-/g, '');
   let badgeCode = generateBadgeCode(Date.now(), crypto.getRandomValues(new Uint8Array(5)));
+  let pin = generateCheckoutPin();
 
-  const insertBatch = (code: string) =>
+  const insertBatch = (code: string, checkoutPin: string) =>
     env.DB.batch([
       env.DB.prepare(
-        `INSERT INTO visits (id, visitor_id, host_officer_id, host_name_manual, directorate_id, purpose_raw, purpose_category, badge_code, status, created_by, idempotency_key, check_in_source, id_photo_check)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', ?, ?, ?, ?)`
+        `INSERT INTO visits (id, visitor_id, host_officer_id, host_name_manual, directorate_id, purpose_raw, purpose_category, badge_code, checkout_pin, status, created_by, idempotency_key, check_in_source, id_photo_check)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', ?, ?, ?, ?)`
       ).bind(
         visitId, params.visitor_id, params.host_officer_id || null, params.host_name_manual || null,
         params.directorate_id || null, params.purpose_raw || null, params.purpose_category || null,
-        code, params.created_by, params.idempotency_key ?? null, params.check_in_source,
+        code, checkoutPin, params.created_by, params.idempotency_key ?? null, params.check_in_source,
         params.id_photo_check ?? null,
       ),
       env.DB.prepare(
@@ -84,7 +91,7 @@ export async function performCheckIn(
     ]);
 
   try {
-    await insertBatch(badgeCode);
+    await insertBatch(badgeCode, pin);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // Idempotency-key race: another concurrent check-in won the insert. Re-read
@@ -93,10 +100,11 @@ export async function performCheckIn(
       const hit = await returnExistingByKey(params.idempotency_key);
       if (hit) return hit;
     }
-    // Badge-code collision: retry once with a freshly generated, higher-entropy code.
-    if (/UNIQUE/i.test(msg) && /badge_code/i.test(msg)) {
+    // Collision retry: regenerate both badge code and checkout PIN.
+    if (/UNIQUE/i.test(msg) && (/badge_code/i.test(msg) || /checkout_pin/i.test(msg))) {
       badgeCode = generateBadgeCode(Date.now(), crypto.getRandomValues(new Uint8Array(5)));
-      await insertBatch(badgeCode);
+      pin = generateCheckoutPin();
+      await insertBatch(badgeCode, pin);
     } else {
       throw e;
     }

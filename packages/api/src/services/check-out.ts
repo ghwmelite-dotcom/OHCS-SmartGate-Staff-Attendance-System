@@ -35,3 +35,16 @@ export async function checkOutByBadgeCode(env: Env, badgeCode: string): Promise<
   if (!row) return { ok: false, code: 'NOT_FOUND' };
   return checkOutById(env, row.id);
 }
+
+// PIN-based checkout: matches only checked-in visits from today so stale PINs
+// from previous visits (same visitor, same day) never accidentally match.
+export async function checkOutByPin(env: Env, pin: string): Promise<CheckOutOutcome> {
+  const row = await env.DB.prepare(
+    `SELECT id FROM visits
+     WHERE checkout_pin = ? AND status = 'checked_in'
+       AND date(check_in_at) = date('now')
+     LIMIT 1`
+  ).bind(pin).first<{ id: string }>();
+  if (!row) return { ok: false, code: 'NOT_FOUND' };
+  return checkOutById(env, row.id);
+}
