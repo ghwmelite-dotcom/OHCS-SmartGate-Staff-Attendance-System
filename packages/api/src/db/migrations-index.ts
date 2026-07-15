@@ -34,6 +34,7 @@ import directorateOrgType from './migration-directorate-org-type.sql';
 import visitorIdPhotoBack from './migration-visitor-id-photo-back.sql';
 import annexOrgEntities from './migration-annex-org-entities.sql';
 import hosSecretariat from './migration-hos-secretariat.sql';
+import checkoutPin from './migration-checkout-pin.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -72,6 +73,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-visitor-id-photo-back.sql', sql: visitorIdPhotoBack },
   { filename: 'migration-annex-org-entities.sql', sql: annexOrgEntities },
   { filename: 'migration-hos-secretariat.sql', sql: hosSecretariat },
+  { filename: 'migration-checkout-pin.sql', sql: checkoutPin },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {

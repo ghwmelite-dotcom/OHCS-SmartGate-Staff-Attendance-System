@@ -4,12 +4,12 @@ import { zValidator } from '@hono/zod-validator';
 import type { Env } from '../types';
 import { success, created, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
-import { KioskCreateVisitorSchema, KioskCheckInSchema, KioskCheckOutSchema } from '../lib/validation';
+import { KioskCreateVisitorSchema, KioskCheckInSchema, KioskCheckOutSchema, KioskCheckOutByPinSchema } from '../lib/validation';
 import { visitorPhotoKey, visitorIdPhotoKey, visitorIdPhotoBackKey } from '../lib/photo-key';
 import { uploadVisitorPhoto } from '../lib/photo-upload';
 import { isJpeg } from '../lib/image-magic';
 import { performCheckIn } from '../services/check-in';
-import { checkOutByBadgeCode } from '../services/check-out';
+import { checkOutByBadgeCode, checkOutByPin } from '../services/check-out';
 import { checkIdDocument } from '../services/id-check';
 import { isBlockingVerdict, mostConservativeVerdict, type IdCheckVerdict } from '../lib/id-check';
 import { getAppSettings } from '../services/settings';
@@ -228,6 +228,18 @@ kioskRoutes.post('/check-out', zValidator('json', KioskCheckOutSchema), async (c
   const result = await checkOutByBadgeCode(c.env, badge_code);
   if (!result.ok) {
     if (result.code === 'NOT_FOUND') return notFound(c, 'Visit');
+    return error(c, 'ALREADY_CHECKED_OUT', 'This visit has already ended', 400);
+  }
+  return success(c, result.visit);
+});
+
+// Check out by 6-digit PIN (for visitors without a smartphone to scan their badge).
+kioskRoutes.post('/check-out-by-pin', zValidator('json', KioskCheckOutByPinSchema), async (c) => {
+  if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
+  const { pin } = c.req.valid('json');
+  const result = await checkOutByPin(c.env, pin);
+  if (!result.ok) {
+    if (result.code === 'NOT_FOUND') return error(c, 'PIN_NOT_FOUND', 'No active check-in found for that PIN. Check the number and try again.', 404);
     return error(c, 'ALREADY_CHECKED_OUT', 'This visit has already ended', 400);
   }
   return success(c, result.visit);

@@ -24,7 +24,7 @@ const visitorSchema = z.object({
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
 
-type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-confirm' | 'checkout-done';
+type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-pin' | 'checkout-confirm' | 'checkout-done';
 
 // Short banner/label for a closed office, by reason.
 function officeBannerText(o: KioskOfficeStatus): string {
@@ -51,6 +51,9 @@ export function KioskPage() {
   const [officeClosedMsg, setOfficeClosedMsg] = useState<string | null>(null);
   const [checkoutBadge, setCheckoutBadge] = useState<string | null>(null);
   const [checkoutVisit, setCheckoutVisit] = useState<KioskVisit | null>(null);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinSubmitting, setPinSubmitting] = useState(false);
   const checkingInRef = useRef(false);
   const checkingOutRef = useRef(false);
 
@@ -175,6 +178,22 @@ export function KioskPage() {
       setMode('checkout-done');
     } finally {
       checkingOutRef.current = false;
+    }
+  }
+
+  async function submitPinCheckout() {
+    if (pinInput.length !== 6 || pinSubmitting) return;
+    setPinSubmitting(true);
+    setPinError(null);
+    try {
+      const visit = await kioskApi.checkOutByPin(pinInput);
+      setCheckoutVisit(visit);
+      setMode('checkout-done');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'PIN not recognised. Please check the number or see reception.';
+      setPinError(msg);
+    } finally {
+      setPinSubmitting(false);
     }
   }
 
@@ -367,6 +386,15 @@ export function KioskPage() {
                 </div>
                 <KioskBadgeQr badgeCode={createdVisit.badge_code} />
                 <p className="text-sm font-mono font-bold text-accent">{createdVisit.badge_code}</p>
+                {createdVisit.checkout_pin && (
+                  <div className="border-t border-border pt-4 space-y-1.5">
+                    <p className="text-xs text-muted">No phone? Use this PIN to check out at the kiosk</p>
+                    <p className="text-3xl font-mono font-bold tracking-[0.25em] text-foreground">
+                      {createdVisit.checkout_pin}
+                    </p>
+                    <p className="text-xs text-muted">Keep this number — it's your checkout PIN</p>
+                  </div>
+                )}
                 <button onClick={resetAll} className="h-12 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Done</button>
               </div>
             ) : (
@@ -379,8 +407,56 @@ export function KioskPage() {
         )}
 
         {mode === 'checkout-scan' && (
-          <div className="mt-6">
+          <div className="mt-6 space-y-4">
             <QrScanner onScan={handleScanned} onCancel={resetAll} />
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => { setPinInput(''); setPinError(null); setMode('checkout-pin'); }}
+                className="text-sm text-muted hover:text-foreground underline-offset-2 hover:underline transition-colors"
+              >
+                No badge? Enter checkout PIN
+              </button>
+            </div>
+          </div>
+        )}
+
+        {mode === 'checkout-pin' && (
+          <div className="mt-6 space-y-5 text-center">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Enter Checkout PIN</h2>
+              <p className="text-sm text-muted mt-1">Type the 6-digit PIN shown at check-in</p>
+            </div>
+            <input
+              type="tel"
+              inputMode="numeric"
+              maxLength={6}
+              value={pinInput}
+              onChange={e => { setPinInput(e.target.value.replace(/\D/g, '')); setPinError(null); }}
+              onKeyDown={e => e.key === 'Enter' && submitPinCheckout()}
+              placeholder="000000"
+              className="w-48 mx-auto block text-center text-3xl font-mono font-bold tracking-[0.3em] h-16 rounded-xl border-2 border-border focus:border-primary focus:outline-none bg-background"
+              autoFocus
+            />
+            {pinError && <p className="text-danger text-sm">{pinError}</p>}
+            <div className="flex gap-3 justify-center">
+              <button
+                type="button"
+                onClick={() => setMode('checkout-scan')}
+                className="h-11 px-4 text-sm text-muted border border-border rounded-xl hover:border-primary/30 transition-all"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={submitPinCheckout}
+                disabled={pinInput.length !== 6 || pinSubmitting}
+                className="h-11 px-6 bg-danger text-white text-sm font-semibold rounded-xl inline-flex items-center gap-2 disabled:opacity-50 transition-all"
+              >
+                {pinSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                Check Out
+              </button>
+            </div>
           </div>
         )}
 

@@ -65,6 +65,7 @@ export interface KioskVisitor {
 export interface KioskVisit {
   id: string;
   badge_code: string | null;
+  checkout_pin: string | null;
   visitor_name?: string;
 }
 
@@ -116,6 +117,7 @@ export const kioskApi = {
   uploadIdPhotoBack: (id: string, blob: Blob) => kioskUploadPhoto<{ id_photo_back_url: string }>(id, 'id-photo-back', blob),
   checkIn: (body: KioskCheckInBody) => kioskRequest<KioskVisit>('/check-in', body),
   checkOut: (badgeCode: string) => kioskRequest<KioskVisit>('/check-out', { badge_code: badgeCode }),
+  checkOutByPin: (pin: string) => kioskRequest<KioskVisit>('/check-out-by-pin', { pin }),
   getDirectorates: () => kioskGet<KioskDirectorate[]>('/directorates'),
   getStatus: () => kioskGet<KioskOfficeStatus>('/status'),
 };
