@@ -25,13 +25,24 @@ adminMigrationsRoutes.post('/run', async (c) => {
       continue;
     }
 
+    // Strip whole-line comments and split into individual statements.
+    const cleaned = m.sql
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('--'))
+      .join('\n');
+    const statements = cleaned
+      .split(/;\s*\n/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
     try {
-      // exec() passes the raw SQL string to SQLite in one shot — all statements
-      // run sequentially in a single implicit transaction and each statement sees
-      // the committed state of its predecessors. This avoids the per-statement
-      // FK ordering issues that can arise with batch(). The applied_migrations
-      // bookkeeping INSERT stays OUTSIDE exec() and runs only after it succeeds.
-      await c.env.DB.exec(m.sql);
+      // Run each statement individually so it commits before the next begins.
+      // This guarantees FK checks in later statements (DELETE FROM officers)
+      // see committed results from earlier ones (UPDATE visits SET host_officer_id = NULL).
+      // batch() has FK ordering issues; exec() rejects large multi-statement files.
+      for (const s of statements) {
+        await c.env.DB.prepare(s).run();
+      }
       const hash = await sha256Hex(m.sql);
       await c.env.DB.prepare(
         'INSERT INTO applied_migrations (filename, hash) VALUES (?, ?)'
