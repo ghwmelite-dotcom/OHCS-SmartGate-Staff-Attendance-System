@@ -162,6 +162,7 @@ export async function recordAudit(env: Env, ctx: AuditContext, input: AuditInput
 export interface AuditRow {
   id: string; seq: number; at: string;
   actor_user_id: string | null; actor_role: string | null; actor_label: string | null;
+  actor_name: string | null;
   action: string; entity_type: string | null; entity_id: string | null;
   summary: string | null; changes: string | null; ip: string | null;
 }
@@ -177,18 +178,23 @@ export async function listAudit(env: Env, f: AuditFilters): Promise<{ rows: Audi
   const limit = Math.min(Math.max(f.limit ?? 50, 1), 200);
   const where: string[] = [];
   const params: unknown[] = [];
-  if (f.beforeSeq) { where.push('seq < ?'); params.push(f.beforeSeq); }
-  if (f.entityType) { where.push('entity_type = ?'); params.push(f.entityType); }
-  if (f.action) { where.push('action = ?'); params.push(f.action); }
-  if (f.actorUserId) { where.push('actor_user_id = ?'); params.push(f.actorUserId); }
-  if (f.from) { where.push('at >= ?'); params.push(f.from); }
-  if (f.to) { where.push('at <= ?'); params.push(f.to); }
-  if (f.q) { where.push('summary LIKE ?'); params.push(`%${f.q}%`); }
+  if (f.beforeSeq) { where.push('al.seq < ?'); params.push(f.beforeSeq); }
+  if (f.entityType) { where.push('al.entity_type = ?'); params.push(f.entityType); }
+  if (f.action) { where.push('al.action = ?'); params.push(f.action); }
+  if (f.actorUserId) { where.push('al.actor_user_id = ?'); params.push(f.actorUserId); }
+  if (f.from) { where.push('al.at >= ?'); params.push(f.from); }
+  if (f.to) { where.push('al.at <= ?'); params.push(f.to); }
+  if (f.q) { where.push('al.summary LIKE ?'); params.push(`%${f.q}%`); }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
   const res = await env.DB.prepare(
-    `SELECT id, seq, at, actor_user_id, actor_role, actor_label, action, entity_type, entity_id, summary, changes, ip
-     FROM audit_log ${clause} ORDER BY seq DESC LIMIT ?`
+    `SELECT al.id, al.seq, al.at,
+            al.actor_user_id, al.actor_role, al.actor_label,
+            u.name AS actor_name,
+            al.action, al.entity_type, al.entity_id, al.summary, al.changes, al.ip
+     FROM audit_log al
+     LEFT JOIN users u ON u.id = al.actor_user_id
+     ${clause} ORDER BY al.seq DESC LIMIT ?`
   ).bind(...params, limit + 1).all<AuditRow>();
 
   const rows = res.results ?? [];
