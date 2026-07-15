@@ -48,10 +48,4 @@ INSERT OR IGNORE INTO users (id, name, email, staff_id, pin_hash, role) VALUES
 INSERT OR IGNORE INTO users (id, name, email, role) VALUES
 ('user_kiosk', 'Self-Service Kiosk', 'kiosk@ohcs.gov.gh', 'staff');
 
--- Seed: Sample officers (mapped to real directorates)
-INSERT OR IGNORE INTO officers (id, name, title, directorate_id, email, office_number) VALUES
-('off_mensah', 'Mr. Kwabena Mensah', 'Director', 'dir_rsimd', 'k.mensah@ohcs.gov.gh', 'Room 19'),
-('off_addo', 'Mrs. Abena Addo', 'Director', 'dir_rtdd', 'a.addo@ohcs.gov.gh', 'Room 09'),
-('off_owusu', 'Mr. Yaw Owusu', 'Principal Officer', 'dir_fa', 'y.owusu@ohcs.gov.gh', 'Room 02'),
-('off_boateng', 'Ms. Akosua Boateng', 'Senior Officer', 'dir_pbmed', 'a.boateng@ohcs.gov.gh', 'Room 31'),
-('off_asante', 'Mr. Kofi Asante', 'Chief Director', 'dir_cdsec', 'k.asante@ohcs.gov.gh', 'Room 24');
+-- Real officers are imported via migration-staff-officers.sql (from the OHCS staff list).

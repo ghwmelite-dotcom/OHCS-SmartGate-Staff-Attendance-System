@@ -73,6 +73,20 @@ kioskRoutes.get('/status', async (c) => {
   return success(c, status);
 });
 
+// Public officer list for the kiosk host-name autocomplete.
+// Returns name + title + directorate only — no phone, email, or override PIN.
+kioskRoutes.get('/officers', async (c) => {
+  if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
+  const rows = await c.env.DB.prepare(
+    `SELECT o.id, o.name, o.title, o.directorate_id, d.abbreviation AS directorate_abbr
+     FROM officers o
+     JOIN directorates d ON d.id = o.directorate_id
+     WHERE o.is_available = 1 AND d.is_active = 1
+     ORDER BY o.name`
+  ).all();
+  return success(c, rows.results ?? []);
+});
+
 // Public directorate list for the kiosk form. type/org_type included for dropdown
 // grouping; the reception officer's NAME is deliberately NOT returned (PII on an
 // unauthenticated endpoint).

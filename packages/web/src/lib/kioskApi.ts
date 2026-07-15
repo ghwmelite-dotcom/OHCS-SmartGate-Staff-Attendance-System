@@ -69,6 +69,14 @@ export interface KioskVisit {
   visitor_name?: string;
 }
 
+export interface KioskOfficer {
+  id: string;
+  name: string;
+  title: string | null;
+  directorate_id: string;
+  directorate_abbr: string;
+}
+
 export interface KioskDirectorate {
   id: string;
   name: string;
@@ -118,6 +126,7 @@ export const kioskApi = {
   checkIn: (body: KioskCheckInBody) => kioskRequest<KioskVisit>('/check-in', body),
   checkOut: (badgeCode: string) => kioskRequest<KioskVisit>('/check-out', { badge_code: badgeCode }),
   checkOutByPin: (pin: string) => kioskRequest<KioskVisit>('/check-out-by-pin', { pin }),
+  getOfficers: () => kioskGet<KioskOfficer[]>('/officers'),
   getDirectorates: () => kioskGet<KioskDirectorate[]>('/directorates'),
   getStatus: () => kioskGet<KioskOfficeStatus>('/status'),
 };

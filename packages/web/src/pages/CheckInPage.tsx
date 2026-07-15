@@ -13,6 +13,7 @@ import { PhotoCapture } from '@/components/PhotoCapture';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
 import { IdDocumentCapture } from '@/components/checkin/IdDocumentCapture';
 import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
+import { OfficerCombobox } from '@/components/checkin/OfficerCombobox';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
 import { suggestDirectorate, groupDirectorates } from '@/lib/directorate-routing';
 import { toast } from '@/stores/toast';
@@ -51,6 +52,14 @@ const checkInSchema = z.object({
   host_officer_id: z.string().optional(),
   host_name_manual: z.string().max(100).optional(),
   purpose_raw: z.string().max(500).optional(),
+}).superRefine((data, ctx) => {
+  if (!data.host_officer_id && !data.host_name_manual?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Please select or enter who the visitor is here to see',
+      path: ['host_name_manual'],
+    });
+  }
 });
 type CheckInForm = z.infer<typeof checkInSchema>;
 
@@ -510,17 +519,24 @@ export function CheckInPage() {
             </FieldWrapper>
 
             {/* 3. HOST OFFICER — filtered by directorate */}
-            <HostOfficerField
-              officers={filteredOfficers}
-              onSelect={(officerId) => {
-                checkInForm.setValue('host_officer_id', officerId);
-                checkInForm.setValue('host_name_manual', '');
-              }}
-              onManual={(name) => {
-                checkInForm.setValue('host_officer_id', '');
-                checkInForm.setValue('host_name_manual', name);
-              }}
-            />
+            <FieldWrapper icon={<User className="h-4 w-4" />} label="Host Officer" error={checkInForm.formState.errors.host_name_manual?.message}>
+              <input type="hidden" {...checkInForm.register('host_officer_id')} />
+              <input type="hidden" {...checkInForm.register('host_name_manual')} />
+              <OfficerCombobox
+                officers={filteredOfficers}
+                inputClassName={fieldCls}
+                rowSize="sm"
+                placeholder="Search or type a name…"
+                onSelect={(o) => {
+                  checkInForm.setValue('host_officer_id', o.id);
+                  checkInForm.setValue('host_name_manual', '');
+                }}
+                onManual={(name) => {
+                  checkInForm.setValue('host_officer_id', '');
+                  checkInForm.setValue('host_name_manual', name);
+                }}
+              />
+            </FieldWrapper>
 
             {checkInMutation.isError && (
               <p className="text-danger text-xs">
@@ -624,101 +640,6 @@ export function CheckInPage() {
 const fieldCls =
   'w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary';
 
-function HostOfficerField({ officers, onSelect, onManual }: {
-  officers: Officer[];
-  onSelect: (id: string) => void;
-  onManual: (name: string) => void;
-}) {
-  const [query, setQuery] = useState('');
-  const [isOpen, setIsOpen] = useState(false);
-  const [selectedName, setSelectedName] = useState('');
-  const [isManual, setIsManual] = useState(false);
-
-  const filtered = query.length >= 1
-    ? officers.filter(o => o.name.toLowerCase().includes(query.toLowerCase()))
-    : officers;
-
-  function handleSelectOfficer(o: Officer) {
-    setSelectedName(`${o.name}${o.title ? ` — ${o.title}` : ''}${o.directorate_abbr ? ` (${o.directorate_abbr})` : ''}`);
-    setQuery('');
-    setIsOpen(false);
-    setIsManual(false);
-    onSelect(o.id);
-  }
-
-  function handleManualInput(value: string) {
-    setQuery(value);
-    setSelectedName('');
-    setIsManual(true);
-    onManual(value);
-    setIsOpen(value.length >= 1);
-  }
-
-  function clear() {
-    setQuery('');
-    setSelectedName('');
-    setIsManual(false);
-    onSelect('');
-    onManual('');
-  }
-
-  return (
-    <FieldWrapper icon={<User className="h-4 w-4" />} label="Host Officer">
-      <div className="relative">
-        {selectedName ? (
-          <div className="flex items-center gap-2">
-            <div className={cn(fieldCls, 'flex items-center text-[14px] text-foreground')}>
-              {selectedName}
-            </div>
-            <button type="button" onClick={clear} className="h-10 w-10 rounded-xl flex items-center justify-center text-muted hover:text-danger hover:bg-danger/5 shrink-0 transition-all">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
-          <>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => handleManualInput(e.target.value)}
-              onFocus={() => setIsOpen(true)}
-              className={fieldCls}
-              placeholder="Search or type a name..."
-              autoComplete="off"
-            />
-            {isManual && query.length >= 2 && (
-              <p className="text-[11px] text-accent-warm mt-1">
-                Typing a custom name — not linked to a registered officer
-              </p>
-            )}
-          </>
-        )}
-
-        {/* Dropdown suggestions */}
-        {isOpen && !selectedName && filtered.length > 0 && (
-          <div className="absolute z-20 top-full mt-1 left-0 right-0 bg-surface rounded-xl border border-border shadow-lg max-h-48 overflow-y-auto">
-            {filtered.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                onClick={() => handleSelectOfficer(o)}
-                className="w-full text-left px-4 py-2.5 text-[14px] hover:bg-background-warm transition-colors flex items-center justify-between"
-              >
-                <span className="font-medium text-foreground">
-                  {o.name}{o.title ? <span className="text-muted font-normal"> — {o.title}</span> : ''}
-                </span>
-                {o.directorate_abbr && (
-                  <span className="text-[10px] font-bold bg-primary/8 text-primary px-2 py-0.5 rounded-md ml-2">
-                    {o.directorate_abbr}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </FieldWrapper>
-  );
-}
 
 function BadgeQRCode({ badgeCode }: { badgeCode: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);

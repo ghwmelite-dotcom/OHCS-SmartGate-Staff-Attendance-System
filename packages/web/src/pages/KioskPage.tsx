@@ -3,12 +3,13 @@ import QRCode from 'qrcode';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { kioskApi, KioskApiError, type KioskVisit, type KioskDirectorate, type KioskOfficeStatus } from '@/lib/kioskApi';
+import { kioskApi, KioskApiError, type KioskVisit, type KioskDirectorate, type KioskOfficer, type KioskOfficeStatus } from '@/lib/kioskApi';
 import { API_BASE, BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
 import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
+import { OfficerCombobox } from '@/components/checkin/OfficerCombobox';
 import { suggestDirectorate, groupDirectorates } from '@/lib/directorate-routing';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
 import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert } from 'lucide-react';
@@ -19,7 +20,7 @@ const visitorSchema = z.object({
   phone: z.string().regex(/^(\+233|0)\d{9}$/, 'A valid Ghana phone is required'),
   organisation: z.string().max(200).optional(),
   directorate_id: z.string().min(1, 'Select a directorate'),
-  host_name: z.string().max(100).optional(),
+  host_name: z.string().min(1, 'Please enter who you are visiting').max(100),
   purpose_raw: z.string().min(1, 'Purpose of visit is required').max(500),
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
@@ -63,11 +64,17 @@ export function KioskPage() {
   });
 
   const [directorates, setDirectorates] = useState<KioskDirectorate[]>([]);
+  const [officers, setOfficers] = useState<KioskOfficer[]>([]);
   useEffect(() => {
-    if (mode === 'form' && directorates.length === 0) {
-      kioskApi.getDirectorates().then(setDirectorates).catch(() => { /* leave empty; reception assists */ });
+    if (mode === 'form') {
+      if (directorates.length === 0) {
+        kioskApi.getDirectorates().then(setDirectorates).catch(() => { /* leave empty; reception assists */ });
+      }
+      if (officers.length === 0) {
+        kioskApi.getOfficers().then(setOfficers).catch(() => { /* leave empty; text entry still works */ });
+      }
     }
-  }, [mode, directorates.length]);
+  }, [mode, directorates.length, officers.length]);
 
   // Refresh the office-open status whenever the kiosk returns to its idle screen,
   // so the closed banner reflects the current time/day without a page reload.
@@ -300,8 +307,22 @@ export function KioskPage() {
                   ))}
                 </select>
               </FieldWrapper>
-              <FieldWrapper icon={<User className="h-4 w-4" />} label="Who are you visiting? (optional)" error={form.formState.errors.host_name?.message}>
-                <input {...form.register('host_name')} className={fieldCls} placeholder="e.g. Mr. Mensah" />
+              <FieldWrapper icon={<User className="h-4 w-4" />} label="Who are you visiting?" error={form.formState.errors.host_name?.message}>
+                {/* hidden input keeps RHF aware of the field so errors surface */}
+                <input type="hidden" {...form.register('host_name')} />
+                <OfficerCombobox
+                  officers={officers}
+                  rowSize="lg"
+                  inputClassName={fieldCls}
+                  placeholder="e.g. Mensah, Doris…"
+                  onSelect={(o) => {
+                    form.setValue('host_name', o.name, { shouldValidate: true });
+                    if (o.directorate_id && !form.getValues('directorate_id')) {
+                      form.setValue('directorate_id', o.directorate_id);
+                    }
+                  }}
+                  onManual={(name) => form.setValue('host_name', name, { shouldValidate: !!name })}
+                />
               </FieldWrapper>
             </div>
             {submitError && <p className="text-danger text-xs">{submitError}</p>}
