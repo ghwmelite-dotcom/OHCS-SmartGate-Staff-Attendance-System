@@ -5,6 +5,7 @@ import type { Env, SessionData } from '../types';
 import { success, error } from '../lib/response';
 import { requireRole } from '../lib/require-role';
 import { purgeExpiredVisitorPhotos } from '../services/photo-purge';
+import { visitorPhotoKey, visitorIdPhotoKey, visitorIdPhotoBackKey } from '../lib/photo-key';
 import { exportBackupToR2, verifyLatestBackup, loadBackupSnapshot, BACKUP_TABLES, type BackupResult } from '../services/backup';
 import { buildRestorePlan, type ColumnMap } from '../services/restore';
 import { verifyPin, getPinLock, recordPinFailure, clearPinLock } from '../services/auth';
@@ -234,6 +235,107 @@ adminMaintenanceRoutes.post('/go-live-reset', zValidator('json', goLiveResetSche
   });
 
   return success(c, { ok: true, backup });
+});
+
+// ---------------------------------------------------------------------------
+// Purge test/demo visitor check-ins (superadmin) — targeted wipe of visit +
+// visitor records created on or before a chosen date. Keeps officers, users,
+// directorates, and all other config. R2 photos for orphaned visitors are also
+// deleted. Irreversible — always takes an R2 backup first.
+// ---------------------------------------------------------------------------
+const PURGE_PHRASE = 'PURGE';
+const purgeTestVisitsSchema = z.object({
+  confirm: z.literal(PURGE_PHRASE),
+  pin: z.string().min(4).max(12),
+  before_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+// Read-only impact preview — counts what WOULD be deleted for a given date cutoff.
+adminMaintenanceRoutes.get('/purge-test-visits/preview', async (c) => {
+  const blocked = requireRole(c, 'superadmin');
+  if (blocked) return blocked;
+
+  const before = c.req.query('before_date');
+  if (!before || !/^\d{4}-\d{2}-\d{2}$/.test(before)) {
+    return error(c, 'INVALID_DATE', 'before_date must be YYYY-MM-DD.', 400);
+  }
+
+  const counts = await c.env.DB.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM visits
+        WHERE date(check_in_at) <= ?) AS visits,
+      (SELECT COUNT(*) FROM visitors
+        WHERE id IN (SELECT visitor_id FROM visits WHERE date(check_in_at) <= ?)
+          AND id NOT IN (SELECT visitor_id FROM visits WHERE date(check_in_at) > ?)) AS orphaned_visitors,
+      (SELECT COUNT(*) FROM notifications
+        WHERE visit_id IN (SELECT id FROM visits WHERE date(check_in_at) <= ?)) AS notifications
+  `).bind(before, before, before, before).first<{ visits: number; orphaned_visitors: number; notifications: number }>();
+
+  return success(c, counts);
+});
+
+adminMaintenanceRoutes.post('/purge-test-visits', zValidator('json', purgeTestVisitsSchema), async (c) => {
+  const blocked = requireRole(c, 'superadmin');
+  if (blocked) return blocked;
+
+  const { pin, before_date } = c.req.valid('json');
+
+  const reauthErr = await reauthOrError(c, pin);
+  if (reauthErr) return reauthErr;
+
+  // Always back up first — R2 photos cannot be restored from a backup but the
+  // visit + visitor DB rows can, so at least the records are recoverable.
+  const safety = await safetyBackupOrError(c);
+  if (safety instanceof Response) return safety;
+  const backup = safety;
+
+  // Capture orphaned visitor IDs BEFORE deleting visits so we can clean R2.
+  const orphanedRes = await c.env.DB.prepare(`
+    SELECT id FROM visitors
+    WHERE id IN (SELECT visitor_id FROM visits WHERE date(check_in_at) <= ?)
+      AND id NOT IN (SELECT visitor_id FROM visits WHERE date(check_in_at) > ?)
+  `).bind(before_date, before_date).all<{ id: string }>();
+  const orphanedIds = (orphanedRes.results ?? []).map((r) => r.id);
+
+  // FK-safe deletion order: notifications → visits → orphaned visitors.
+  await c.env.DB.prepare(
+    `DELETE FROM notifications WHERE visit_id IN (SELECT id FROM visits WHERE date(check_in_at) <= ?)`
+  ).bind(before_date).run();
+
+  const visitDel = await c.env.DB.prepare(
+    `DELETE FROM visits WHERE date(check_in_at) <= ?`
+  ).bind(before_date).run();
+
+  // Delete R2 photos for each orphaned visitor (best-effort; missing key is a no-op).
+  let photosDeleted = 0;
+  for (const vid of orphanedIds) {
+    await c.env.STORAGE.delete(visitorPhotoKey(vid));
+    await c.env.STORAGE.delete(visitorIdPhotoKey(vid));
+    await c.env.STORAGE.delete(visitorIdPhotoBackKey(vid));
+    photosDeleted += 3;
+  }
+
+  // Remove visitors who now have no visits at all.
+  const visitorDel = orphanedIds.length > 0
+    ? await c.env.DB.prepare(`DELETE FROM visitors WHERE id NOT IN (SELECT DISTINCT visitor_id FROM visits)`).run()
+    : { meta: { changes: 0 } };
+
+  const deleted = {
+    visits: visitDel.meta?.changes ?? 0,
+    visitors: visitorDel.meta?.changes ?? 0,
+    photos: photosDeleted,
+  };
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'system.purge_test_visits',
+    entityType: 'system',
+    summary:
+      `Purged ${deleted.visits} test visits (on or before ${before_date}), ` +
+      `${deleted.visitors} orphaned visitors, ${photosDeleted} R2 photo slots cleared. ` +
+      `Backup taken at ${backup.date}.`,
+  });
+
+  return success(c, { ok: true, deleted, backup });
 });
 
 // ---------------------------------------------------------------------------
