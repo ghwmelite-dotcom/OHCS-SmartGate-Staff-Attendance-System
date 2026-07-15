@@ -302,7 +302,7 @@ export function KioskPage() {
               <p className="text-sm text-muted mt-0.5">Look at the camera and capture a clear photo</p>
             </div>
             <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
-              <PhotoCapture title="Take Your Photo" facingMode="user" required onCapture={handleFaceCapture} onSkip={() => { /* selfie is required — no skip */ }} />
+              <PhotoCapture title="Take Your Photo" facingMode="user" required onCapture={handleFaceCapture} onSkip={() => finishCheckIn()} />
             </div>
           </div>
         )}

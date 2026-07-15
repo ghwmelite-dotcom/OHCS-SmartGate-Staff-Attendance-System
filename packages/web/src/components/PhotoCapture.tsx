@@ -195,12 +195,12 @@ export function PhotoCapture({
       <div className="flex items-center justify-center gap-3">
         {!captured ? (
           <>
-            {!required && (
+            {(!required || cameraError) && (
               <button
                 onClick={onSkip}
                 className="h-10 px-4 text-[13px] font-medium text-muted hover:text-foreground transition-colors"
               >
-                Skip Photo
+                {cameraError ? 'Continue without photo' : 'Skip Photo'}
               </button>
             )}
             <button
