@@ -35,6 +35,9 @@ import visitorIdPhotoBack from './migration-visitor-id-photo-back.sql';
 import annexOrgEntities from './migration-annex-org-entities.sql';
 import hosSecretariat from './migration-hos-secretariat.sql';
 import checkoutPin from './migration-checkout-pin.sql';
+import clearAllOfficers from './migration-clear-all-officers.sql';
+import staffOfficers from './migration-staff-officers.sql';
+import removeDemoOfficers from './migration-remove-demo-officers.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -74,6 +77,9 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-annex-org-entities.sql', sql: annexOrgEntities },
   { filename: 'migration-hos-secretariat.sql', sql: hosSecretariat },
   { filename: 'migration-checkout-pin.sql', sql: checkoutPin },
+  { filename: 'migration-clear-all-officers.sql', sql: clearAllOfficers },
+  { filename: 'migration-staff-officers.sql', sql: staffOfficers },
+  { filename: 'migration-remove-demo-officers.sql', sql: removeDemoOfficers },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {
