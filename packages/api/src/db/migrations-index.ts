@@ -42,6 +42,7 @@ import cdsecOfficersAndCounsDedup from './migration-cdsec-officers-and-couns-ded
 import reinstateOfficersAbuAduboahen from './migration-reinstate-officers-abu-aduboahen.sql';
 import addNarteiRsimd from './migration-add-nartei-rsimd.sql';
 import directorateLocations from './migration-directorate-locations.sql';
+import deactivateRecordsUnit from './migration-deactivate-records-unit.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -88,6 +89,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-reinstate-officers-abu-aduboahen.sql', sql: reinstateOfficersAbuAduboahen },
   { filename: 'migration-add-nartei-rsimd.sql', sql: addNarteiRsimd },
   { filename: 'migration-directorate-locations.sql', sql: directorateLocations },
+  { filename: 'migration-deactivate-records-unit.sql', sql: deactivateRecordsUnit },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {
