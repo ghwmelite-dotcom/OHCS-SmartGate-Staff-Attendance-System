@@ -67,6 +67,12 @@ export interface KioskVisit {
   badge_code: string | null;
   checkout_pin: string | null;
   visitor_name?: string;
+  host_name?: string | null;
+  directorate_name?: string | null;
+  directorate_abbr?: string | null;
+  check_in_at?: string | null;
+  floor?: string | null;
+  wing?: string | null;
 }
 
 export interface KioskOfficer {

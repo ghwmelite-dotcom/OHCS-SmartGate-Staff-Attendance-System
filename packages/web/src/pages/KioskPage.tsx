@@ -12,7 +12,7 @@ import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
 import { OfficerCombobox } from '@/components/checkin/OfficerCombobox';
 import { suggestDirectorate, groupDirectorates } from '@/lib/directorate-routing';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
-import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert } from 'lucide-react';
+import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert, MapPin, CalendarDays, Clock3 } from 'lucide-react';
 
 const visitorSchema = z.object({
   first_name: z.string().min(1, 'First name is required').max(100),
@@ -397,16 +397,19 @@ export function KioskPage() {
         {mode === 'success' && (
           <div className="mt-6">
             {createdVisit?.badge_code ? (
-              <div className="bg-surface rounded-2xl border border-border shadow-sm p-8 text-center space-y-4">
+              <div className="bg-surface rounded-2xl border border-border shadow-sm p-6 text-center space-y-4">
                 <div className="w-14 h-14 bg-success/10 rounded-full flex items-center justify-center mx-auto">
                   <CheckCircle2 className="h-7 w-7 text-success" />
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold text-foreground">You're Checked In</h2>
-                  <p className="text-sm text-muted mt-1">Scan this code with your phone to keep your badge</p>
+                  <p className="text-sm text-muted mt-1">Scan the QR code or photograph your visit details below</p>
                 </div>
                 <KioskBadgeQr badgeCode={createdVisit.badge_code} />
                 <p className="text-sm font-mono font-bold text-accent">{createdVisit.badge_code}</p>
+
+                <VisitInfoCard visit={createdVisit} />
+
                 {createdVisit.checkout_pin && (
                   <div className="border-t border-border pt-4 space-y-1.5">
                     <p className="text-xs text-muted">No phone? Use this PIN to check out at the kiosk</p>
@@ -534,4 +537,55 @@ function KioskBadgeQr({ badgeCode }: { badgeCode: string }) {
     });
   }, [badgeCode]);
   return <canvas ref={canvasRef} className="mx-auto rounded-lg" />;
+}
+
+function VisitInfoCard({ visit }: { visit: import('@/lib/kioskApi').KioskVisit }) {
+  const { host_name, directorate_name, directorate_abbr, check_in_at, floor, wing } = visit;
+
+  const locationParts = [floor, wing ? `${wing} Wing` : null].filter(Boolean);
+  const location = locationParts.length > 0 ? locationParts.join(', ') : null;
+
+  const dirLabel = directorate_abbr && directorate_name
+    ? `${directorate_abbr} — ${directorate_name}`
+    : (directorate_name ?? directorate_abbr ?? null);
+
+  let dateStr: string | null = null;
+  let timeStr: string | null = null;
+  if (check_in_at) {
+    const d = new Date(check_in_at);
+    dateStr = d.toLocaleDateString('en-GH', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    timeStr = d.toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit', hour12: true });
+  }
+
+  type InfoRow = { icon: JSX.Element; label: string; value: string };
+  const rows: InfoRow[] = (
+    [
+      host_name    ? { icon: <User         className="h-3.5 w-3.5" />, label: 'Host',        value: host_name } : null,
+      dirLabel     ? { icon: <Building2    className="h-3.5 w-3.5" />, label: 'Directorate',  value: dirLabel  } : null,
+      location     ? { icon: <MapPin       className="h-3.5 w-3.5" />, label: 'Location',    value: location  } : null,
+      dateStr      ? { icon: <CalendarDays className="h-3.5 w-3.5" />, label: 'Date',        value: dateStr   } : null,
+      timeStr      ? { icon: <Clock3       className="h-3.5 w-3.5" />, label: 'Check In',    value: timeStr   } : null,
+    ] as (InfoRow | null)[]
+  ).filter((r): r is InfoRow => r !== null);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border-2 border-primary/20 bg-white text-left overflow-hidden">
+      <div className="bg-primary/8 px-4 py-2 border-b border-primary/15 flex items-center gap-2">
+        <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+        <p className="text-[11px] font-semibold text-primary tracking-wide uppercase">Where to Go</p>
+        <p className="ml-auto text-[10px] text-muted">📸 Take a photo of this</p>
+      </div>
+      <div className="divide-y divide-border/60">
+        {rows.map(({ icon, label, value }) => (
+          <div key={label} className="flex items-start gap-3 px-4 py-2.5">
+            <span className="mt-0.5 text-muted shrink-0">{icon}</span>
+            <span className="w-20 shrink-0 text-[11px] font-medium text-muted">{label}</span>
+            <span className="text-[13px] font-semibold text-foreground leading-snug">{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
