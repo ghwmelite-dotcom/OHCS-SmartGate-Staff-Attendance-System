@@ -37,8 +37,9 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
       'change of name', 'bank change', 'personal data change', 'update records',
       'salary advance', 'advance', 'payslip', 'pay slip',
       // welfare
-      'welfare', 'staff welfare', 'officer welfare', 'human resources',
-      'hr', 'personnel', 'staff matters', 'staff affairs', 'personal matters',
+      'welfare', 'staff welfare', 'officer welfare',
+      'human resources', 'human resource', 'hr', 'hr officer', 'hr office',
+      'personnel', 'staff matters', 'staff affairs', 'personal matters',
     ],
   },
 
