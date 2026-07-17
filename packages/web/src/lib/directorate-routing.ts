@@ -129,6 +129,7 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
       'car request', 'government vehicle', 'fuel', 'fuel coupon', 'petrol',
       // HR / administration
       'human resources', 'human resource', 'hr', 'hr officer', 'hr office',
+      'admin', 'administration', 'administrative',
       // facilities
       'asset', 'utility', 'catering', 'maintenance', 'facility', 'repair',
       'estate management', 'office maintenance', 'insurance',
