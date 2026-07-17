@@ -38,7 +38,6 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
       'salary advance', 'advance', 'payslip', 'pay slip',
       // welfare
       'welfare', 'staff welfare', 'officer welfare',
-      'human resources', 'human resource', 'hr', 'hr officer', 'hr office',
       'personnel', 'staff matters', 'staff affairs', 'personal matters',
     ],
   },
@@ -128,6 +127,8 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
       // vehicles
       'vehicle', 'transport', 'logistics', 'official vehicle', 'pool car',
       'car request', 'government vehicle', 'fuel', 'fuel coupon', 'petrol',
+      // HR / administration
+      'human resources', 'human resource', 'hr', 'hr officer', 'hr office',
       // facilities
       'asset', 'utility', 'catering', 'maintenance', 'facility', 'repair',
       'estate management', 'office maintenance', 'insurance',
@@ -386,7 +387,7 @@ function keywordMatches(kw: string, text: string): boolean {
 // purpose text, return the directorate with the highest score (min 1).
 // Multi-word phrases naturally outscore ambiguous single-word overlaps.
 export function suggestDirectorate(purpose: string, directorates: DirectorateOption[]): DirectorateOption | null {
-  if (!purpose || purpose.length < 3) return null;
+  if (!purpose || purpose.length < 2) return null;
   const lower = purpose.toLowerCase();
 
   let bestDir: DirectorateOption | null = null;
