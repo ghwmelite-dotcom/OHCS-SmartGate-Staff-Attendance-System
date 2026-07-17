@@ -17,7 +17,9 @@ import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Buildi
 const visitorSchema = z.object({
   first_name: z.string().min(1, 'First name is required').max(100),
   last_name: z.string().min(1, 'Last name is required').max(100),
-  phone: z.string().regex(/^(\+233|0)\d{9}$/, 'A valid Ghana phone is required'),
+  phone: z.string()
+    .transform(v => v.replace(/[\s\-()]/g, ''))
+    .pipe(z.string().min(1, 'Phone number is required').regex(/^(\+233|0)\d{9}$/, 'Enter a valid Ghana number — e.g. 024 123 4567')),
   organisation: z.string().max(200).optional(),
   directorate_id: z.string().min(1, 'Select a directorate'),
   host_name: z.string().min(1, 'Please enter who you are visiting').max(100),
@@ -62,6 +64,9 @@ export function KioskPage() {
     resolver: zodResolver(visitorSchema),
     defaultValues: { first_name: '', last_name: '', phone: '', organisation: '', directorate_id: '', host_name: '', purpose_raw: '' },
   });
+
+  const rawPhone = (form.watch('phone') ?? '').replace(/[\s\-()]/g, '');
+  const isPhoneValid = /^(\+233|0)\d{9}$/.test(rawPhone);
 
   const [directorates, setDirectorates] = useState<KioskDirectorate[]>([]);
   const [officers, setOfficers] = useState<KioskOfficer[]>([]);
@@ -269,7 +274,31 @@ export function KioskPage() {
                 </FieldWrapper>
               </div>
               <FieldWrapper icon={<Phone className="h-4 w-4" />} label="Phone" error={form.formState.errors.phone?.message}>
-                <input {...form.register('phone')} className={fieldCls} placeholder="0241234567" inputMode="tel" />
+                <div className="relative">
+                  <input
+                    {...form.register('phone', {
+                      onChange: e => {
+                        const v = e.target.value.replace(/[^\d+\s\-()]/g, '').slice(0, 16);
+                        if (e.target.value !== v) e.target.value = v;
+                      },
+                    })}
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    maxLength={16}
+                    placeholder="024 123 4567"
+                    className={`${fieldCls} pr-9 transition-colors ${
+                      isPhoneValid
+                        ? 'border-success focus:ring-success/30'
+                        : form.formState.errors.phone
+                        ? 'border-danger focus:ring-danger/20'
+                        : ''
+                    }`}
+                  />
+                  {isPhoneValid && (
+                    <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-success pointer-events-none" />
+                  )}
+                </div>
               </FieldWrapper>
               <FieldWrapper icon={<Briefcase className="h-4 w-4" />} label="Organisation (optional)">
                 <input {...form.register('organisation')} className={fieldCls} />
