@@ -76,7 +76,7 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     room: 'Room 7, 2nd Fl · Deputy: Room 19, 1st Fl',
     keywords: [
       // salary system
-      'salary', 'e-spar', 'espar', 'spar', 'payroll', 'salary not paid',
+      'salary', 'e-spar', 'espar', 'spar', 'salary not paid',
       'salary not updated', 'salary error', 'name on salary', 'update salary',
       'salary issue', 'salary problem', 'e-spar registration', 'spar registration',
       'salary database', 'ghost name', 'payroll system', 'e-pay',
@@ -127,9 +127,9 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
       // vehicles
       'vehicle', 'transport', 'logistics', 'official vehicle', 'pool car',
       'car request', 'government vehicle', 'fuel', 'fuel coupon', 'petrol',
-      // HR / administration
+      // HR / administration / payroll
       'human resources', 'human resource', 'hr', 'hr officer', 'hr office',
-      'admin', 'administration', 'administrative',
+      'admin', 'administration', 'administrative', 'payroll',
       // facilities
       'asset', 'utility', 'catering', 'maintenance', 'facility', 'repair',
       'estate management', 'office maintenance', 'insurance',
