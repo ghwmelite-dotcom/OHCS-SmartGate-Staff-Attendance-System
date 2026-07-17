@@ -3,8 +3,8 @@ import type { Directorate } from '@/lib/api';
 export type DirectorateOption = Pick<Directorate, 'id' | 'name' | 'abbreviation'>;
 
 // Routing rules for the purpose-of-visit suggestion card.
-// Matching: case-insensitive substring. Score = keywords matched; highest wins.
-// Multi-word phrases naturally score higher when both words appear — no special weighting needed.
+// Matching: word-boundary for short keywords (≤5 chars), substring for longer ones.
+// Score = keywords matched; highest wins. Multi-word phrases naturally score higher.
 // Order only matters for ties (put higher-traffic offices first).
 export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string; room: string }> = [
   // ── CMD — career, postings, leave, retirement ─────────────────────────────
@@ -12,12 +12,33 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     abbreviation: 'CMD',
     room: 'Room 3, 2nd Fl · Deputy: Room 34, 1st Fl',
     keywords: [
-      'promotion', 'posting', 'transfer', 'career', 'succession',
-      'occupational health', 'confirmation', 'appointment letter',
+      // postings & transfers
+      'promotion', 'promoted', 'posting', 'posted', 'transfer', 'transferred',
+      'career', 'succession', 'rank', 'grade', 'notch', 'step increment',
+      'job rotation', 'secondment',
+      // appointments & letters
+      'confirmation', 'appointment letter', 'posting letter', 'release letter',
+      'clearance letter', 'first appointment', 'acting appointment',
+      'resume duty', 'return to duty', 'reporting letter',
+      // leave
       'annual leave', 'sick leave', 'leave application', 'leave form',
-      'retirement', 'discipline', 'attestation', 'acting appointment',
-      'secondment', 'clearance letter', 'release letter', 'posting letter',
-      'increment', 'salary increment', 'seniority', 'welfare',
+      'leave balance', 'casual leave', 'maternity leave', 'paternity leave',
+      'compassionate leave', 'emergency leave', 'study leave extension',
+      'unpaid leave', 'leave without pay', 'lwop', 'earned leave',
+      // retirement & exit
+      'retirement', 'retire', 'pension', 'gratuity', 'provident fund',
+      'voluntary retirement', 'early retirement', 'exit benefits',
+      // discipline
+      'discipline', 'disciplinary', 'misconduct', 'awol', 'interdiction',
+      'dismissal', 'warning letter', 'caution letter', 'query letter',
+      'show cause', 'suspension',
+      // pay & personal data
+      'salary increment', 'increment', 'seniority', 'attestation',
+      'change of name', 'bank change', 'personal data change', 'update records',
+      'salary advance', 'advance', 'payslip', 'pay slip',
+      // welfare
+      'welfare', 'staff welfare', 'officer welfare', 'human resources',
+      'hr', 'personnel', 'staff matters', 'staff affairs', 'personal matters',
     ],
   },
 
@@ -26,11 +47,26 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     abbreviation: 'RTDD',
     room: 'Room 11, 2nd Fl · Deputy: Room 9, 2nd Fl',
     keywords: [
-      'recruit', 'recruitment', 'job', 'vacancy', 'apply', 'application',
-      'hiring', 'training', 'workshop', 'study leave', 'scholarship',
-      'capacity building', 'induction', 'gimpa', 'entrance exam',
-      'competitive exam', 'examination', 'interview', 'staff development',
-      'seeking employment', 'employment opportunity', 'new staff',
+      // recruitment
+      'recruit', 'recruitment', 'job', 'vacancy', 'vacancies', 'apply',
+      'application', 'hiring', 'hire', 'employed', 'employment opportunity',
+      'new staff', 'seeking employment', 'job seeker', 'job opening',
+      'fresh graduate', 'graduate', 'new hire', 'filling vacancy',
+      'interview', 'screening',
+      // training
+      'training', 'workshop', 'seminar', 'seminar registration', 'course',
+      'courses', 'programme', 'program', 'enrollment', 'enroll', 'register',
+      'short course', 'online course', 'e-learning', 'capacity building',
+      'staff development', 'skills', 'upskill', 'professional development',
+      'induction', 'orientation', 'study leave', 'scholarship', 'sponsor',
+      'study abroad', 'certification', 'certificate', 'diploma', 'masters',
+      'degree', 'gimpa', 'galop', 'conference', 'learning', 'develop',
+      // exams
+      'entrance exam', 'competitive exam', 'examination', 'aptitude test',
+      'written test', 'practical test', 'exam result', 'entrance test',
+      // attachment / national service
+      'national service', 'nss placement', 'attachment', 'industrial attachment',
+      'internship', 'placement', 'siwes', 'work experience', 'industrial',
     ],
   },
 
@@ -39,11 +75,24 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     abbreviation: 'RSIMD',
     room: 'Room 7, 2nd Fl · Deputy: Room 19, 1st Fl',
     keywords: [
-      'salary', 'e-spar', 'espar', 'spar', 'payroll', 'ict',
-      'it support', 'computer', 'software', 'technology', 'research',
-      'data', 'statistics', 'survey', 'database', 'e-governance',
-      'digital', 'information system', 'information technology',
-      'network', 'system support', 'salary update', 'salary issue',
+      // salary system
+      'salary', 'e-spar', 'espar', 'spar', 'payroll', 'salary not paid',
+      'salary not updated', 'salary error', 'name on salary', 'update salary',
+      'salary issue', 'salary problem', 'e-spar registration', 'spar registration',
+      'salary database', 'ghost name', 'payroll system', 'e-pay',
+      // ICT support
+      'ict', 'it support', 'computer', 'software', 'technology', 'laptop',
+      'printer', 'internet', 'wifi', 'wi-fi', 'network', 'connectivity',
+      'system support', 'technical', 'technical support', 'technical issue',
+      'helpdesk', 'help desk', 'password', 'login issue', 'account access',
+      'system access', 'server', 'email', 'system problem', 'it help',
+      'information technology', 'information system',
+      // data & digital
+      'research', 'data', 'statistics', 'survey', 'database', 'e-governance',
+      'digital', 'e-government', 'digital transformation', 'digital services',
+      'portal access', 'government portal', 'portal',
+      // identity
+      'biometric', 'smart card', 'staff id', 'id card', 'access card',
     ],
   },
 
@@ -52,11 +101,16 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     abbreviation: 'PBMED',
     room: 'Room 5, 2nd Fl · Deputy: Room 31, 1st Fl',
     keywords: [
-      'performance', 'appraisal', 'monitoring', 'evaluation',
-      'service delivery', 'client service', 'development plan',
-      'annual plan', 'strategic plan', 'sector plan', 'kpi', 'target',
-      'output', 'outcome', 'performance review', 'performance management',
-      'performance contract',
+      'performance', 'appraisal', 'appraisal form', 'performance form',
+      'performance review', 'performance management', 'performance contract',
+      'monitoring', 'evaluation', 'assess', 'assessment', 'rating',
+      'service delivery', 'client service', 'citizen', 'citizen satisfaction',
+      'service charter', 'service standard', 'quality assurance',
+      'development plan', 'work plan', 'annual plan', 'strategic plan',
+      'sector plan', 'annual report', 'sector review', 'management review',
+      'kpi', 'target', 'output', 'outcome', 'indicator', 'milestone',
+      'deliverable', 'objectives', 'acar', 'quarterly review',
+      'performance feedback', 'feedback',
     ],
   },
 
@@ -65,10 +119,17 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     abbreviation: 'F&A',
     room: 'Room 10, 2nd Fl · Deputy: Room 35, 1st Fl',
     keywords: [
-      'budget', 'finance', 'financial', 'payment', 'invoice', 'vehicle',
-      'transport', 'logistics', 'asset', 'utility', 'catering',
-      'maintenance', 'facility', 'fuel', 'official vehicle',
-      'repair', 'estate management',
+      // finance
+      'budget', 'finance', 'financial', 'payment', 'invoice', 'cash',
+      'expenditure', 'claim', 'reimbursement', 'per diem', 'subsistence',
+      'dsa', 'allowance', 'duty allowance', 'travel allowance', 'mileage',
+      'mileage claim', 'trip claim', 'official trip', 'in-country travel',
+      // vehicles
+      'vehicle', 'transport', 'logistics', 'official vehicle', 'pool car',
+      'car request', 'government vehicle', 'fuel', 'fuel coupon', 'petrol',
+      // facilities
+      'asset', 'utility', 'catering', 'maintenance', 'facility', 'repair',
+      'estate management', 'office maintenance', 'insurance',
     ],
   },
 
@@ -77,9 +138,12 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     abbreviation: 'CSC',
     room: 'Rooms 24 & 44',
     keywords: [
-      'complaint', 'petition', 'disciplinary', 'civil service council',
+      'complaint', 'complain', 'petition', 'civil service council',
       'appeal', 'misconduct', 'tribunal', 'grievance', 'unfair treatment',
-      'lodge complaint', 'file complaint',
+      'treated unfairly', 'lodge complaint', 'file complaint',
+      'case', 'hearing', 'mediation', 'arbitration', 'dispute',
+      'employment dispute', 'injustice', 'labor case', 'violation',
+      'right', 'rights', 'wrongful', 'unfair', 'unjust',
     ],
   },
 
@@ -90,7 +154,8 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     keywords: [
       'audit', 'fraud', 'internal audit', 'compliance', 'risk',
       'investigation', 'irregularity', 'financial irregularity',
-      'misappropriation', 'embezzlement',
+      'misappropriation', 'embezzlement', 'leakage', 'financial loss',
+      'public funds', 'misuse of funds', 'risk assessment', 'internal control',
     ],
   },
 
@@ -101,7 +166,8 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     keywords: [
       'reform', 'anti-corruption', 'nacap', 'right to information', 'rti',
       'transparency', 'freedom of information', 'accountability',
-      'corruption', 'whistleblower',
+      'corruption', 'whistleblower', 'bribery', 'extortion',
+      'public accountability', 'civil service reform', 'public sector reform',
     ],
   },
 
@@ -110,9 +176,13 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     abbreviation: 'REGISTRY',
     room: 'Room 4, 2nd Floor',
     keywords: [
-      'submit', 'submission', 'drop off', 'dispatch', 'filing',
-      'document', 'file', 'correspondence', 'memo', 'confidential',
-      'registry', 'deliver document', 'drop document',
+      'submit', 'submission', 'drop off', 'drop document', 'hand in',
+      'deliver', 'deliver document', 'deliver letter', 'dispatch',
+      'filing', 'file', 'document', 'correspondence', 'memo',
+      'confidential', 'registry', 'send document', 'send letter',
+      'official document', 'postal', 'courier', 'incoming mail',
+      'outgoing mail', 'mail room', 'bring documents', 'return documents',
+      'signed form', 'signed document', 'submit form', 'submit documents',
     ],
   },
 
@@ -124,6 +194,10 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
       'p registry', 'personal file', 'personnel file', 'staff file',
       'employee file', 'employment history', 'service record',
       'file number', 'staff record', 'personnel record', 'my file',
+      'my records', 'my history', 'check my file', 'see my file',
+      'career history', 'service history', 'employment records',
+      'experience letter', 'years of service', 'length of service',
+      'history of service', 'past postings', 'career record',
     ],
   },
 
@@ -134,7 +208,8 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     keywords: [
       'records unit', 'records office', 'archive', 'archival',
       'retrieve record', 'historical record', 'official record',
-      'old file', 'old record', 'records retrieval',
+      'old file', 'old record', 'records retrieval', 'old documents',
+      'retrieve documents', 'retrieve file', 'official archives',
     ],
   },
 
@@ -145,7 +220,8 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     keywords: [
       'head of service', 'head of civil service', 'hos', 'hcs',
       'head of service secretariat', 'hos secretariat',
-      'head of the civil service',
+      'head of the civil service', 'see the head', 'meet the head',
+      'head\'s office', 'the head',
     ],
   },
 
@@ -156,7 +232,9 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     keywords: [
       'chief director', 'director general', 'executive', 'management meeting',
       'top management', 'official visit', 'protocol', 'head of office',
-      'cd office',
+      'cd office', 'director\'s office', 'chief director\'s office',
+      'see the director', 'meet the director', 'see management',
+      'administration', 'administrative head', 'management',
     ],
   },
 
@@ -165,9 +243,14 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     abbreviation: 'ACCOUNTS',
     room: '',
     keywords: [
-      'voucher', 'cheque', 'check', 'arrears', 'deduction', 'allowance',
-      'overtime', 'salary arrears', 'financial clearance', 'cash',
-      'payment voucher', 'salary voucher', 'accounts',
+      'voucher', 'cheque', 'check', 'arrears', 'deduction', 'salary arrears',
+      'allowance', 'overtime', 'financial clearance', 'payment voucher',
+      'salary voucher', 'accounts', 'ssnit', 'third tier', 'net pay',
+      'gross pay', 'income tax', 'paye', 'tax', 'withholding tax',
+      'bank details', 'bank account', 'salary bank', 'emolument',
+      'consolidated pay', 'salary structure', 'payment slip', 'pay advice',
+      'ippd', 'cagd', 'controller', 'accountant general', 'treasury',
+      'tax relief', 'tax clearance', 'pension deduction', 'financial statement',
     ],
   },
 
@@ -178,7 +261,8 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     keywords: [
       'estate', 'accommodation', 'quarters', 'bungalow', 'housing',
       'property', 'land', 'official residence', 'government bungalow',
-      'staff accommodation',
+      'staff accommodation', 'government house', 'official house',
+      'rent', 'keys', 'room allocation', 'quarter allocation',
     ],
   },
 
@@ -189,7 +273,9 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     keywords: [
       'counseling', 'counselling', 'mental health', 'stress', 'emotional',
       'psychological', 'welfare support', 'personal problem', 'wellbeing',
-      'well-being', 'employee assistance', 'eap',
+      'well-being', 'employee assistance', 'eap', 'anxiety', 'depression',
+      'burnout', 'family issues', 'marital issues', 'personal counseling',
+      'emotional support', 'mental wellness', 'work stress',
     ],
   },
 
@@ -200,7 +286,10 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
     keywords: [
       'procurement', 'tender', 'bid', 'bidding', 'contract', 'purchase',
       'supply', 'vendor', 'supplier', 'goods', 'rfq', 'rfp',
-      'sole source', 'procure', 'acquire goods',
+      'sole source', 'procure', 'acquire goods', 'quotation', 'quote',
+      'supplier registration', 'vendor registration', 'supply goods',
+      'purchase order', 'lpo', 'local purchase order', 'procurement notice',
+      'contract award', 'provide goods', 'service contract', 'outsource',
     ],
   },
 
@@ -223,6 +312,8 @@ export const ROUTING_KEYWORDS: Array<{ keywords: string[]; abbreviation: string;
       'stores', 'stationery', 'office supplies', 'office supply', 'stock',
       'inventory', 'consumables', 'equipment request', 'furniture',
       'office materials', 'store request', 'collect items', 'collect supplies',
+      'collect stationery', 'pick up supplies', 'request equipment',
+      'requisition', 'office items', 'printing paper', 'pen', 'toner',
     ],
   },
 
@@ -276,6 +367,20 @@ export function groupDirectorates<T extends GroupableDir>(
   return result;
 }
 
+// Use word-boundary matching for short keywords (≤5 chars) to avoid false
+// substring hits (e.g. "hr" inside "another", "pay" inside "display").
+// Longer phrases use simple includes — they're specific enough already.
+function keywordMatches(kw: string, text: string): boolean {
+  if (kw.length <= 5) {
+    try {
+      return new RegExp(`\\b${kw}\\b`).test(text);
+    } catch {
+      return text.includes(kw);
+    }
+  }
+  return text.includes(kw);
+}
+
 // Score-based matching: count how many keywords from each rule appear in the
 // purpose text, return the directorate with the highest score (min 1).
 // Multi-word phrases naturally outscore ambiguous single-word overlaps.
@@ -287,7 +392,7 @@ export function suggestDirectorate(purpose: string, directorates: DirectorateOpt
   let bestScore = 0;
 
   for (const rule of ROUTING_KEYWORDS) {
-    const score = rule.keywords.filter((kw) => lower.includes(kw)).length;
+    const score = rule.keywords.filter((kw) => keywordMatches(kw, lower)).length;
     if (score > bestScore) {
       const dir = directorates.find((d) => d.abbreviation === rule.abbreviation);
       if (dir) {
