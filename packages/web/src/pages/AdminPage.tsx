@@ -18,6 +18,7 @@ import {
   Pencil,
   Power,
   KeyRound,
+  Search,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -253,7 +254,19 @@ function UsersTab() {
     },
   });
 
+  const [search, setSearch] = useState('');
+
   const users = data?.data ?? [];
+  const q = search.trim().toLowerCase();
+  const filteredUsers = q
+    ? users.filter(u =>
+        u.name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        (u.staff_id ?? '').toLowerCase().includes(q) ||
+        u.role.toLowerCase().includes(q) ||
+        (u.directorate_abbr ?? '').toLowerCase().includes(q)
+      )
+    : users;
 
   return (
     <div className="space-y-6">
@@ -314,6 +327,27 @@ function UsersTab() {
         />
       )}
 
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted pointer-events-none" />
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name, email, staff ID, role or directorate…"
+          className="w-full h-11 pl-10 pr-4 rounded-xl border border-border bg-surface text-[14px] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted"
+        />
+        {q && (
+          <button
+            onClick={() => setSearch('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+            aria-label="Clear search"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
       {/* Users table */}
       <div className="bg-surface rounded-2xl border border-border shadow-sm overflow-hidden animate-fade-in-up stagger-2">
         <div className="h-[2px]" style={{
@@ -359,7 +393,7 @@ function UsersTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {users.map((user) => {
+                {filteredUsers.map((user) => {
                   const roleCfg = ROLES.find(r => r.value === user.role);
                   return (
                     <tr key={user.id} className="hover:bg-background-warm/50 transition-colors">
@@ -467,8 +501,20 @@ function UsersTab() {
                     </tr>
                   );
                 })}
+                {filteredUsers.length === 0 && !isLoading && (
+                  <tr>
+                    <td colSpan={9} className="px-6 py-10 text-center text-[14px] text-muted">
+                      {q ? `No users match "${search}"` : 'No users yet'}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
+            {q && filteredUsers.length > 0 && (
+              <div className="px-6 py-3 border-t border-border text-[12px] text-muted">
+                Showing {filteredUsers.length} of {users.length} users
+              </div>
+            )}
           </div>
         )}
       </div>
