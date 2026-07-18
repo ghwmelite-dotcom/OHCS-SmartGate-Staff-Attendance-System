@@ -7,7 +7,7 @@ import { hashPin, bumpSessionEpoch } from '../services/auth';
 import { sendWelcomeEmail } from '../services/email';
 import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
 
-const AUDITED_USER_FIELDS = ['name', 'email', 'staff_id', 'role', 'grade', 'directorate_id', 'is_active'];
+const AUDITED_USER_FIELDS = ['name', 'email', 'staff_id', 'role', 'grade', 'directorate_id', 'is_active', 'phone'];
 
 export const userRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -22,7 +22,7 @@ userRoutes.get('/', async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
 
   const results = await c.env.DB.prepare(
-    `SELECT u.id, u.name, u.email, u.staff_id, u.role, u.grade, u.is_active, u.last_login_at, u.created_at,
+    `SELECT u.id, u.name, u.email, u.staff_id, u.phone, u.role, u.grade, u.is_active, u.last_login_at, u.created_at,
             u.user_type, u.nss_number, u.nss_start_date, u.nss_end_date,
             d.abbreviation as directorate_abbr
      FROM users u LEFT JOIN directorates d ON u.directorate_id = d.id
@@ -30,6 +30,17 @@ userRoutes.get('/', async (c) => {
   ).all();
 
   return success(c, results.results ?? []);
+});
+
+// Count officers who have a staff_id but no matching Staff Attendance account.
+userRoutes.get('/unprovisioned-count', async (c) => {
+  if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(*) as count FROM officers o
+     WHERE o.staff_id IS NOT NULL AND o.staff_id != ''
+       AND NOT EXISTS (SELECT 1 FROM users u WHERE u.staff_id = o.staff_id)`
+  ).first<{ count: number }>();
+  return success(c, { count: row?.count ?? 0 });
 });
 
 // Get single user
@@ -55,6 +66,7 @@ const createUserSchema = z.object({
   pin: z.string().length(4).regex(/^\d{4}$/, 'PIN must be 4 digits'),
   role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']),
   grade: z.string().max(100).optional().or(z.literal('')),
+  phone: z.string().max(20).optional().or(z.literal('')),
   directorate_code: z.string().max(20).optional().or(z.literal('')),
 });
 
@@ -82,8 +94,8 @@ userRoutes.post('/', zValidator('json', createUserSchema), async (c) => {
   }
 
   await c.env.DB.prepare(
-    `INSERT INTO users (id, name, email, staff_id, pin_hash, role, grade, directorate_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(id, body.name, body.email, body.staff_id.toUpperCase(), pinHash, body.role, body.grade || null, directorateId).run();
+    `INSERT INTO users (id, name, email, staff_id, pin_hash, role, grade, directorate_id, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(id, body.name, body.email, body.staff_id.toUpperCase(), pinHash, body.role, body.grade || null, directorateId, body.phone || null).run();
 
   const user = await c.env.DB.prepare(
     `SELECT u.id, u.name, u.email, u.staff_id, u.role, u.grade, u.is_active, u.created_at,
@@ -118,6 +130,7 @@ const updateUserSchema = z.object({
   pin: z.string().length(4).regex(/^\d{4}$/).optional(),
   role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']).optional(),
   grade: z.string().max(100).optional().or(z.literal('')),
+  phone: z.string().max(20).optional().or(z.literal('')),
   directorate_code: z.string().max(20).optional().or(z.literal('')),
   is_active: z.number().min(0).max(1).optional(),
 });
@@ -151,6 +164,7 @@ userRoutes.put('/:id', zValidator('json', updateUserSchema), async (c) => {
   if (body.staff_id !== undefined) { fields.push('staff_id = ?'); values.push(body.staff_id.toUpperCase()); }
   if (body.role !== undefined) { fields.push('role = ?'); values.push(body.role); }
   if (body.grade !== undefined) { fields.push('grade = ?'); values.push(body.grade || null); }
+  if (body.phone !== undefined) { fields.push('phone = ?'); values.push(body.phone || null); }
   if (body.directorate_code !== undefined) {
     if (body.directorate_code) {
       const dir = await c.env.DB.prepare('SELECT id FROM directorates WHERE abbreviation = ?')
@@ -212,12 +226,12 @@ userRoutes.post('/provision-from-officers', async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
 
   const officers = await c.env.DB.prepare(
-    `SELECT o.id, o.name, o.email, o.staff_id, o.directorate_id
+    `SELECT o.id, o.name, o.email, o.staff_id, o.phone, o.directorate_id
      FROM officers o
      WHERE o.staff_id IS NOT NULL AND o.staff_id != ''
        AND NOT EXISTS (SELECT 1 FROM users u WHERE u.staff_id = o.staff_id)
      ORDER BY o.name`
-  ).all<{ id: string; name: string; email: string | null; staff_id: string; directorate_id: string }>();
+  ).all<{ id: string; name: string; email: string | null; staff_id: string; phone: string | null; directorate_id: string }>();
 
   const rows = officers.results ?? [];
   let provisioned = 0;
@@ -238,9 +252,9 @@ userRoutes.post('/provision-from-officers', async (c) => {
     }
 
     await c.env.DB.prepare(
-      `INSERT INTO users (id, name, email, staff_id, pin_hash, role, directorate_id)
-       VALUES (?, ?, ?, ?, ?, 'staff', ?)`
-    ).bind(userId, officer.name, userEmail, staffId, pinHash, officer.directorate_id).run();
+      `INSERT INTO users (id, name, email, staff_id, pin_hash, role, directorate_id, phone)
+       VALUES (?, ?, ?, ?, ?, 'staff', ?, ?)`
+    ).bind(userId, officer.name, userEmail, staffId, pinHash, officer.directorate_id, officer.phone ?? null).run();
 
     if (officer.email) {
       c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
