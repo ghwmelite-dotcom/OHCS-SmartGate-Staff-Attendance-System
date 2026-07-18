@@ -47,6 +47,7 @@ import storesOfficers from './migration-stores-officers.sql';
 import officerStaffId from './migration-officer-staff-id.sql';
 import usersPhone from './migration-users-phone.sql';
 import officersStaffIdBackfill from './migration-officers-staff-id-backfill.sql';
+import migrationAppointments from './migration-appointments.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -98,6 +99,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-officer-staff-id.sql', sql: officerStaffId },
   { filename: 'migration-users-phone.sql', sql: usersPhone },
   { filename: 'migration-officers-staff-id-backfill.sql', sql: officersStaffIdBackfill },
+  { filename: 'migration-appointments.sql', sql: migrationAppointments },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {
