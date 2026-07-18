@@ -30,9 +30,10 @@ assistantRoutes.post('/chat', zValidator('json', chatSchema), async (c) => {
   if (!rl.allowed) return error(c, 'RATE_LIMITED', 'Too many chat requests. Slow down a moment.', 429);
 
   const { messages } = c.req.valid('json');
+  const { role } = c.get('session');
 
   try {
-    const reply = await chat(messages, c.env);
+    const reply = await chat(messages, c.env, role);
     return success(c, { reply });
   } catch (err) {
     console.error('[Assistant] Error:', err);
@@ -45,9 +46,10 @@ assistantRoutes.post('/chat/stream', zValidator('json', chatSchema), async (c) =
   if (!rl.allowed) return error(c, 'RATE_LIMITED', 'Too many chat requests. Slow down a moment.', 429);
 
   const { messages } = c.req.valid('json');
+  const { role } = c.get('session');
 
   try {
-    const stream = await chatStream(messages, c.env);
+    const stream = await chatStream(messages, c.env, role);
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',

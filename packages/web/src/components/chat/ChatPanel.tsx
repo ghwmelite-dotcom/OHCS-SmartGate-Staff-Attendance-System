@@ -1,10 +1,27 @@
 import { useState, useRef, useEffect } from 'react';
 import { useChatStore } from '@/stores/chat';
+import { useAuthStore } from '@/stores/auth';
 import { cn } from '@/lib/utils';
-import { Send, Bot, User } from 'lucide-react';
+import { Send, Bot, User, BarChart2 } from 'lucide-react';
+
+const RECEPTIONIST_SUGGESTIONS = [
+  '"Which directorate handles pensions?"',
+  '"Is Mr. Mensah available?"',
+  '"How many visitors today?"',
+];
+
+const ANALYTICS_SUGGESTIONS = [
+  '"What\'s today\'s attendance rate?"',
+  '"Which directorate had the most visitors this month?"',
+  '"Who hasn\'t clocked in yet today?"',
+  '"Show me visit trends for the last 30 days"',
+];
 
 export function ChatPanel() {
   const { messages, isLoading, sendMessage } = useChatStore();
+  const user = useAuthStore((s) => s.user);
+  const isAnalytics = user?.role === 'superadmin' || user?.role === 'admin';
+  const suggestions = isAnalytics ? ANALYTICS_SUGGESTIONS : RECEPTIONIST_SUGGESTIONS;
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -34,12 +51,18 @@ export function ChatPanel() {
         <div className="w-9 h-9 rounded-xl overflow-hidden ring-1 ring-accent/30">
           <img src="/ohcs-logo.jpg" alt="" className="w-full h-full object-cover" />
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <h3 className="text-sm font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>
             OHCS <span style={{ color: '#D4A017' }}>VMS</span> Assistant
           </h3>
           <p className="text-[10px] text-accent/60 tracking-wide">Powered by AI</p>
         </div>
+        {isAnalytics && (
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-accent/15 border border-accent/25">
+            <BarChart2 className="h-3 w-3 text-accent" style={{ color: '#D4A017' }} />
+            <span className="text-[10px] font-semibold tracking-wide" style={{ color: '#D4A017' }}>Analytics</span>
+          </div>
+        )}
       </div>
       <div className="h-[2px]" style={{
         background: 'linear-gradient(90deg, #D4A017, #F5D76E, #D4A017)',
@@ -48,17 +71,23 @@ export function ChatPanel() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-background-warm">
         {messages.length === 0 && (
-          <div className="text-center py-8">
+          <div className="text-center py-6">
             <div className="w-12 h-12 rounded-xl bg-primary/8 flex items-center justify-center mx-auto mb-3">
               <Bot className="h-5 w-5 text-primary" />
             </div>
             <p className="text-sm text-foreground font-medium" style={{ fontFamily: 'var(--font-display)' }}>
-              How can I help?
+              {isAnalytics ? 'What would you like to analyse?' : 'How can I help?'}
             </p>
-            <div className="mt-3 space-y-1.5 text-[11px] text-muted">
-              <p>"Which directorate handles pensions?"</p>
-              <p>"Is Mr. Mensah available?"</p>
-              <p>"How many visitors today?"</p>
+            <div className="mt-3 space-y-1.5">
+              {suggestions.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => sendMessage(s.replace(/^"|"$/g, ''))}
+                  className="block w-full text-left px-3 py-1.5 rounded-lg text-[11px] text-muted hover:text-foreground hover:bg-surface transition-all"
+                >
+                  {s}
+                </button>
+              ))}
             </div>
           </div>
         )}
