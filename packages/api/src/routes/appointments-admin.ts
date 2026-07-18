@@ -186,23 +186,23 @@ appointmentsAdminRoutes.patch(
       } catch { /* non-fatal */ }
     }
 
-    // Notify approvers via Telegram
-    const approversWithTg = await c.env.DB.prepare(
-      `SELECT u.telegram_chat_id
-       FROM appointment_approvers aa
-       JOIN users u ON u.id = aa.user_id
-       WHERE aa.officer_id = ? AND u.telegram_chat_id IS NOT NULL`
-    ).bind(appt.officer_id).all<{ telegram_chat_id: string }>();
+    // Notify approvers via Telegram — non-fatal
+    try {
+      const approversWithTg = await c.env.DB.prepare(
+        `SELECT u.telegram_chat_id
+         FROM appointment_approvers aa
+         JOIN users u ON u.id = aa.user_id
+         WHERE aa.officer_id = ? AND u.telegram_chat_id IS NOT NULL`
+      ).bind(appt.officer_id).all<{ telegram_chat_id: string }>();
 
-    for (const approver of approversWithTg.results ?? []) {
-      try {
+      for (const approver of approversWithTg.results ?? []) {
         await sendTelegramMessage({
           chatId: approver.telegram_chat_id,
           text: confirmText,
           token: c.env.TELEGRAM_BOT_TOKEN,
-        });
-      } catch { /* non-fatal */ }
-    }
+        }).catch(() => {});
+      }
+    } catch { /* non-fatal */ }
 
     return success(c, { ok: true });
   },
