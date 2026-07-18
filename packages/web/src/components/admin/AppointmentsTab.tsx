@@ -955,7 +955,7 @@ function SetupView() {
     const t = (o.title ?? '').trim();
     return (
       /^(chief\s+)?director\b/i.test(t) ||
-      /^head\s+of\s+(service|civil)/i.test(t)
+      /^head\s+of\b/i.test(t)
     );
   });
 
