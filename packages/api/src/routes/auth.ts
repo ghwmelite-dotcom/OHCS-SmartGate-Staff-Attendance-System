@@ -175,6 +175,81 @@ authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
   });
 });
 
+const profileUpdateSchema = z
+  .object({
+    phone: z.string().max(20).trim().optional().or(z.literal('')),
+    email: z.string().email().max(255).toLowerCase().trim().optional(),
+    current_pin: z.string().regex(/^\d{4,6}$/).optional(),
+  })
+  .refine(
+    (v) => !v.email || !!v.current_pin,
+    { message: 'current_pin is required when changing email', path: ['current_pin'] }
+  );
+
+authRoutes.patch('/profile', zValidator('json', profileUpdateSchema), async (c) => {
+  const sessionId = readSessionId(c);
+  if (!sessionId) return error(c, 'UNAUTHORIZED', 'Not authenticated', 401);
+  const session = await getSession(sessionId, c.env);
+  if (!session) return error(c, 'UNAUTHORIZED', 'Session expired', 401);
+
+  const body = c.req.valid('json');
+  const userId = session.userId;
+
+  if (body.email !== undefined) {
+    const lock = await getPinLock(c.env, userId);
+    if (lock.locked) {
+      c.header('Retry-After', String(lock.retryAfter));
+      return error(c, 'ACCOUNT_LOCKED', 'Too many failed attempts. Temporarily locked.', 429);
+    }
+    const user = await c.env.DB.prepare('SELECT pin_hash FROM users WHERE id = ?')
+      .bind(userId).first<{ pin_hash: string | null }>();
+    if (!user?.pin_hash) return error(c, 'NO_PIN', 'No PIN set for this account', 400);
+    const valid = await verifyPin(body.current_pin!, user.pin_hash);
+    if (!valid) {
+      await recordPinFailure(c.env, userId);
+      return error(c, 'WRONG_PIN', 'Current PIN is incorrect', 401);
+    }
+    await clearPinLock(c.env, userId);
+  }
+
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if (body.phone !== undefined) {
+    fields.push('phone = ?');
+    values.push(body.phone || null);
+  }
+  if (body.email !== undefined) {
+    const clash = await c.env.DB.prepare('SELECT id FROM users WHERE email = ? AND id != ?')
+      .bind(body.email, userId).first();
+    if (clash) return error(c, 'DUPLICATE', 'That email is already in use', 409);
+    fields.push('email = ?');
+    values.push(body.email);
+  }
+
+  if (fields.length === 0) return error(c, 'NO_CHANGES', 'Nothing to update', 400);
+
+  fields.push("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')");
+  values.push(userId);
+  await c.env.DB.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
+
+  if (body.email !== undefined) {
+    await bumpSessionEpoch(c.env, userId);
+    await deleteSession(sessionId, c.env);
+    const row = await c.env.DB.prepare('SELECT session_epoch FROM users WHERE id = ?')
+      .bind(userId).first<{ session_epoch: number }>();
+    const epoch = row?.session_epoch ?? 0;
+    const { sessionId: newSid, ttl } = await createSession(userId, body.email, session.role, session.name, c.env, false, epoch);
+    setCookie(c, 'session_id', newSid, sessionCookieOptions(c.env, ttl));
+  }
+
+  const updated = await c.env.DB.prepare(
+    'SELECT id, name, email, staff_id, phone, role, pin_acknowledged FROM users WHERE id = ?'
+  ).bind(userId).first();
+
+  return success(c, { user: updated });
+});
+
 authRoutes.post('/logout', async (c) => {
   const sessionId = readSessionId(c);
   if (sessionId) {
@@ -236,10 +311,10 @@ authRoutes.get('/me', async (c) => {
   // Read name/email/role fresh from DB so edits made in the admin portal
   // propagate without requiring the user to log out and back in.
   const row = await c.env.DB.prepare(
-    'SELECT name, email, role, pin_acknowledged, is_active FROM users WHERE id = ?'
+    'SELECT name, email, staff_id, phone, role, pin_acknowledged, is_active FROM users WHERE id = ?'
   )
     .bind(session.userId)
-    .first<{ name: string; email: string; role: string; pin_acknowledged: number; is_active: number }>();
+    .first<{ name: string; email: string; staff_id: string | null; phone: string | null; role: string; pin_acknowledged: number; is_active: number }>();
 
   if (!row || row.is_active !== 1) {
     return error(c, 'UNAUTHORIZED', 'Account disabled or deleted', 401);
@@ -250,6 +325,8 @@ authRoutes.get('/me', async (c) => {
       id: session.userId,
       name: row.name,
       email: row.email,
+      staff_id: row.staff_id,
+      phone: row.phone,
       role: row.role,
       pin_acknowledged: row.pin_acknowledged === 1,
     },
