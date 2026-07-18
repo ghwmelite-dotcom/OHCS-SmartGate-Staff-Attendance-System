@@ -91,6 +91,8 @@ interface AppointmentWithOfficer extends AppointmentRow {
   officer_title: string | null;
   officer_telegram_chat_id: string | null;
   directorate_name: string;
+  directorate_floor: string | null;
+  directorate_wing: string | null;
 }
 
 // ─── Route: GET /officers ────────────────────────────────────────────────────
@@ -101,7 +103,8 @@ appointmentsPublicRoutes.get('/officers', async (c) => {
             bo.slot_start_time, bo.slot_end_time,
             bo.advance_days_min, bo.advance_days_max,
             o.name as officer_name, o.title as officer_title,
-            d.name as directorate_name
+            d.name as directorate_name,
+            d.floor as directorate_floor, d.wing as directorate_wing
      FROM bookable_officers bo
      JOIN officers o ON o.id = bo.officer_id
      JOIN directorates d ON d.id = o.directorate_id
@@ -312,7 +315,8 @@ appointmentsPublicRoutes.get('/ref/:code', async (c) => {
 
   const appointment = await c.env.DB.prepare(
     `SELECT a.*, o.name as officer_name, o.title as officer_title,
-            d.name as directorate_name
+            d.name as directorate_name,
+            d.floor as directorate_floor, d.wing as directorate_wing
      FROM appointments a
      JOIN officers o ON o.id = a.officer_id
      JOIN directorates d ON d.id = o.directorate_id

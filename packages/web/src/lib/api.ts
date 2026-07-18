@@ -185,6 +185,7 @@ export interface UpsertBookableOfficer {
 export interface PublicBookableOfficer {
   bookable_id: string; officer_id: string; officer_name: string;
   officer_title?: string; directorate_name: string;
+  directorate_floor?: string | null; directorate_wing?: string | null;
   slot_duration_mins: number; slot_start_time: string; slot_end_time: string;
   advance_days_min: number; advance_days_max: number;
 }

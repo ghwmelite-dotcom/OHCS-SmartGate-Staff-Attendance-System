@@ -12,6 +12,8 @@ interface BookableOfficer {
   officer_name: string;
   officer_title?: string;
   directorate_name: string;
+  directorate_floor?: string | null;
+  directorate_wing?: string | null;
   slot_duration_mins: number;
   slot_start_time: string;
   slot_end_time: string;
@@ -34,6 +36,8 @@ interface BookingSuccess {
   reference_code: string;
   officer_name: string;
   directorate_name: string;
+  directorate_floor?: string | null;
+  directorate_wing?: string | null;
   appointment_date: string;
   time_slot: string;
 }
@@ -249,6 +253,8 @@ export function BookingPage() {
         reference_code: refCode,
         officer_name: booking.officer.officer_name,
         directorate_name: booking.officer.directorate_name,
+        directorate_floor: booking.officer.directorate_floor,
+        directorate_wing: booking.officer.directorate_wing,
         appointment_date: booking.date,
         time_slot: booking.timeSlot,
       });
@@ -446,6 +452,11 @@ function Step1({
                       <p className="font-semibold text-sm text-gray-900">{o.officer_name}</p>
                       {o.officer_title && <p className="text-xs text-gray-500">{o.officer_title}</p>}
                       <p className="text-xs mt-0.5" style={{ color: '#1A4D2E' }}>{o.directorate_name}</p>
+                      {(o.directorate_floor || o.directorate_wing) && (
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {[o.directorate_floor, o.directorate_wing ? `${o.directorate_wing} Wing` : null].filter(Boolean).join(', ')}
+                        </p>
+                      )}
                     </div>
                     {isSelected && (
                       <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: '#1A4D2E' }}>
@@ -715,6 +726,11 @@ function Step4({
           <p className="font-semibold text-sm text-gray-900">{booking.officer.officer_name}</p>
           {booking.officer.officer_title && <p className="text-xs text-gray-500">{booking.officer.officer_title}</p>}
           <p className="text-xs mt-0.5" style={{ color: '#1A4D2E' }}>{booking.officer.directorate_name}</p>
+          {(booking.officer.directorate_floor || booking.officer.directorate_wing) && (
+            <p className="text-xs text-gray-400 mt-0.5">
+              {[booking.officer.directorate_floor, booking.officer.directorate_wing ? `${booking.officer.directorate_wing} Wing` : null].filter(Boolean).join(', ')}
+            </p>
+          )}
         </div>
 
         {/* Date & Time */}
@@ -824,6 +840,11 @@ function SuccessScreen({
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-0.5">Officer</p>
           <p className="text-sm font-semibold text-gray-900">{success.officer_name}</p>
           <p className="text-xs" style={{ color: '#1A4D2E' }}>{success.directorate_name}</p>
+          {(success.directorate_floor || success.directorate_wing) && (
+            <p className="text-xs text-gray-400 mt-0.5">
+              {[success.directorate_floor, success.directorate_wing ? `${success.directorate_wing} Wing` : null].filter(Boolean).join(', ')}
+            </p>
+          )}
         </div>
         <div className="px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-0.5">When</p>

@@ -34,6 +34,8 @@ interface AppointmentLookup {
   officer_name: string;
   officer_title?: string;
   directorate_name: string;
+  directorate_floor?: string | null;
+  directorate_wing?: string | null;
   visitor_name: string;
   visitor_phone: string;
   appointment_date: string;
@@ -680,6 +682,15 @@ export function KioskPage() {
                   <span className="w-24 shrink-0 text-[11px] font-medium text-muted">Directorate</span>
                   <span className="text-[13px] font-semibold text-foreground leading-snug">{apptData.directorate_name}</span>
                 </div>
+                {(apptData.directorate_floor || apptData.directorate_wing) && (
+                  <div className="flex items-start gap-3 px-4 py-2.5">
+                    <span className="mt-0.5 text-muted shrink-0"><MapPin className="h-3.5 w-3.5" /></span>
+                    <span className="w-24 shrink-0 text-[11px] font-medium text-muted">Location</span>
+                    <span className="text-[13px] font-semibold text-foreground leading-snug">
+                      {[apptData.directorate_floor, apptData.directorate_wing ? `${apptData.directorate_wing} Wing` : null].filter(Boolean).join(', ')}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-start gap-3 px-4 py-2.5">
                   <span className="mt-0.5 text-muted shrink-0"><CalendarDays className="h-3.5 w-3.5" /></span>
                   <span className="w-24 shrink-0 text-[11px] font-medium text-muted">Date</span>
@@ -810,7 +821,12 @@ function AppointmentDoneScreen({ apptData, onReset }: { apptData: AppointmentLoo
         <h2 className="text-xl font-bold text-foreground">Welcome!</h2>
         <p className="text-sm text-muted mt-1">
           Your arrival has been confirmed. Please proceed to the{' '}
-          <span className="font-semibold text-foreground">{apptData.directorate_name}</span> office.
+          <span className="font-semibold text-foreground">{apptData.directorate_name}</span> office
+          {(apptData.directorate_floor || apptData.directorate_wing) && (
+            <> — <span className="font-semibold text-foreground">
+              {[apptData.directorate_floor, apptData.directorate_wing ? `${apptData.directorate_wing} Wing` : null].filter(Boolean).join(', ')}
+            </span></>
+          )}.
         </p>
       </div>
       <p className="text-xs text-muted">A member of staff will attend to you shortly.</p>
