@@ -59,7 +59,7 @@ def main():
         col_b = row[1]   # Staff No.
         col_c = row[2]   # First Name
         col_d = row[3]   # Surname
-        col_r = row[17]  # Phone No.
+        col_r = row[17] if len(row) > 17 else None  # Phone No.
 
         if not is_numeric_staff_id(col_b):
             continue
