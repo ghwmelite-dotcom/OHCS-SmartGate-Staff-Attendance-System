@@ -599,11 +599,11 @@ export function KioskPage() {
                         setApptError('');
                         try {
                           const res = await fetch(`/api/appointments/public/ref/${apptRef.trim()}`);
-                          const data = await res.json() as { appointment?: AppointmentLookup; message?: string };
+                          const json = await res.json() as { data?: { appointment: AppointmentLookup }; error?: { message?: string } };
                           if (!res.ok) {
-                            setApptError(data.message ?? 'Appointment not found.');
+                            setApptError(json.error?.message ?? 'Appointment not found.');
                           } else {
-                            setApptData(data.appointment ?? null);
+                            setApptData(json.data?.appointment ?? null);
                             setMode('appointment-confirm');
                           }
                         } catch {
@@ -628,11 +628,11 @@ export function KioskPage() {
                 setApptError('');
                 try {
                   const res = await fetch(`/api/appointments/public/ref/${apptRef.trim()}`);
-                  const data = await res.json() as { appointment?: AppointmentLookup; message?: string };
+                  const json = await res.json() as { data?: { appointment: AppointmentLookup }; error?: { message?: string } };
                   if (!res.ok) {
-                    setApptError(data.message ?? 'Appointment not found.');
+                    setApptError(json.error?.message ?? 'Appointment not found.');
                   } else {
-                    setApptData(data.appointment ?? null);
+                    setApptData(json.data?.appointment ?? null);
                     setMode('appointment-confirm');
                   }
                 } catch {
@@ -731,12 +731,12 @@ export function KioskPage() {
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ reference_code: apptData.reference_code }),
                     });
-                    const data = await res.json() as { code?: string; message?: string };
+                    const json = await res.json() as { data?: unknown; error?: { code?: string; message?: string } };
                     if (!res.ok) {
-                      if (data.code === 'APPT_WRONG_DATE') {
+                      if (json.error?.code === 'APPT_WRONG_DATE') {
                         setApptError('Your appointment is not scheduled for today.');
                       } else {
-                        setApptError(data.message ?? 'Could not confirm arrival. Please see reception.');
+                        setApptError(json.error?.message ?? 'Could not confirm arrival. Please see reception.');
                       }
                     } else {
                       setMode('appointment-done');

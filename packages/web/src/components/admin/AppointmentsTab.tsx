@@ -449,6 +449,17 @@ function AppointmentCard({
         )}
       </div>
 
+      {/* Timestamps */}
+      <div className="flex items-center gap-4 text-[11px] text-muted flex-wrap">
+        <span>Booked {new Date(appt.created_at).toLocaleString('en-GH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+        {appt.approved_at && (
+          <>
+            <span className="text-border">·</span>
+            <span>{appt.status === 'declined' ? 'Declined' : 'Confirmed'} {new Date(appt.approved_at).toLocaleString('en-GH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+          </>
+        )}
+      </div>
+
       {/* Actions */}
       {appt.status === 'pending' && (
         <div className="flex items-center gap-2 pt-1">

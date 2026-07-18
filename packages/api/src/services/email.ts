@@ -64,6 +64,150 @@ export async function sendWelcomeEmail(env: Env, input: WelcomeEmailInput): Prom
   }
 }
 
+// ─── Appointment status emails ────────────────────────────────────────────────
+
+export interface AppointmentEmailInput {
+  visitorName: string;
+  visitorEmail: string;
+  officerName: string;
+  officerTitle: string | null;
+  directorateName: string;
+  appointmentDate: string;
+  timeSlot: string;
+  referenceCode: string;
+  declineReason?: string;
+}
+
+export async function sendAppointmentConfirmedEmail(env: Env, input: AppointmentEmailInput): Promise<boolean> {
+  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return false;
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: env.EMAIL_FROM,
+        to: [input.visitorEmail],
+        subject: `Appointment confirmed — ${input.appointmentDate} at ${input.timeSlot}`,
+        html: appointmentConfirmedHtml(input),
+        text: appointmentConfirmedText(input),
+      }),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+export async function sendAppointmentDeclinedEmail(env: Env, input: AppointmentEmailInput): Promise<boolean> {
+  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return false;
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: env.EMAIL_FROM,
+        to: [input.visitorEmail],
+        subject: `Appointment request update — Ref ${input.referenceCode}`,
+        html: appointmentDeclinedHtml(input),
+        text: appointmentDeclinedText(input),
+      }),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+function appointmentConfirmedText(i: AppointmentEmailInput): string {
+  return [
+    `Hello ${i.visitorName},`,
+    '',
+    `Your appointment at the Office of the Head of the Civil Service has been confirmed.`,
+    '',
+    `Details:`,
+    `  Officer : ${i.officerName}${i.officerTitle ? ` (${i.officerTitle})` : ''}`,
+    `  Office  : ${i.directorateName}`,
+    `  Date    : ${i.appointmentDate}`,
+    `  Time    : ${i.timeSlot}`,
+    `  Ref     : ${i.referenceCode}`,
+    '',
+    `Please arrive a few minutes early and present your reference code at the reception kiosk.`,
+    '',
+    `— Office of the Head of the Civil Service`,
+  ].join('\n');
+}
+
+function appointmentDeclinedText(i: AppointmentEmailInput): string {
+  return [
+    `Hello ${i.visitorName},`,
+    '',
+    `Unfortunately, your appointment request (Ref: ${i.referenceCode}) could not be approved.`,
+    ...(i.declineReason ? [``, `Reason: ${i.declineReason}`] : []),
+    '',
+    `Please contact the office to arrange an alternative time.`,
+    '',
+    `— Office of the Head of the Civil Service`,
+  ].join('\n');
+}
+
+function appointmentConfirmedHtml(i: AppointmentEmailInput): string {
+  const name = escapeHtml(i.visitorName);
+  const officer = escapeHtml(`${i.officerName}${i.officerTitle ? ` — ${i.officerTitle}` : ''}`);
+  const dir = escapeHtml(i.directorateName);
+  const ref = escapeHtml(i.referenceCode);
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;background:#F8F9FA;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
+  <div style="max-width:520px;margin:0 auto;padding:24px 16px;">
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+      <div style="background:#1A4D2E;color:#fff;padding:24px;text-align:center;">
+        <h1 style="margin:0;font-size:16px;font-weight:700;">Appointment Confirmed</h1>
+        <p style="margin:4px 0 0;font-size:12px;opacity:.75;">Office of the Head of the Civil Service, Ghana</p>
+      </div>
+      <div style="height:3px;background:linear-gradient(90deg,#CE1126 33%,#FCD116 33% 66%,#006B3F 66%);"></div>
+      <div style="padding:28px 24px;">
+        <p style="margin:0 0 18px;font-size:15px;">Hello <strong>${name}</strong>,</p>
+        <p style="margin:0 0 20px;font-size:14px;color:#374151;">Your appointment has been <strong style="color:#1A4D2E;">confirmed</strong>. Please find your details below:</p>
+        <table role="presentation" style="width:100%;border-collapse:collapse;background:#F0FDF4;border-radius:12px;margin:0 0 20px;border:1px solid #BBF7D0;">
+          <tr><td style="padding:12px 16px 4px;font-size:11px;color:#166534;text-transform:uppercase;letter-spacing:.5px;">Officer</td></tr>
+          <tr><td style="padding:0 16px 10px;font-size:15px;font-weight:600;color:#14532D;">${officer}</td></tr>
+          <tr><td style="padding:0 16px 4px;font-size:11px;color:#166534;text-transform:uppercase;letter-spacing:.5px;border-top:1px solid #BBF7D0;">Office / Directorate</td></tr>
+          <tr><td style="padding:0 16px 10px;font-size:14px;color:#14532D;">${dir}</td></tr>
+          <tr><td style="padding:0 16px 4px;font-size:11px;color:#166534;text-transform:uppercase;letter-spacing:.5px;border-top:1px solid #BBF7D0;">Date &amp; Time</td></tr>
+          <tr><td style="padding:0 16px 10px;font-size:15px;font-weight:600;color:#14532D;">${escapeHtml(i.appointmentDate)} at ${escapeHtml(i.timeSlot)}</td></tr>
+          <tr><td style="padding:0 16px 4px;font-size:11px;color:#166534;text-transform:uppercase;letter-spacing:.5px;border-top:1px solid #BBF7D0;">Reference Code</td></tr>
+          <tr><td style="padding:0 16px 14px;font-size:22px;font-weight:700;font-family:monospace;color:#14532D;letter-spacing:4px;">${ref}</td></tr>
+        </table>
+        <p style="margin:0 0 6px;font-size:13px;color:#6B7280;">Please arrive a few minutes early and present your reference code at the reception kiosk.</p>
+      </div>
+      <div style="padding:14px 24px;border-top:1px solid #E5E7EB;text-align:center;font-size:11px;color:#9CA3AF;">Office of the Head of the Civil Service</div>
+    </div>
+  </div>
+</body></html>`;
+}
+
+function appointmentDeclinedHtml(i: AppointmentEmailInput): string {
+  const name = escapeHtml(i.visitorName);
+  const ref = escapeHtml(i.referenceCode);
+  const reason = i.declineReason ? `<p style="margin:0 0 18px;font-size:14px;color:#374151;background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:12px 16px;"><strong>Reason:</strong> ${escapeHtml(i.declineReason)}</p>` : '';
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;background:#F8F9FA;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
+  <div style="max-width:520px;margin:0 auto;padding:24px 16px;">
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+      <div style="background:#7F1D1D;color:#fff;padding:24px;text-align:center;">
+        <h1 style="margin:0;font-size:16px;font-weight:700;">Appointment Not Approved</h1>
+        <p style="margin:4px 0 0;font-size:12px;opacity:.75;">Office of the Head of the Civil Service, Ghana</p>
+      </div>
+      <div style="height:3px;background:linear-gradient(90deg,#CE1126 33%,#FCD116 33% 66%,#006B3F 66%);"></div>
+      <div style="padding:28px 24px;">
+        <p style="margin:0 0 18px;font-size:15px;">Hello <strong>${name}</strong>,</p>
+        <p style="margin:0 0 18px;font-size:14px;color:#374151;">Unfortunately your appointment request (Ref: <strong style="font-family:monospace;">${ref}</strong>) could not be approved at this time.</p>
+        ${reason}
+        <p style="margin:0 0 6px;font-size:13px;color:#6B7280;">Please contact the office to arrange an alternative time.</p>
+      </div>
+      <div style="padding:14px 24px;border-top:1px solid #E5E7EB;text-align:center;font-size:11px;color:#9CA3AF;">Office of the Head of the Civil Service</div>
+    </div>
+  </div>
+</body></html>`;
+}
+
 function welcomeText(i: WelcomeEmailInput, loginUrl: string): string {
   return [
     `Hello ${i.name},`,

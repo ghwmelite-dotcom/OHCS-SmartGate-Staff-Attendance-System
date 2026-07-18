@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error, notFound } from '../lib/response';
 import { sendTelegramMessage } from '../services/telegram';
+import { sendAppointmentConfirmedEmail, sendAppointmentDeclinedEmail } from '../services/email';
 
 export const appointmentsAdminRoutes = new Hono<{
   Bindings: Env;
@@ -204,6 +205,20 @@ appointmentsAdminRoutes.patch(
       }
     } catch { /* non-fatal */ }
 
+    // Email visitor — best-effort
+    if (appt.visitor_email) {
+      c.executionCtx.waitUntil(sendAppointmentConfirmedEmail(c.env, {
+        visitorName: appt.visitor_name,
+        visitorEmail: appt.visitor_email,
+        officerName: appt.officer_name,
+        officerTitle: appt.officer_title,
+        directorateName: appt.directorate_name,
+        appointmentDate: appt.appointment_date,
+        timeSlot: appt.time_slot,
+        referenceCode: appt.reference_code,
+      }));
+    }
+
     return success(c, { ok: true });
   },
 );
@@ -218,9 +233,18 @@ appointmentsAdminRoutes.patch(
     const id = c.req.param('id');
     const { decline_reason } = c.req.valid('json');
 
-    const appt = await c.env.DB.prepare('SELECT id, officer_id, status FROM appointments WHERE id = ?')
+    const appt = await c.env.DB.prepare(
+      `SELECT a.id, a.officer_id, a.status, a.visitor_name, a.visitor_email,
+              a.reference_code, a.appointment_date, a.time_slot,
+              o.name as officer_name, o.title as officer_title,
+              d.name as directorate_name
+       FROM appointments a
+       JOIN officers o ON o.id = a.officer_id
+       JOIN directorates d ON d.id = o.directorate_id
+       WHERE a.id = ?`,
+    )
       .bind(id)
-      .first<{ id: string; officer_id: string; status: string }>();
+      .first<{ id: string; officer_id: string; status: string; visitor_name: string; visitor_email: string | null; reference_code: string; appointment_date: string; time_slot: string; officer_name: string; officer_title: string | null; directorate_name: string }>();
 
     if (!appt) return notFound(c, 'Appointment');
 
@@ -242,6 +266,21 @@ appointmentsAdminRoutes.patch(
     )
       .bind(session.userId, decline_reason, id)
       .run();
+
+    // Email visitor — best-effort
+    if (appt.visitor_email) {
+      c.executionCtx.waitUntil(sendAppointmentDeclinedEmail(c.env, {
+        visitorName: appt.visitor_name,
+        visitorEmail: appt.visitor_email,
+        officerName: appt.officer_name,
+        officerTitle: appt.officer_title,
+        directorateName: appt.directorate_name,
+        appointmentDate: appt.appointment_date,
+        timeSlot: appt.time_slot,
+        referenceCode: appt.reference_code,
+        declineReason: decline_reason,
+      }));
+    }
 
     return success(c, { ok: true });
   },
