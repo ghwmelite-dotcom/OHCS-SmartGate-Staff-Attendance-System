@@ -3,9 +3,18 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { toast } from '@/stores/toast';
 import { cn } from '@/lib/utils';
-import { Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle, Users, Building2, UserPlus, Sparkles } from 'lucide-react';
+import { Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle, Users, Building2, UserPlus, Sparkles, GraduationCap, Briefcase, KeyRound } from 'lucide-react';
 
-type ImportType = 'users' | 'directorates' | 'officers';
+type ImportType = 'users' | 'directorates' | 'officers' | 'nss' | 'interns';
+
+type PinRecord = { row: number; name: string; email: string; identifier: string; initial_pin: string };
+
+type ImportResponse = {
+  imported: number;
+  skipped: number;
+  errors: Array<{ row: number; message: string }>;
+  pins?: PinRecord[];
+};
 
 const TEMPLATES: Record<ImportType, { label: string; icon: typeof Users; headers: string[]; optionalHeaders?: string[]; example: string[]; description: string }> = {
   users: {
@@ -31,6 +40,22 @@ const TEMPLATES: Record<ImportType, { label: string; icon: typeof Users; headers
     example: ['Mr. Kwame Mensah', 'Director', 'RSIMD', 'k.mensah@ohcs.gov.gh', '0241234567', 'Room 19', '1334685'],
     description: 'Import officers. directorate_code must match an existing directorate abbreviation. staff_id (optional) auto-creates a Staff Attendance login — initial PIN is the last 4 digits of the staff ID.',
   },
+  nss: {
+    label: 'NSS Personnel',
+    icon: GraduationCap,
+    headers: ['name', 'email', 'nss_number', 'nss_start_date', 'nss_end_date', 'directorate_code'],
+    optionalHeaders: ['grade'],
+    example: ['Kwame Asante', 'k.asante@ohcs.gov.gh', 'NSSGUE8364724', '2025-09-01', '2026-08-31', 'RSIMD', 'National Service Personnel'],
+    description: 'Import NSS service personnel. nss_number format: NSS + 3 letters + 7 digits (e.g. NSSGUE8364724). Dates in YYYY-MM-DD. A 6-digit initial PIN is auto-generated — download the credentials after import.',
+  },
+  interns: {
+    label: 'Interns',
+    icon: Briefcase,
+    headers: ['name', 'email', 'nss_start_date', 'nss_end_date', 'directorate_code'],
+    optionalHeaders: ['institution', 'programme', 'grade'],
+    example: ['Ama Boateng', 'a.boateng@gmail.com', '2025-09-01', '2026-02-28', 'HRM', 'University of Ghana', 'BSc Administration', 'Intern'],
+    description: 'Import interns. Intern codes are auto-generated (OHCS-INT-YYYY-NNN). Dates in YYYY-MM-DD. A 6-digit initial PIN is auto-generated — download the credentials after import.',
+  },
 };
 
 function downloadTemplate(type: ImportType) {
@@ -42,6 +67,25 @@ function downloadTemplate(type: ImportType) {
   const a = document.createElement('a');
   a.href = url;
   a.download = `smartgate-${type}-template.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadCredentials(pins: PinRecord[], type: 'nss' | 'interns') {
+  const identifierLabel = type === 'nss' ? 'nss_number' : 'intern_code';
+  const header = ['name', 'email', identifierLabel, 'initial_pin'].join(',');
+  const rows = pins.map(p => [
+    `"${p.name.replace(/"/g, '""')}"`,
+    p.email,
+    p.identifier,
+    p.initial_pin,
+  ].join(','));
+  const csv = [header, ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `smartgate-${type}-credentials-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -74,6 +118,7 @@ export function BulkImportTab() {
   const [importType, setImportType] = useState<ImportType>('users');
   const [previewData, setPreviewData] = useState<Record<string, string>[]>([]);
   const [fileName, setFileName] = useState('');
+  const [credentials, setCredentials] = useState<{ type: 'nss' | 'interns'; pins: PinRecord[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const tmpl = TEMPLATES[importType];
@@ -102,15 +147,16 @@ export function BulkImportTab() {
 
   const importMutation = useMutation({
     mutationFn: (rows: Record<string, string>[]) =>
-      api.post<{ imported: number; skipped: number; errors: Array<{ row: number; message: string }> }>(
-        `/admin/import/${importType}`, { rows }
-      ),
+      api.post<ImportResponse>(`/admin/import/${importType}`, { rows }),
     onSuccess: (res) => {
       const data = res.data;
       if (data) {
         toast.success(`Imported ${data.imported} ${importType}, ${data.skipped} skipped`);
         if (data.errors.length > 0) {
           data.errors.slice(0, 3).forEach(e => toast.error(`Row ${e.row}: ${e.message}`));
+        }
+        if (data.pins && data.pins.length > 0 && (importType === 'nss' || importType === 'interns')) {
+          setCredentials({ type: importType, pins: data.pins });
         }
       }
       setPreviewData([]);
@@ -125,6 +171,7 @@ export function BulkImportTab() {
     const file = e.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
+    setCredentials(null);
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -136,7 +183,6 @@ export function BulkImportTab() {
         return;
       }
 
-      // Check if headers match
       const fileHeaders = rows[0]!.map(h => h.toLowerCase().replace(/\s+/g, '_'));
       const expectedHeaders = tmpl.headers;
       const headersMatch = expectedHeaders.every(h => fileHeaders.includes(h));
@@ -150,9 +196,17 @@ export function BulkImportTab() {
       setPreviewData(objects);
     };
     reader.readAsText(file);
-    // Reset input so same file can be re-selected
     e.target.value = '';
   }
+
+  function switchType(type: ImportType) {
+    setImportType(type);
+    setPreviewData([]);
+    setFileName('');
+    setCredentials(null);
+  }
+
+  const identifierLabel = importType === 'nss' ? 'NSS Number' : 'Intern Code';
 
   return (
     <div className="space-y-6">
@@ -172,7 +226,7 @@ export function BulkImportTab() {
             {(Object.entries(TEMPLATES) as [ImportType, typeof TEMPLATES[ImportType]][]).map(([key, val]) => (
               <button
                 key={key}
-                onClick={() => { setImportType(key); setPreviewData([]); setFileName(''); }}
+                onClick={() => switchType(key)}
                 className={cn(
                   'inline-flex items-center gap-2 h-10 px-4 rounded-xl text-[14px] font-medium border transition-all',
                   importType === key
@@ -243,8 +297,77 @@ export function BulkImportTab() {
               </div>
             </div>
           )}
+
+          {/* PIN notice for NSS/intern imports */}
+          {(importType === 'nss' || importType === 'interns') && (
+            <div className="mt-2 p-4 rounded-xl bg-background border border-border">
+              <div className="flex items-start gap-3">
+                <KeyRound className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-[14px] font-semibold text-foreground">Auto-generated PINs</p>
+                  <p className="text-[13px] text-muted mt-0.5">
+                    Each {importType === 'nss' ? 'NSS personnel' : 'intern'} receives a unique 6-digit initial PIN.
+                    After import, a credential summary appears — download it before leaving this page.
+                    PINs are one-time visible and cannot be retrieved again.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Credential summary — shown after successful NSS/intern import */}
+      {credentials && (
+        <div className="bg-surface rounded-2xl border border-border shadow-sm overflow-hidden animate-fade-in-up">
+          <div className="h-[2px]" style={{ background: 'linear-gradient(90deg, #22c55e, #4ade80 50%, #22c55e)' }} />
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+            <div className="flex items-center gap-3">
+              <KeyRound className="h-5 w-5 text-success" />
+              <div>
+                <h3 className="text-[15px] font-bold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
+                  Credential Summary — {credentials.pins.length} {credentials.type === 'nss' ? 'NSS personnel' : 'intern'}{credentials.pins.length !== 1 ? 's' : ''}
+                </h3>
+                <p className="text-[13px] text-danger font-medium">Download now — initial PINs cannot be retrieved again</p>
+              </div>
+            </div>
+            <button
+              onClick={() => downloadCredentials(credentials.pins, credentials.type)}
+              className="inline-flex items-center gap-2 h-9 px-4 bg-success text-white text-[13px] font-semibold rounded-xl hover:opacity-90 shadow-sm transition-all"
+            >
+              <Download className="h-4 w-4" />
+              Download CSV
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border bg-background/50">
+                  <th className="text-left px-5 py-2.5 text-[11px] font-semibold text-muted uppercase tracking-wide">#</th>
+                  <th className="text-left px-5 py-2.5 text-[11px] font-semibold text-muted uppercase tracking-wide">Name</th>
+                  <th className="text-left px-5 py-2.5 text-[11px] font-semibold text-muted uppercase tracking-wide">Email</th>
+                  <th className="text-left px-5 py-2.5 text-[11px] font-semibold text-muted uppercase tracking-wide">{identifierLabel}</th>
+                  <th className="text-left px-5 py-2.5 text-[11px] font-semibold text-muted uppercase tracking-wide">Initial PIN</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {credentials.pins.map((p) => (
+                  <tr key={p.row} className="hover:bg-background-warm/50 transition-colors">
+                    <td className="px-5 py-2.5 text-[13px] text-muted font-mono">{p.row}</td>
+                    <td className="px-5 py-2.5 text-[14px] text-foreground font-medium">{p.name}</td>
+                    <td className="px-5 py-2.5 text-[13px] text-muted">{p.email}</td>
+                    <td className="px-5 py-2.5 text-[13px] font-mono text-foreground">{p.identifier}</td>
+                    <td className="px-5 py-2.5">
+                      <span className="font-mono text-[15px] font-bold text-primary tracking-widest">{p.initial_pin}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Preview table */}
       {previewData.length > 0 && (

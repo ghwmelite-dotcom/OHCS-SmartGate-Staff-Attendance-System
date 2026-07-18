@@ -6,6 +6,8 @@ import { success, error } from '../lib/response';
 import { hashPin } from '../services/auth';
 import { recordAudit, auditActorFromContext } from '../services/audit';
 import { sendWelcomeEmail } from '../services/email';
+import { generateInitialPin, isValidIsoDate } from './admin-nss';
+import { nextInternCode } from '../services/intern-code';
 
 function defaultPinFromStaffId(staffId: string): string {
   const digits = staffId.replace(/\D/g, '');
@@ -260,4 +262,193 @@ bulkImportRoutes.post('/officers', async (c) => {
     summary: `Bulk import (officers): ${imported} imported, ${skipped} skipped`,
   });
   return success(c, { imported, skipped, errors });
+});
+
+// Bulk import NSS service personnel
+const NSS_NUMBER_REGEX = /^NSS[A-Z]{3}\d{7}$/;
+
+const nssRowSchema = z.object({
+  name: z.string().min(1).max(255),
+  email: z.string().email().max(255),
+  nss_number: z.string().min(1),
+  nss_start_date: z.string().min(1),
+  nss_end_date: z.string().min(1),
+  directorate_code: z.string().min(1),
+  grade: z.string().optional().or(z.literal('')),
+});
+
+bulkImportRoutes.post('/nss', async (c) => {
+  if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+
+  const body = await c.req.json() as { rows: unknown[] };
+  if (!Array.isArray(body.rows) || body.rows.length === 0) {
+    return error(c, 'EMPTY', 'No rows to import', 400);
+  }
+  if (body.rows.length > 200) {
+    return error(c, 'TOO_MANY', 'Maximum 200 rows per import', 400);
+  }
+
+  let imported = 0;
+  let skipped = 0;
+  const errors: Array<{ row: number; message: string }> = [];
+  const pins: Array<{ row: number; name: string; email: string; identifier: string; initial_pin: string }> = [];
+
+  for (let i = 0; i < body.rows.length; i++) {
+    const parsed = nssRowSchema.safeParse(body.rows[i]);
+    if (!parsed.success) {
+      errors.push({ row: i + 1, message: parsed.error.issues[0]?.message ?? 'Invalid data' });
+      skipped++;
+      continue;
+    }
+
+    const { name, email, nss_number, nss_start_date, nss_end_date, directorate_code, grade } = parsed.data;
+    const normalizedNss = nss_number.toUpperCase().trim();
+
+    if (!NSS_NUMBER_REGEX.test(normalizedNss)) {
+      errors.push({ row: i + 1, message: `Invalid NSS number: ${nss_number} — expected NSS + 3 letters + 7 digits (e.g. NSSGUE8364724)` });
+      skipped++;
+      continue;
+    }
+
+    if (!isValidIsoDate(nss_start_date) || !isValidIsoDate(nss_end_date)) {
+      errors.push({ row: i + 1, message: `Invalid date format for ${name} — expected YYYY-MM-DD` });
+      skipped++;
+      continue;
+    }
+
+    const existing = await c.env.DB.prepare(
+      'SELECT id FROM users WHERE email = ? OR nss_number = ?'
+    ).bind(email.toLowerCase(), normalizedNss).first();
+
+    if (existing) {
+      errors.push({ row: i + 1, message: `Duplicate email or NSS number: ${email} / ${normalizedNss}` });
+      skipped++;
+      continue;
+    }
+
+    const dir = await c.env.DB.prepare('SELECT id FROM directorates WHERE abbreviation = ?')
+      .bind(directorate_code.toUpperCase()).first<{ id: string }>();
+
+    if (!dir) {
+      errors.push({ row: i + 1, message: `Unknown directorate code: ${directorate_code}` });
+      skipped++;
+      continue;
+    }
+
+    const id = crypto.randomUUID().replace(/-/g, '');
+    const initialPin = generateInitialPin();
+    const pinHash = await hashPin(initialPin);
+
+    await c.env.DB.prepare(
+      `INSERT INTO users (id, name, email, pin_hash, role, grade, directorate_id, user_type, nss_number, nss_start_date, nss_end_date)
+       VALUES (?, ?, ?, ?, 'staff', ?, ?, 'nss', ?, ?, ?)`
+    ).bind(id, name, email.toLowerCase(), pinHash, grade || null, dir.id, normalizedNss, nss_start_date, nss_end_date).run();
+
+    pins.push({ row: i + 1, name, email: email.toLowerCase(), identifier: normalizedNss, initial_pin: initialPin });
+
+    c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
+      userId: id, name, email: email.toLowerCase(), role: 'staff',
+      identifierLabel: 'NSS Number', identifierValue: normalizedNss, pin: initialPin,
+    }));
+
+    imported++;
+  }
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'nss.bulk_import', entityType: 'user', entityId: null,
+    summary: `Bulk import (NSS): ${imported} imported, ${skipped} skipped`,
+  });
+  return success(c, { imported, skipped, errors, pins });
+});
+
+// Bulk import interns
+const internRowSchema = z.object({
+  name: z.string().min(1).max(255),
+  email: z.string().email().max(255),
+  nss_start_date: z.string().min(1),
+  nss_end_date: z.string().min(1),
+  directorate_code: z.string().min(1),
+  institution: z.string().optional().or(z.literal('')),
+  programme: z.string().optional().or(z.literal('')),
+  grade: z.string().optional().or(z.literal('')),
+});
+
+bulkImportRoutes.post('/interns', async (c) => {
+  if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+
+  const body = await c.req.json() as { rows: unknown[] };
+  if (!Array.isArray(body.rows) || body.rows.length === 0) {
+    return error(c, 'EMPTY', 'No rows to import', 400);
+  }
+  if (body.rows.length > 200) {
+    return error(c, 'TOO_MANY', 'Maximum 200 rows per import', 400);
+  }
+
+  let imported = 0;
+  let skipped = 0;
+  const errors: Array<{ row: number; message: string }> = [];
+  const pins: Array<{ row: number; name: string; email: string; identifier: string; initial_pin: string }> = [];
+
+  const year = new Date().getUTCFullYear();
+
+  for (let i = 0; i < body.rows.length; i++) {
+    const parsed = internRowSchema.safeParse(body.rows[i]);
+    if (!parsed.success) {
+      errors.push({ row: i + 1, message: parsed.error.issues[0]?.message ?? 'Invalid data' });
+      skipped++;
+      continue;
+    }
+
+    const { name, email, nss_start_date, nss_end_date, directorate_code, institution, programme, grade } = parsed.data;
+
+    if (!isValidIsoDate(nss_start_date) || !isValidIsoDate(nss_end_date)) {
+      errors.push({ row: i + 1, message: `Invalid date format for ${name} — expected YYYY-MM-DD` });
+      skipped++;
+      continue;
+    }
+
+    const existingEmail = await c.env.DB.prepare(
+      'SELECT id FROM users WHERE email = ?'
+    ).bind(email.toLowerCase()).first();
+
+    if (existingEmail) {
+      errors.push({ row: i + 1, message: `Duplicate email: ${email}` });
+      skipped++;
+      continue;
+    }
+
+    const dir = await c.env.DB.prepare('SELECT id FROM directorates WHERE abbreviation = ?')
+      .bind(directorate_code.toUpperCase()).first<{ id: string }>();
+
+    if (!dir) {
+      errors.push({ row: i + 1, message: `Unknown directorate code: ${directorate_code}` });
+      skipped++;
+      continue;
+    }
+
+    const id = crypto.randomUUID().replace(/-/g, '');
+    const initialPin = generateInitialPin();
+    const pinHash = await hashPin(initialPin);
+    const internCode = await nextInternCode(c.env.DB, year);
+
+    await c.env.DB.prepare(
+      `INSERT INTO users (id, name, email, pin_hash, role, grade, directorate_id, user_type, intern_code, institution, programme, nss_start_date, nss_end_date)
+       VALUES (?, ?, ?, ?, 'staff', ?, ?, 'nss', ?, ?, ?, ?, ?)`
+    ).bind(id, name, email.toLowerCase(), pinHash, grade || null, dir.id, internCode, institution || null, programme || null, nss_start_date, nss_end_date).run();
+
+    pins.push({ row: i + 1, name, email: email.toLowerCase(), identifier: internCode, initial_pin: initialPin });
+
+    c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
+      userId: id, name, email: email.toLowerCase(), role: 'staff',
+      identifierLabel: 'Intern Code', identifierValue: internCode, pin: initialPin,
+    }));
+
+    imported++;
+  }
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'interns.bulk_import', entityType: 'user', entityId: null,
+    summary: `Bulk import (interns): ${imported} imported, ${skipped} skipped`,
+  });
+  return success(c, { imported, skipped, errors, pins });
 });
