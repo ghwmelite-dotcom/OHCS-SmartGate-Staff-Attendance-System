@@ -272,9 +272,9 @@ adminDirectorateRoutes.post('/officers', zValidator('json', officerCreateSchema)
       const emailClash = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(userEmail).first();
       if (!emailClash) {
         await c.env.DB.prepare(
-          `INSERT INTO users (id, name, email, staff_id, pin_hash, role, directorate_id)
-           VALUES (?, ?, ?, ?, ?, 'staff', ?)`
-        ).bind(userId, body.name, userEmail, normalizedStaffId, pinHash, body.directorate_id).run();
+          `INSERT INTO users (id, name, email, staff_id, pin_hash, role, directorate_id, phone)
+           VALUES (?, ?, ?, ?, ?, 'staff', ?, ?)`
+        ).bind(userId, body.name, userEmail, normalizedStaffId, pinHash, body.directorate_id, body.phone || null).run();
         if (body.email) {
           c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
             userId, name: body.name, email: body.email, role: 'staff',

@@ -120,7 +120,7 @@ export function ProfilePage() {
               </label>
               <input
                 type="password"
-                maxLength={4}
+                maxLength={6}
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
                 className={cn(inputCls, 'text-center tracking-[0.4em] font-mono text-xl')}
@@ -145,7 +145,7 @@ export function ProfilePage() {
 
           <button
             type="submit"
-            disabled={saving || (emailChanged && pin.length < 4)}
+            disabled={saving || (emailChanged && (pin.length < 4 || pin.length > 6))}
             className="w-full h-11 bg-primary text-white text-[14px] font-semibold rounded-xl hover:bg-primary-light transition-all disabled:opacity-50 shadow-lg shadow-primary/15 active:scale-[0.98]"
           >
             {saving ? 'Saving…' : 'Save Changes'}
