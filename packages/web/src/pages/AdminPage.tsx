@@ -12,6 +12,7 @@ import { BulkImportTab } from '@/components/admin/BulkImportTab';
 import { AttendanceTab } from '@/components/admin/AttendanceTab';
 import { NssTab } from '@/components/admin/NssTab';
 import { AuditLogTab } from '@/components/admin/AuditLogTab';
+import { AppointmentsTab } from '@/components/admin/AppointmentsTab';
 import {
   Users,
   UserPlus,
@@ -86,7 +87,7 @@ const editUserSchema = z.object({
 });
 type EditUserForm = z.infer<typeof editUserSchema>;
 
-type AdminTab = 'users' | 'org' | 'attendance' | 'nss' | 'import' | 'audit';
+type AdminTab = 'users' | 'org' | 'attendance' | 'nss' | 'import' | 'audit' | 'appointments';
 
 export function AdminPage() {
   const user = useAuthStore(s => s.user);
@@ -107,9 +108,13 @@ export function AdminPage() {
         { value: 'nss', label: 'NSS & Interns' },
         { value: 'import', label: 'Bulk Import' },
         { value: 'audit', label: 'Audit Log' },
+        { value: 'appointments', label: 'Appointments' },
       ];
     }
-    return [{ value: 'nss', label: 'NSS & Interns' }];
+    return [
+      { value: 'nss', label: 'NSS & Interns' },
+      { value: 'appointments', label: 'Appointments' },
+    ];
   }, [isSuperadmin]);
 
   // Admin defaults to NSS; superadmin defaults to ?tab= or 'users'.
@@ -190,6 +195,7 @@ export function AdminPage() {
       {activeTab === 'nss' && <NssTab />}
       {activeTab === 'import' && isSuperadmin && <BulkImportTab />}
       {activeTab === 'audit' && isSuperadmin && <AuditLogTab />}
+      {activeTab === 'appointments' && <AppointmentsTab />}
     </div>
   );
 }
