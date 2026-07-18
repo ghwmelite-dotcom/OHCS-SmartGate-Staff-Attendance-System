@@ -5,6 +5,12 @@ import type { Env, SessionData } from '../types';
 import { success, error } from '../lib/response';
 import { hashPin } from '../services/auth';
 import { recordAudit, auditActorFromContext } from '../services/audit';
+import { sendWelcomeEmail } from '../services/email';
+
+function defaultPinFromStaffId(staffId: string): string {
+  const digits = staffId.replace(/\D/g, '');
+  return digits.length >= 4 ? digits.slice(-4) : digits.padStart(4, '0');
+}
 
 export const bulkImportRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -153,6 +159,7 @@ const officerRowSchema = z.object({
   email: z.string().email().max(255).optional().or(z.literal('')),
   phone: z.string().max(255).optional(),
   office_number: z.string().max(255).optional(),
+  staff_id: z.string().max(20).optional().or(z.literal('')),
 });
 
 bulkImportRoutes.post('/officers', async (c) => {
@@ -178,7 +185,8 @@ bulkImportRoutes.post('/officers', async (c) => {
       continue;
     }
 
-    const { name, title, directorate_code, email, phone, office_number } = parsed.data;
+    const { name, title, directorate_code, email, phone, office_number, staff_id } = parsed.data;
+    const normalizedStaffId = staff_id ? staff_id.toUpperCase().trim() : null;
 
     // Look up directorate by code
     const dir = await c.env.DB.prepare(
@@ -191,10 +199,58 @@ bulkImportRoutes.post('/officers', async (c) => {
       continue;
     }
 
+    // Check for duplicate staff_id in officers
+    if (normalizedStaffId) {
+      const existingOfficer = await c.env.DB.prepare(
+        'SELECT id FROM officers WHERE staff_id = ?'
+      ).bind(normalizedStaffId).first();
+      if (existingOfficer) {
+        errors.push({ row: i + 1, message: `Staff ID already exists: ${normalizedStaffId}` });
+        skipped++;
+        continue;
+      }
+    }
+
     const id = crypto.randomUUID().replace(/-/g, '');
     await c.env.DB.prepare(
-      'INSERT INTO officers (id, name, title, directorate_id, email, phone, office_number) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(id, name, title || null, dir.id, email || null, phone || null, office_number || null).run();
+      'INSERT INTO officers (id, name, title, directorate_id, email, phone, office_number, staff_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, name, title || null, dir.id, email || null, phone || null, office_number || null, normalizedStaffId).run();
+
+    // Auto-provision a Staff Attendance user account when staff_id is provided
+    if (normalizedStaffId) {
+      const existingUser = await c.env.DB.prepare(
+        'SELECT id FROM users WHERE staff_id = ?'
+      ).bind(normalizedStaffId).first();
+
+      if (!existingUser) {
+        const pin = defaultPinFromStaffId(normalizedStaffId);
+        const pinHash = await hashPin(pin);
+        const userId = crypto.randomUUID().replace(/-/g, '');
+        const userEmail = email || `${normalizedStaffId.toLowerCase()}@ohcs.internal`;
+
+        const emailClash = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?')
+          .bind(userEmail).first();
+
+        if (!emailClash) {
+          await c.env.DB.prepare(
+            `INSERT INTO users (id, name, email, staff_id, pin_hash, role, directorate_id)
+             VALUES (?, ?, ?, ?, ?, 'staff', ?)`
+          ).bind(userId, name, userEmail, normalizedStaffId, pinHash, dir.id).run();
+
+          if (email) {
+            c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
+              userId,
+              name,
+              email,
+              role: 'staff',
+              identifierLabel: 'Staff ID',
+              identifierValue: normalizedStaffId,
+              pin,
+            }));
+          }
+        }
+      }
+    }
 
     imported++;
   }

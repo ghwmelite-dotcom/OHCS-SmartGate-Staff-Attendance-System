@@ -5,6 +5,12 @@ import type { Env, SessionData } from '../types';
 import { success, error, created, notFound } from '../lib/response';
 import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
 import { hashPin } from '../services/auth';
+import { sendWelcomeEmail } from '../services/email';
+
+function defaultPinFromStaffId(staffId: string): string {
+  const digits = staffId.replace(/\D/g, '');
+  return digits.length >= 4 ? digits.slice(-4) : digits.padStart(4, '0');
+}
 
 export const adminDirectorateRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -233,27 +239,61 @@ const officerCreateSchema = z.object({
   office_number: z.string().max(20).optional().or(z.literal('')),
   // Per-officer kiosk override PIN (4–8 digits; '' clears). Hashed, never returned.
   override_pin: z.string().regex(/^\d{4,8}$/, 'Override PIN must be 4–8 digits').optional().or(z.literal('')),
+  // Staff Attendance ID — when provided, auto-provisions a users account.
+  staff_id: z.string().max(20).optional().or(z.literal('')),
 });
 
 adminDirectorateRoutes.post('/officers', zValidator('json', officerCreateSchema), async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
   const body = c.req.valid('json');
   const id = crypto.randomUUID().replace(/-/g, '');
+  const normalizedStaffId = body.staff_id ? body.staff_id.toUpperCase().trim() : null;
+
+  if (normalizedStaffId) {
+    const clash = await c.env.DB.prepare('SELECT id FROM officers WHERE staff_id = ?')
+      .bind(normalizedStaffId).first();
+    if (clash) return error(c, 'DUPLICATE_STAFF_ID', `Staff ID ${normalizedStaffId} is already assigned to another officer`, 409);
+  }
 
   const overridePinHash = body.override_pin ? await hashPin(body.override_pin) : null;
   await c.env.DB.prepare(
-    'INSERT INTO officers (id, name, title, directorate_id, email, phone, office_number, override_pin_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, body.name, body.title || null, body.directorate_id, body.email || null, body.phone || null, body.office_number || null, overridePinHash).run();
+    'INSERT INTO officers (id, name, title, directorate_id, email, phone, office_number, override_pin_hash, staff_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(id, body.name, body.title || null, body.directorate_id, body.email || null, body.phone || null, body.office_number || null, overridePinHash, normalizedStaffId).run();
+
+  // Auto-provision Staff Attendance account when staff_id is given
+  if (normalizedStaffId) {
+    const existingUser = await c.env.DB.prepare('SELECT id FROM users WHERE staff_id = ?')
+      .bind(normalizedStaffId).first();
+    if (!existingUser) {
+      const pin = defaultPinFromStaffId(normalizedStaffId);
+      const pinHash = await hashPin(pin);
+      const userId = crypto.randomUUID().replace(/-/g, '');
+      const userEmail = body.email || `${normalizedStaffId.toLowerCase()}@ohcs.internal`;
+      const emailClash = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(userEmail).first();
+      if (!emailClash) {
+        await c.env.DB.prepare(
+          `INSERT INTO users (id, name, email, staff_id, pin_hash, role, directorate_id)
+           VALUES (?, ?, ?, ?, ?, 'staff', ?)`
+        ).bind(userId, body.name, userEmail, normalizedStaffId, pinHash, body.directorate_id).run();
+        if (body.email) {
+          c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
+            userId, name: body.name, email: body.email, role: 'staff',
+            identifierLabel: 'Staff ID', identifierValue: normalizedStaffId, pin,
+          }));
+        }
+      }
+    }
+  }
 
   const row = await c.env.DB.prepare(
     `SELECT o.id, o.name, o.title, o.directorate_id, o.email, o.phone, o.office_number, o.is_available,
-            o.created_at, o.updated_at, (o.override_pin_hash IS NOT NULL) AS has_override_pin,
+            o.staff_id, o.created_at, o.updated_at, (o.override_pin_hash IS NOT NULL) AS has_override_pin,
             d.abbreviation as directorate_abbr
      FROM officers o JOIN directorates d ON o.directorate_id = d.id WHERE o.id = ?`
   ).bind(id).first();
   await recordAudit(c.env, auditActorFromContext(c), {
     action: 'officer.create', entityType: 'officer', entityId: id,
-    summary: `Created officer ${body.name}${body.title ? ` (${body.title})` : ''}`,
+    summary: `Created officer ${body.name}${body.title ? ` (${body.title})` : ''}${normalizedStaffId ? ` · staff_id=${normalizedStaffId}` : ''}`,
   });
   return created(c, row);
 });

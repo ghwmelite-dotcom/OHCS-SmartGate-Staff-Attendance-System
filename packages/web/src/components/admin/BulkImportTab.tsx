@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { toast } from '@/stores/toast';
 import { cn } from '@/lib/utils';
-import { Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle, Users, Building2, UserPlus } from 'lucide-react';
+import { Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle, Users, Building2, UserPlus, Sparkles } from 'lucide-react';
 
 type ImportType = 'users' | 'directorates' | 'officers';
 
@@ -27,8 +27,9 @@ const TEMPLATES: Record<ImportType, { label: string; icon: typeof Users; headers
     label: 'Officers',
     icon: UserPlus,
     headers: ['name', 'title', 'directorate_code', 'email', 'phone', 'office_number'],
-    example: ['Mr. Kwame Mensah', 'Director', 'RSIMD', 'k.mensah@ohcs.gov.gh', '0241234567', 'Room 19'],
-    description: 'Import officers. directorate_code must match an existing directorate abbreviation',
+    optionalHeaders: ['staff_id'],
+    example: ['Mr. Kwame Mensah', 'Director', 'RSIMD', 'k.mensah@ohcs.gov.gh', '0241234567', 'Room 19', '1334685'],
+    description: 'Import officers. directorate_code must match an existing directorate abbreviation. staff_id (optional) auto-creates a Staff Attendance login — initial PIN is the last 4 digits of the staff ID.',
   },
 };
 
@@ -77,6 +78,27 @@ export function BulkImportTab() {
 
   const tmpl = TEMPLATES[importType];
   const allHeaders = [...tmpl.headers, ...(tmpl.optionalHeaders ?? [])];
+
+  const provisionMutation = useMutation({
+    mutationFn: () =>
+      api.post<{ provisioned: number; skipped: number; skipped_details: string[] }>(
+        '/users/provision-from-officers', {}
+      ),
+    onSuccess: (res) => {
+      const data = res.data;
+      if (data) {
+        if (data.provisioned > 0) {
+          toast.success(`${data.provisioned} Staff Attendance account${data.provisioned !== 1 ? 's' : ''} created`);
+        } else {
+          toast.success('All officers with staff IDs already have accounts');
+        }
+        if (data.skipped > 0) {
+          toast.error(`${data.skipped} skipped (email conflicts) — check details`);
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
+  });
 
   const importMutation = useMutation({
     mutationFn: (rows: Record<string, string>[]) =>
@@ -189,6 +211,38 @@ export function BulkImportTab() {
               <span className="self-center text-[13px] text-muted">{fileName}</span>
             )}
           </div>
+
+          {/* Provision button — only shown on the Officers tab */}
+          {importType === 'officers' && (
+            <div className="mt-2 p-4 rounded-xl bg-background border border-border">
+              <div className="flex items-start gap-3">
+                <Sparkles className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[14px] font-semibold text-foreground">Provision Staff Attendance Accounts</p>
+                  <p className="text-[13px] text-muted mt-0.5">
+                    Creates login accounts for all officers who have a Staff ID but no Staff Attendance account yet.
+                    Initial PIN = last 4 digits of staff ID. Staff set their own PIN on first login.
+                  </p>
+                  {provisionMutation.data?.data && (
+                    <div className="mt-2 flex items-center gap-2 text-[13px]">
+                      <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
+                      <span className="text-success font-medium">
+                        {provisionMutation.data.data.provisioned} created · {provisionMutation.data.data.skipped} skipped
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => provisionMutation.mutate()}
+                  disabled={provisionMutation.isPending}
+                  className="inline-flex items-center gap-2 h-9 px-4 bg-primary text-white text-[13px] font-semibold rounded-xl hover:bg-primary-light disabled:opacity-50 shadow-sm transition-all shrink-0"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {provisionMutation.isPending ? 'Provisioning…' : 'Provision All'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

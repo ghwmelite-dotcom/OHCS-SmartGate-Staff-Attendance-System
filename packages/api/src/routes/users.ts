@@ -206,6 +206,59 @@ userRoutes.put('/:id', zValidator('json', updateUserSchema), async (c) => {
   return success(c, user);
 });
 
+// Batch-provision Staff Attendance accounts for all officers who have a staff_id
+// but no matching users row yet. Returns counts of created / already-existing.
+userRoutes.post('/provision-from-officers', async (c) => {
+  if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+
+  const officers = await c.env.DB.prepare(
+    `SELECT o.id, o.name, o.email, o.staff_id, o.directorate_id
+     FROM officers o
+     WHERE o.staff_id IS NOT NULL AND o.staff_id != ''
+       AND NOT EXISTS (SELECT 1 FROM users u WHERE u.staff_id = o.staff_id)
+     ORDER BY o.name`
+  ).all<{ id: string; name: string; email: string | null; staff_id: string; directorate_id: string }>();
+
+  const rows = officers.results ?? [];
+  let provisioned = 0;
+  const skippedRows: string[] = [];
+
+  for (const officer of rows) {
+    const staffId = officer.staff_id.toUpperCase();
+    const digits = staffId.replace(/\D/g, '');
+    const pin = digits.length >= 4 ? digits.slice(-4) : digits.padStart(4, '0');
+    const pinHash = await hashPin(pin);
+    const userId = crypto.randomUUID().replace(/-/g, '');
+    const userEmail = officer.email || `${staffId.toLowerCase()}@ohcs.internal`;
+
+    const emailClash = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(userEmail).first();
+    if (emailClash) {
+      skippedRows.push(`${officer.name} (email clash: ${userEmail})`);
+      continue;
+    }
+
+    await c.env.DB.prepare(
+      `INSERT INTO users (id, name, email, staff_id, pin_hash, role, directorate_id)
+       VALUES (?, ?, ?, ?, ?, 'staff', ?)`
+    ).bind(userId, officer.name, userEmail, staffId, pinHash, officer.directorate_id).run();
+
+    if (officer.email) {
+      c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
+        userId, name: officer.name, email: officer.email, role: 'staff',
+        identifierLabel: 'Staff ID', identifierValue: staffId, pin,
+      }));
+    }
+    provisioned++;
+  }
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'users.provision_from_officers', entityType: 'user', entityId: null,
+    summary: `Provisioned ${provisioned} Staff Attendance accounts from officer roster${skippedRows.length ? `; ${skippedRows.length} skipped` : ''}`,
+  });
+
+  return success(c, { provisioned, skipped: skippedRows.length, skipped_details: skippedRows });
+});
+
 // Delete (deactivate) user
 userRoutes.delete('/:id', async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
