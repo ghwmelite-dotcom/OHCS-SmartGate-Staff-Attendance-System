@@ -273,6 +273,37 @@ userRoutes.post('/provision-from-officers', async (c) => {
   return success(c, { provisioned, skipped: skippedRows.length, skipped_details: skippedRows });
 });
 
+// Reset a user's PIN to the last 4 digits of their staff ID and clear pin_acknowledged
+// so they're prompted to set a new PIN immediately on next login.
+userRoutes.post('/:id/reset-pin', async (c) => {
+  if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+
+  const id = c.req.param('id');
+  const user = await c.env.DB.prepare(
+    'SELECT id, name, email, staff_id FROM users WHERE id = ?'
+  ).bind(id).first<{ id: string; name: string; email: string; staff_id: string | null }>();
+
+  if (!user) return notFound(c, 'User');
+  if (!user.staff_id) return error(c, 'NO_STAFF_ID', 'Cannot reset PIN: user has no staff ID', 400);
+
+  const digits = user.staff_id.replace(/\D/g, '');
+  const pin = digits.length >= 4 ? digits.slice(-4) : digits.padStart(4, '0');
+  const pinHash = await hashPin(pin);
+
+  await c.env.DB.prepare(
+    `UPDATE users SET pin_hash = ?, pin_acknowledged = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?`
+  ).bind(pinHash, id).run();
+
+  await bumpSessionEpoch(c.env, id);
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'user.pin_reset', entityType: 'user', entityId: id,
+    summary: `Reset PIN for ${user.name} (${user.email}) to default (last 4 digits of staff ID)`,
+  });
+
+  return success(c, { message: 'PIN reset to default. User will be prompted to change it on next login.' });
+});
+
 // Delete (deactivate) user
 userRoutes.delete('/:id', async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);

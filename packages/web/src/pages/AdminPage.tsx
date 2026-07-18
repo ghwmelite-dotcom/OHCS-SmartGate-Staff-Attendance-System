@@ -17,6 +17,7 @@ import {
   UserPlus,
   Pencil,
   Power,
+  KeyRound,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -237,6 +238,21 @@ function UsersTab() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
   });
 
+  const [pendingResetId, setPendingResetId] = useState<string | null>(null);
+
+  const resetPinMutation = useMutation({
+    mutationFn: (userId: string) => api.post(`/users/${userId}/reset-pin`, {}),
+    onSuccess: (_, userId) => {
+      toast.success('PIN reset to default — staff will be prompted to change it on next login');
+      setPendingResetId(null);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
+    onError: () => {
+      toast.error('Failed to reset PIN');
+      setPendingResetId(null);
+    },
+  });
+
   const users = data?.data ?? [];
 
   return (
@@ -407,6 +423,33 @@ function UsersTab() {
                           >
                             <Pencil className="h-4 w-4" />
                           </button>
+                          {user.staff_id && (
+                            pendingResetId === user.id ? (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => resetPinMutation.mutate(user.id)}
+                                  disabled={resetPinMutation.isPending}
+                                  className="h-7 px-2 text-[11px] font-bold bg-secondary text-white rounded-lg disabled:opacity-50"
+                                >
+                                  Confirm
+                                </button>
+                                <button
+                                  onClick={() => setPendingResetId(null)}
+                                  className="h-7 px-2 text-[11px] font-medium text-muted hover:text-foreground rounded-lg border border-border"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setPendingResetId(user.id)}
+                                className="h-8 w-8 rounded-lg flex items-center justify-center text-muted hover:text-accent-warm hover:bg-accent/10 transition-all"
+                                title="Reset PIN to default"
+                              >
+                                <KeyRound className="h-4 w-4" />
+                              </button>
+                            )
+                          )}
                           <button
                             onClick={() => toggleActiveMutation.mutate(user)}
                             className={cn(
