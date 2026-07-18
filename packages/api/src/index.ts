@@ -10,6 +10,7 @@ import { notificationRoutes } from './routes/notifications';
 import { telegramWebhook, telegramLinkRoute } from './routes/telegram';
 import { badgeRoutes, serveBadgePage } from './routes/badges';
 import { kioskRoutes } from './routes/kiosk';
+import { appointmentsPublicRoutes } from './routes/appointments-public';
 import { assistantRoutes } from './routes/assistant';
 import { userRoutes } from './routes/users';
 import { analyticsRoutes } from './routes/analytics';
@@ -79,6 +80,7 @@ app.route('/api/auth/webauthn', authWebAuthnPublicRoutes);
 app.route('/api/badges', badgeRoutes);
 app.get('/badge/:code', serveBadgePage);
 app.route('/api/kiosk', kioskRoutes);
+app.route('/api/appointments/public', appointmentsPublicRoutes);
 app.post('/api/telegram/webhook', telegramWebhook);
 
 // Protected routes
