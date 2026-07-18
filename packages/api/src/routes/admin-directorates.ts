@@ -308,8 +308,8 @@ adminDirectorateRoutes.put('/officers/:id', zValidator('json', officerUpdateSche
   const body = c.req.valid('json');
 
   const existing = await c.env.DB.prepare(
-    'SELECT id, name, title, directorate_id, email, phone, office_number, is_available FROM officers WHERE id = ?'
-  ).bind(id).first<Record<string, unknown> & { name?: string }>();
+    'SELECT id, name, title, directorate_id, email, phone, office_number, is_available, staff_id FROM officers WHERE id = ?'
+  ).bind(id).first<Record<string, unknown> & { name?: string; staff_id?: string | null }>();
   if (!existing) return notFound(c, 'Officer');
 
   const fields: string[] = [];
@@ -351,6 +351,14 @@ adminDirectorateRoutes.put('/officers/:id', zValidator('json', officerUpdateSche
       changes,
     });
   }
+
+  // Mirror phone change to the linked staff attendance account (if any).
+  if (body.phone !== undefined && existing.staff_id) {
+    await c.env.DB.prepare(
+      `UPDATE users SET phone = ? WHERE staff_id = ?`
+    ).bind(body.phone || null, existing.staff_id).run();
+  }
+
   return success(c, row);
 });
 

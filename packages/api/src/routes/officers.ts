@@ -7,8 +7,11 @@ export const officerRoutes = new Hono<{ Bindings: Env; Variables: { session: Ses
 
 // Explicit column list — never expose officers.telegram_chat_id to API consumers.
 const OFFICER_COLUMNS = `o.id, o.name, o.title, o.directorate_id, o.email, o.phone,
-       o.office_number, o.is_available, o.created_at, o.updated_at,
+       o.office_number, o.is_available, o.staff_id, o.created_at, o.updated_at,
        (o.override_pin_hash IS NOT NULL) as has_override_pin,
+       (o.staff_id IS NOT NULL AND EXISTS(
+         SELECT 1 FROM users u WHERE u.staff_id = o.staff_id
+       )) as has_sa_account,
        d.name as directorate_name, d.abbreviation as directorate_abbr`;
 
 officerRoutes.get('/', async (c) => {
