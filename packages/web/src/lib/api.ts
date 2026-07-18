@@ -196,29 +196,29 @@ export const appointmentsApi = {
       )
     ).toString();
     return request<{ appointments: AppointmentRecord[]; total: number; page: number; limit: number }>(
-      `/api/appointments/admin${qs ? `?${qs}` : ''}`
+      `/appointments/admin${qs ? `?${qs}` : ''}`
     );
   },
   confirm: (id: string, approver_notes?: string) =>
-    request<{ ok: boolean }>(`/api/appointments/admin/${id}/confirm`, { method: 'PATCH', body: JSON.stringify({ approver_notes }) }),
+    request<{ ok: boolean }>(`/appointments/admin/${id}/confirm`, { method: 'PATCH', body: JSON.stringify({ approver_notes }) }),
   decline: (id: string, decline_reason: string) =>
-    request<{ ok: boolean }>(`/api/appointments/admin/${id}/decline`, { method: 'PATCH', body: JSON.stringify({ decline_reason }) }),
+    request<{ ok: boolean }>(`/appointments/admin/${id}/decline`, { method: 'PATCH', body: JSON.stringify({ decline_reason }) }),
   cancel: (id: string) =>
-    request<{ ok: boolean }>(`/api/appointments/admin/${id}/cancel`, { method: 'PATCH', body: JSON.stringify({}) }),
+    request<{ ok: boolean }>(`/appointments/admin/${id}/cancel`, { method: 'PATCH', body: JSON.stringify({}) }),
   complete: (id: string) =>
-    request<{ ok: boolean }>(`/api/appointments/admin/${id}/complete`, { method: 'PATCH', body: JSON.stringify({}) }),
+    request<{ ok: boolean }>(`/appointments/admin/${id}/complete`, { method: 'PATCH', body: JSON.stringify({}) }),
   getBookableOfficers: () =>
-    request<{ bookable_officers: BookableOfficerRecord[] }>('/api/appointments/admin/setup/bookable-officers'),
+    request<{ bookable_officers: BookableOfficerRecord[] }>('/appointments/admin/setup/bookable-officers'),
   upsertBookableOfficer: (data: UpsertBookableOfficer) =>
-    request<{ ok: boolean }>('/api/appointments/admin/setup/bookable-officers', { method: 'POST', body: JSON.stringify(data) }),
+    request<{ ok: boolean }>('/appointments/admin/setup/bookable-officers', { method: 'POST', body: JSON.stringify(data) }),
   deleteBookableOfficer: (officerId: string) =>
-    request<{ ok: boolean }>(`/api/appointments/admin/setup/bookable-officers/${officerId}`, { method: 'DELETE' }),
+    request<{ ok: boolean }>(`/appointments/admin/setup/bookable-officers/${officerId}`, { method: 'DELETE' }),
   getApprovers: (officerId: string) =>
-    request<{ approvers: ApproverRecord[] }>(`/api/appointments/admin/setup/approvers/${officerId}`),
+    request<{ approvers: ApproverRecord[] }>(`/appointments/admin/setup/approvers/${officerId}`),
   addApprover: (officer_id: string, user_id: string) =>
-    request<{ ok: boolean }>('/api/appointments/admin/setup/approvers', { method: 'POST', body: JSON.stringify({ officer_id, user_id }) }),
+    request<{ ok: boolean }>('/appointments/admin/setup/approvers', { method: 'POST', body: JSON.stringify({ officer_id, user_id }) }),
   removeApprover: (id: string) =>
-    request<{ ok: boolean }>(`/api/appointments/admin/setup/approvers/${id}`, { method: 'DELETE' }),
+    request<{ ok: boolean }>(`/appointments/admin/setup/approvers/${id}`, { method: 'DELETE' }),
   publicOfficers: () =>
-    request<{ officers: PublicBookableOfficer[] }>('/api/appointments/public/officers'),
+    request<{ officers: PublicBookableOfficer[] }>('/appointments/public/officers'),
 };
