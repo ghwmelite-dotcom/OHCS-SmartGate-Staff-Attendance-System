@@ -176,12 +176,12 @@ export function BookingPage() {
   useEffect(() => {
     setOfficersLoading(true);
     fetch('/api/appointments/public/officers')
-      .then((r) => r.json() as Promise<{ officers?: BookableOfficer[]; error?: { message: string } }>)
-      .then((data) => {
-        if (data.officers) {
-          setOfficers(data.officers);
+      .then((r) => r.json() as Promise<{ data?: { officers: BookableOfficer[] }; error?: { message: string } }>)
+      .then((res) => {
+        if (res.data?.officers) {
+          setOfficers(res.data.officers);
         } else {
-          setOfficersError(data.error?.message ?? 'Failed to load officers.');
+          setOfficersError(res.error?.message ?? 'Failed to load officers.');
         }
       })
       .catch(() => setOfficersError('Could not connect. Please try again.'))
@@ -194,12 +194,12 @@ export function BookingPage() {
     setSlotsError(null);
     setSlots([]);
     fetch(`/api/appointments/public/slots?officer_id=${encodeURIComponent(officerId)}&date=${encodeURIComponent(date)}`)
-      .then((r) => r.json() as Promise<{ slots?: string[]; error?: { message: string } }>)
-      .then((data) => {
-        if (Array.isArray(data.slots)) {
-          setSlots(data.slots);
+      .then((r) => r.json() as Promise<{ data?: { slots: string[] }; error?: { message: string } }>)
+      .then((res) => {
+        if (Array.isArray(res.data?.slots)) {
+          setSlots(res.data!.slots);
         } else {
-          setSlotsError(data.error?.message ?? 'Failed to load slots.');
+          setSlotsError(res.error?.message ?? 'Failed to load slots.');
         }
       })
       .catch(() => setSlotsError('Could not load slots. Please try again.'))
@@ -227,8 +227,7 @@ export function BookingPage() {
         }),
       });
       const data = (await res.json()) as {
-        reference_code?: string;
-        appointment?: { reference_code: string };
+        data?: { reference_code?: string };
         error?: { message: string; code?: string };
       };
       if (!res.ok) {
@@ -241,7 +240,7 @@ export function BookingPage() {
         }
         return;
       }
-      const refCode = data.reference_code ?? data.appointment?.reference_code;
+      const refCode = data.data?.reference_code;
       if (!refCode) {
         setSubmitError('Booking created but no reference code returned. Please contact reception.');
         return;
