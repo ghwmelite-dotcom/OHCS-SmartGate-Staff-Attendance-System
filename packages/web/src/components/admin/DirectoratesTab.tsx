@@ -23,6 +23,8 @@ interface DirectorateExt extends Directorate {
 interface OfficerExt extends Officer {
   directorate_abbr?: string;
   has_override_pin?: number;
+  staff_id?: string | null;
+  has_sa_account?: number;
 }
 
 const dirSchema = z.object({
@@ -176,6 +178,8 @@ export function DirectoratesTab() {
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Title</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Directorate</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Office</th>
+                <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide hidden lg:table-cell">Staff ID</th>
+                <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide hidden lg:table-cell">SA Account</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Status</th>
                 <th className="text-right px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Edit</th>
               </tr>
@@ -191,6 +195,20 @@ export function DirectoratesTab() {
                     </span>
                   </td>
                   <td className="px-6 py-3 text-[13px] text-muted">{o.office_number ?? '—'}</td>
+                  <td className="px-6 py-3 hidden lg:table-cell">
+                    <span className="text-[13px] font-mono text-muted">{o.staff_id ?? '—'}</span>
+                  </td>
+                  <td className="px-6 py-3 hidden lg:table-cell">
+                    {o.has_sa_account ? (
+                      <span className="inline-flex items-center h-6 px-2 text-[10px] font-bold bg-success/10 text-success rounded-lg uppercase tracking-wide">
+                        Linked
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center h-6 px-2 text-[10px] font-bold bg-border text-muted-foreground rounded-lg uppercase tracking-wide">
+                        None
+                      </span>
+                    )}
+                  </td>
                   <td className="px-6 py-3">
                     <span className={cn('text-[13px] font-medium', o.is_available ? 'text-success' : 'text-muted-foreground')}>
                       {o.is_available ? 'Available' : 'Unavailable'}
