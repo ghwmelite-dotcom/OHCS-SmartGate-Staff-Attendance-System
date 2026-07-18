@@ -819,14 +819,6 @@ function BookableOfficerModal({
 
 /* ---- Add approver modal ---- */
 
-interface SystemUser {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  is_active: number;
-}
-
 function AddApproverModal({
   officerId,
   officerName,
@@ -842,9 +834,9 @@ function AddApproverModal({
 }) {
   const [search, setSearch] = useState('');
 
-  const { data: usersData, isLoading } = useQuery({
-    queryKey: ['users'],
-    queryFn: () => api.get<SystemUser[]>('/users'),
+  const { data: candidatesData, isLoading } = useQuery({
+    queryKey: ['approver-candidates'],
+    queryFn: () => appointmentsApi.getApproverCandidates(),
   });
 
   const addMutation = useMutation({
@@ -858,15 +850,16 @@ function AddApproverModal({
     },
   });
 
-  const allUsers = usersData?.data ?? [];
+  const allCandidates = candidatesData?.data?.candidates ?? [];
   const existingIds = new Set(existingApprovers.map((a) => a.user_id));
   const q = search.trim().toLowerCase();
-  const filteredUsers = allUsers.filter(
+  const filtered = allCandidates.filter(
     (u) =>
-      u.is_active &&
       !existingIds.has(u.id) &&
       (q
-        ? u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+        ? u.name.toLowerCase().includes(q) ||
+          u.email.toLowerCase().includes(q) ||
+          u.directorate_name.toLowerCase().includes(q)
         : true)
   );
 
@@ -877,13 +870,16 @@ function AddApproverModal({
       icon={<UserPlus className="h-4 w-4 text-primary" />}
     >
       <div className="space-y-4">
+        <p className="text-[13px] text-muted">
+          Staff officers (excluding directors) who have a system account.
+        </p>
         <div className="relative">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted pointer-events-none" />
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or email…"
+            placeholder="Search by name, email or directorate…"
             className="w-full h-11 pl-10 pr-4 rounded-xl border border-border bg-surface text-[14px] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted"
             autoFocus
           />
@@ -893,20 +889,22 @@ function AddApproverModal({
           <div className="py-6 text-center">
             <div className="h-5 w-5 border-2 border-primary/20 border-t-primary rounded-full animate-spin mx-auto" />
           </div>
-        ) : filteredUsers.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <p className="text-center text-[14px] text-muted py-4">
-            {q ? 'No matching users' : 'No available users to add'}
+            {q ? 'No matching officers' : 'No available officers to add'}
           </p>
         ) : (
-          <div className="max-h-60 overflow-y-auto space-y-1 -mx-2 px-2">
-            {filteredUsers.map((u) => (
+          <div className="max-h-64 overflow-y-auto space-y-1 -mx-2 px-2">
+            {filtered.map((u) => (
               <div
                 key={u.id}
                 className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl hover:bg-background transition-colors"
               >
                 <div className="min-w-0">
                   <p className="text-[14px] font-semibold text-foreground truncate">{u.name}</p>
-                  <p className="text-[12px] text-muted truncate">{u.email}</p>
+                  <p className="text-[12px] text-muted truncate">
+                    {u.officer_title} · {u.directorate_name}
+                  </p>
                 </div>
                 <button
                   onClick={() => addMutation.mutate(u.id)}

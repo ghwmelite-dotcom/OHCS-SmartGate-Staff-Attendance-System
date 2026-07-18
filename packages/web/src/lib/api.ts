@@ -171,6 +171,11 @@ export interface ApproverRecord {
   user_name: string; user_email: string; user_role: string;
 }
 
+export interface ApproverCandidate {
+  id: string; name: string; email: string; role: string;
+  officer_title: string; directorate_name: string;
+}
+
 export interface UpsertBookableOfficer {
   officer_id: string; is_active: boolean; slot_duration_mins: number;
   slot_start_time: string; slot_end_time: string;
@@ -219,6 +224,8 @@ export const appointmentsApi = {
     request<{ ok: boolean }>('/appointments/admin/setup/approvers', { method: 'POST', body: JSON.stringify({ officer_id, user_id }) }),
   removeApprover: (id: string) =>
     request<{ ok: boolean }>(`/appointments/admin/setup/approvers/${id}`, { method: 'DELETE' }),
+  getApproverCandidates: () =>
+    request<{ candidates: ApproverCandidate[] }>('/appointments/admin/setup/approver-candidates'),
   publicOfficers: () =>
     request<{ officers: PublicBookableOfficer[] }>('/appointments/public/officers'),
 };

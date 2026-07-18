@@ -478,3 +478,32 @@ appointmentsAdminRoutes.delete('/setup/approvers/:id', async (c) => {
 
   return success(c, { ok: true });
 });
+
+// ─── Route: GET /setup/approver-candidates ────────────────────────────────────
+// Officers (non-director level) who have a linked user account via staff_id.
+// These are the staff members eligible to approve appointments on behalf of a director.
+
+appointmentsAdminRoutes.get('/setup/approver-candidates', async (c) => {
+  const session = c.get('session');
+
+  if (session.role !== 'superadmin' && session.role !== 'admin') {
+    return error(c, 'FORBIDDEN', 'Only admins can view approver candidates', 403);
+  }
+
+  const rows = await c.env.DB.prepare(
+    `SELECT DISTINCT u.id, u.name, u.email, u.role,
+            o.title as officer_title,
+            d.name as directorate_name
+     FROM users u
+     JOIN officers o ON o.staff_id = u.staff_id
+     JOIN directorates d ON d.id = o.directorate_id
+     WHERE u.is_active = 1
+       AND o.is_available = 1
+       AND lower(o.title) NOT LIKE 'director%'
+       AND lower(o.title) NOT LIKE 'chief director%'
+       AND lower(o.title) NOT LIKE 'head of%'
+     ORDER BY u.name`
+  ).all<{ id: string; name: string; email: string; role: string; officer_title: string; directorate_name: string }>();
+
+  return success(c, { candidates: rows.results ?? [] });
+});
