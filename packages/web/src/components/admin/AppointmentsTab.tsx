@@ -951,7 +951,10 @@ function SetupView() {
     queryKey: ['officers-list'],
     queryFn: () => api.get<{ id: string; name: string; title: string | null; directorate_name?: string }[]>('/officers'),
   });
-  const allOfficers = allOfficersData?.data ?? [];
+  const allOfficers = (allOfficersData?.data ?? []).filter((o) => {
+    const t = (o.title ?? '').toLowerCase();
+    return t.includes('director') || t.includes('head of service') || t.includes('head of civil');
+  });
 
   // Approvers — fetch per bookable officer
   const [selectedOfficerForApprover, setSelectedOfficerForApprover] = useState<BookableOfficerRecord | null>(null);
