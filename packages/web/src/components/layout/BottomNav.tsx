@@ -13,6 +13,7 @@ import {
   Settings,
   LogOut,
   X,
+  UserCircle,
 } from 'lucide-react';
 
 const MAIN_ITEMS = [
@@ -23,6 +24,7 @@ const MAIN_ITEMS = [
 ];
 
 const MORE_ITEMS = [
+  { to: '/profile', icon: UserCircle, label: 'My Profile' },
   { to: '/visit-log', icon: ScrollText, label: 'Visit Log' },
   { to: '/reports', icon: FileText, label: 'Reports' },
 ];

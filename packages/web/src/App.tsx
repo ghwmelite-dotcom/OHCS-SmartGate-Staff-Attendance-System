@@ -13,6 +13,7 @@ import { AdminPage } from './pages/AdminPage';
 import { VisitLogPage } from './pages/VisitLogPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { ReportsPage } from './pages/ReportsPage';
+import { ProfilePage } from './pages/ProfilePage';
 import { AppLayout } from './components/layout/AppLayout';
 import { useAuthStore } from './stores/auth';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -167,6 +168,7 @@ export function App() {
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="admin" element={<AdminPage />} />
+            <Route path="profile" element={<ProfilePage />} />
           </Route>
           </Routes>
         </BrowserRouter>

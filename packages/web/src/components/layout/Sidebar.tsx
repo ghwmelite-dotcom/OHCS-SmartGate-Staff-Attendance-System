@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, ClipboardCheck, Users, ScrollText, BarChart3, FileText, Settings, LogOut, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { LayoutDashboard, ClipboardCheck, Users, ScrollText, BarChart3, FileText, Settings, LogOut, ChevronsLeft, ChevronsRight, UserCircle } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import { useSidebarStore } from '@/stores/sidebar';
 
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: '/visit-log', icon: ScrollText, label: 'Visit Log' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/reports', icon: FileText, label: 'Reports' },
+  { to: '/profile', icon: UserCircle, label: 'My Profile' },
 ];
 
 const ADMIN_NAV_SUPER = [
