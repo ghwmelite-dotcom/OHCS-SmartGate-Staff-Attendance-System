@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Env } from '../types';
 import { success, created, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
+import { sendTelegramMessage } from '../services/telegram';
 
 export const appointmentsPublicRoutes = new Hono<{ Bindings: Env }>();
 
@@ -66,6 +67,7 @@ interface BookedSlotRow {
 
 interface AppointmentApproverRow {
   user_id: string;
+  telegram_chat_id: string | null;
 }
 
 interface AppointmentRow {
@@ -87,6 +89,7 @@ interface AppointmentRow {
 interface AppointmentWithOfficer extends AppointmentRow {
   officer_name: string;
   officer_title: string | null;
+  officer_telegram_chat_id: string | null;
   directorate_name: string;
 }
 
@@ -263,22 +266,33 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
     body.purpose,
   ).run();
 
-  // 7. Notify approvers
+  // 7. Notify approvers (in-app + Telegram)
   const approvers = await c.env.DB.prepare(
-    `SELECT user_id FROM appointment_approvers WHERE officer_id = ?`
+    `SELECT aa.user_id, u.telegram_chat_id
+     FROM appointment_approvers aa
+     JOIN users u ON u.id = aa.user_id
+     WHERE aa.officer_id = ?`
   ).bind(body.officer_id).all<AppointmentApproverRow>();
+
+  const notifTitle = `New appointment request`;
+  const notifBody = `${body.visitor_name} requests a meeting with ${config.officer_name} on ${body.appointment_date} at ${body.time_slot}`;
 
   for (const approver of approvers.results ?? []) {
     const notifId = `appt-${crypto.randomUUID()}`;
     await c.env.DB.prepare(
       `INSERT INTO notifications (id, user_id, type, title, body, visit_id, created_at)
        VALUES (?, ?, 'appointment_request', ?, ?, NULL, strftime('%Y-%m-%dT%H:%M:%SZ','now'))`
-    ).bind(
-      notifId,
-      approver.user_id,
-      `New appointment request`,
-      `${body.visitor_name} requests a meeting with ${config.officer_name} on ${body.appointment_date} at ${body.time_slot}`,
-    ).run();
+    ).bind(notifId, approver.user_id, notifTitle, notifBody).run();
+
+    if (approver.telegram_chat_id) {
+      try {
+        await sendTelegramMessage({
+          chatId: approver.telegram_chat_id,
+          text: `📋 New Appointment Request\n${notifBody}`,
+          token: c.env.TELEGRAM_BOT_TOKEN,
+        });
+      } catch { /* non-fatal */ }
+    }
   }
 
   return created(c, {
@@ -325,6 +339,7 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
   // 1. Lookup appointment
   const appointment = await c.env.DB.prepare(
     `SELECT a.*, o.name as officer_name, o.title as officer_title,
+            o.telegram_chat_id as officer_telegram_chat_id,
             d.name as directorate_name
      FROM appointments a
      JOIN officers o ON o.id = a.officer_id
@@ -360,9 +375,26 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
      WHERE id = ?`
   ).bind(appointment.id).run();
 
-  // 5. Notify approvers
+  const arrivalTitle = `Appointment arrived`;
+  const arrivalBody = `${appointment.visitor_name} has arrived for their appointment with ${appointment.officer_name} at ${appointment.time_slot}`;
+
+  // 5a. Telegram: notify the officer directly
+  if (appointment.officer_telegram_chat_id) {
+    try {
+      await sendTelegramMessage({
+        chatId: appointment.officer_telegram_chat_id,
+        text: `🏢 Visitor Arrived\n${appointment.visitor_name} is here for your ${appointment.time_slot} appointment`,
+        token: c.env.TELEGRAM_BOT_TOKEN,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  // 5b. Notify approvers (in-app + Telegram)
   const approvers = await c.env.DB.prepare(
-    `SELECT user_id FROM appointment_approvers WHERE officer_id = ?`
+    `SELECT aa.user_id, u.telegram_chat_id
+     FROM appointment_approvers aa
+     JOIN users u ON u.id = aa.user_id
+     WHERE aa.officer_id = ?`
   ).bind(appointment.officer_id).all<AppointmentApproverRow>();
 
   for (const approver of approvers.results ?? []) {
@@ -370,12 +402,17 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
     await c.env.DB.prepare(
       `INSERT INTO notifications (id, user_id, type, title, body, visit_id, created_at)
        VALUES (?, ?, 'appointment_arrived', ?, ?, NULL, strftime('%Y-%m-%dT%H:%M:%SZ','now'))`
-    ).bind(
-      notifId,
-      approver.user_id,
-      `Appointment arrived`,
-      `${appointment.visitor_name} has arrived for their appointment with ${appointment.officer_name}`,
-    ).run();
+    ).bind(notifId, approver.user_id, arrivalTitle, arrivalBody).run();
+
+    if (approver.telegram_chat_id) {
+      try {
+        await sendTelegramMessage({
+          chatId: approver.telegram_chat_id,
+          text: `🏢 Visitor Arrived\n${arrivalBody}`,
+          token: c.env.TELEGRAM_BOT_TOKEN,
+        });
+      } catch { /* non-fatal */ }
+    }
   }
 
   return success(c, {

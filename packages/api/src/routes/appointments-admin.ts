@@ -173,18 +173,35 @@ appointmentsAdminRoutes.patch(
       .bind(session.userId, approver_notes ?? null, id)
       .run();
 
-    // Notify officer via Telegram if they have a chat_id
-    const chatId = appt.telegram_chat_id;
-    if (chatId) {
+    const confirmText = `📅 Appointment confirmed\n${appt.visitor_name} (${appt.visitor_phone}) — ${appt.appointment_date} at ${appt.time_slot}\nPurpose: ${appt.purpose}`;
+
+    // Notify officer via Telegram
+    if (appt.telegram_chat_id) {
       try {
         await sendTelegramMessage({
-          chatId,
-          text: `📅 Appointment confirmed\n${appt.visitor_name} (${appt.visitor_phone}) — ${appt.appointment_date} at ${appt.time_slot}\nPurpose: ${appt.purpose}`,
+          chatId: appt.telegram_chat_id,
+          text: confirmText,
           token: c.env.TELEGRAM_BOT_TOKEN,
         });
-      } catch {
-        // Non-fatal
-      }
+      } catch { /* non-fatal */ }
+    }
+
+    // Notify approvers via Telegram
+    const approversWithTg = await c.env.DB.prepare(
+      `SELECT u.telegram_chat_id
+       FROM appointment_approvers aa
+       JOIN users u ON u.id = aa.user_id
+       WHERE aa.officer_id = ? AND u.telegram_chat_id IS NOT NULL`
+    ).bind(appt.officer_id).all<{ telegram_chat_id: string }>();
+
+    for (const approver of approversWithTg.results ?? []) {
+      try {
+        await sendTelegramMessage({
+          chatId: approver.telegram_chat_id,
+          text: confirmText,
+          token: c.env.TELEGRAM_BOT_TOKEN,
+        });
+      } catch { /* non-fatal */ }
     }
 
     return success(c, { ok: true });
