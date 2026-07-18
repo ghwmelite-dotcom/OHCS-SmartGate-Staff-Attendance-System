@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { api, type Directorate, type Officer } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { Building2, UserPlus, Pencil, Plus } from 'lucide-react';
+import { Building2, UserPlus, Pencil, Plus, Search, X } from 'lucide-react';
 
 const TYPES = [
   { value: 'directorate', label: 'Directorate', color: 'bg-primary/10 text-primary' },
@@ -60,8 +60,21 @@ export function DirectoratesTab() {
     queryFn: () => api.get<OfficerExt[]>('/officers'),
   });
 
+  const [officerSearch, setOfficerSearch] = useState('');
+
   const directorates = dirData?.data ?? [];
   const officers = offData?.data ?? [];
+
+  const oq = officerSearch.trim().toLowerCase();
+  const filteredOfficers = oq
+    ? officers.filter(o =>
+        o.name.toLowerCase().includes(oq) ||
+        (o.title ?? '').toLowerCase().includes(oq) ||
+        (o.staff_id ?? '').toLowerCase().includes(oq) ||
+        (o.directorate_abbr ?? '').toLowerCase().includes(oq) ||
+        (o.email ?? '').toLowerCase().includes(oq)
+      )
+    : officers;
 
   const refreshDirs = () => queryClient.invalidateQueries({ queryKey: ['directorates-admin'] });
   const refreshOfficers = () => queryClient.invalidateQueries({ queryKey: ['officers-admin'] });
@@ -151,13 +164,34 @@ export function DirectoratesTab() {
           <div className="flex items-center gap-2.5">
             <UserPlus className="h-4.5 w-4.5 text-primary" />
             <h3 className="text-base font-bold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
-              Officers ({officers.length})
+              Officers ({oq ? `${filteredOfficers.length} of ${officers.length}` : officers.length})
             </h3>
           </div>
           <button onClick={() => setOffForm({ open: true, editing: null })}
             className="inline-flex items-center gap-1.5 h-9 px-4 bg-primary text-white text-[13px] font-semibold rounded-xl hover:bg-primary-light transition-all shadow-sm">
             <Plus className="h-3.5 w-3.5" /> Add Officer
           </button>
+        </div>
+
+        {/* Search */}
+        <div className="relative px-4 py-3 border-b border-border">
+          <Search className="absolute left-7.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted pointer-events-none" />
+          <input
+            type="search"
+            value={officerSearch}
+            onChange={(e) => setOfficerSearch(e.target.value)}
+            placeholder="Search by name, title, staff ID, directorate or email…"
+            className="w-full h-10 pl-9 pr-4 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted"
+          />
+          {oq && (
+            <button
+              onClick={() => setOfficerSearch('')}
+              className="absolute right-7 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {offForm.open && (
@@ -185,7 +219,7 @@ export function DirectoratesTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {officers.map(o => (
+              {filteredOfficers.map(o => (
                 <tr key={o.id} className={cn('hover:bg-background-warm/50 transition-colors', !o.is_available && 'opacity-55')}>
                   <td className="px-6 py-3 text-[14px] font-semibold text-foreground">{o.name}</td>
                   <td className="px-6 py-3 text-[14px] text-muted">{o.title ?? '—'}</td>
@@ -223,6 +257,13 @@ export function DirectoratesTab() {
                   </td>
                 </tr>
               ))}
+              {filteredOfficers.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-6 py-10 text-center text-[14px] text-muted">
+                    {oq ? `No officers match "${officerSearch}"` : 'No officers yet'}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
