@@ -17,14 +17,17 @@ import {
   UserPlus,
   Pencil,
   Power,
+  Sparkles,
   X,
 } from 'lucide-react';
+import { toast } from '@/stores/toast';
 
 interface UserRecord {
   id: string;
   name: string;
   email: string;
   staff_id: string | null;
+  phone: string | null;
   role: string;
   grade: string | null;
   directorate_abbr: string | null;
@@ -43,6 +46,20 @@ const ROLES = [
   { value: 'staff', label: 'Staff', color: 'bg-success/10 text-success' },
 ] as const;
 
+type ReadinessLevel = 'ready' | 'partial' | 'inactive';
+
+function getReadiness(user: UserRecord): ReadinessLevel {
+  if (!user.is_active) return 'inactive';
+  if (!user.phone || user.email.endsWith('@ohcs.internal')) return 'partial';
+  return 'ready';
+}
+
+const READINESS_BADGE: Record<ReadinessLevel, { label: string; cls: string }> = {
+  ready:    { label: 'Ready',    cls: 'bg-success/10 text-success' },
+  partial:  { label: 'Partial',  cls: 'bg-accent/15 text-accent-warm' },
+  inactive: { label: 'Inactive', cls: 'bg-border text-muted-foreground' },
+};
+
 const createUserSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   email: z.string().email('Invalid email').max(255),
@@ -50,6 +67,7 @@ const createUserSchema = z.object({
   pin: z.string().length(4, 'PIN must be 4 digits').regex(/^\d{4}$/, 'PIN must be 4 digits'),
   role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']),
   grade: z.string().max(100).optional(),
+  phone: z.string().max(20).optional(),
   directorate_code: z.string().max(20).optional(),
 });
 type CreateUserForm = z.infer<typeof createUserSchema>;
@@ -60,6 +78,7 @@ const editUserSchema = z.object({
   staff_id: z.string().min(1).max(20),
   role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']),
   grade: z.string().max(100).optional(),
+  phone: z.string().max(20).optional(),
   directorate_code: z.string().max(20).optional(),
   pin: z.string().length(4).regex(/^\d{4}$/).or(z.literal('')).optional(),
 });
@@ -184,6 +203,32 @@ function UsersTab() {
     queryFn: () => api.get<UserRecord[]>('/users'),
   });
 
+  const { data: unprovisionedData, refetch: refetchUnprovisioned } = useQuery({
+    queryKey: ['unprovisioned-count'],
+    queryFn: () => api.get<{ count: number }>('/users/unprovisioned-count'),
+  });
+  const unprovisionedCount = unprovisionedData?.data?.count ?? 0;
+
+  const provisionMutation = useMutation({
+    mutationFn: () =>
+      api.post<{ provisioned: number; skipped: number; skipped_details: string[] }>(
+        '/users/provision-from-officers', {}
+      ),
+    onSuccess: (res) => {
+      const d = res.data;
+      if (d) {
+        if (d.provisioned > 0) {
+          toast.success(`${d.provisioned} account${d.provisioned !== 1 ? 's' : ''} created`);
+        } else {
+          toast.success('All officers with staff IDs already have accounts');
+        }
+        if (d.skipped > 0) toast.error(`${d.skipped} skipped — check Bulk Import tab`);
+      }
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      refetchUnprovisioned();
+    },
+  });
+
   const toggleActiveMutation = useMutation({
     mutationFn: (user: UserRecord) =>
       user.is_active
@@ -196,15 +241,39 @@ function UsersTab() {
 
   return (
     <div className="space-y-6">
-      {/* Add User button (NSS registration moved to NSS tab) */}
-      <div className="flex justify-end gap-3">
-        <button
-          onClick={() => { setShowCreate(true); setEditingUser(null); }}
-          className="inline-flex items-center gap-2 h-11 px-5 bg-primary text-white text-[14px] font-semibold rounded-xl hover:bg-primary-light transition-all shadow-lg shadow-primary/15 active:scale-[0.98]"
-        >
-          <UserPlus className="h-4.5 w-4.5" />
-          Add User
-        </button>
+      {/* Header: stats + actions */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-4 text-[13px]">
+          <span className="text-success font-semibold">
+            {users.filter(u => getReadiness(u) === 'ready').length} ready
+          </span>
+          <span className="text-accent-warm font-semibold">
+            {users.filter(u => getReadiness(u) === 'partial').length} partial
+          </span>
+          {unprovisionedCount > 0 && (
+            <span className="text-muted font-semibold">{unprovisionedCount} no account</span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3">
+          {unprovisionedCount > 0 && (
+            <button
+              onClick={() => provisionMutation.mutate()}
+              disabled={provisionMutation.isPending}
+              className="inline-flex items-center gap-2 h-10 px-4 bg-surface border border-border text-[13px] font-semibold rounded-xl hover:border-primary/40 transition-all disabled:opacity-50"
+            >
+              <Sparkles className="h-4 w-4 text-primary" />
+              {provisionMutation.isPending ? 'Provisioning…' : `Provision ${unprovisionedCount} Missing`}
+            </button>
+          )}
+          <button
+            onClick={() => { setShowCreate(true); setEditingUser(null); }}
+            className="inline-flex items-center gap-2 h-11 px-5 bg-primary text-white text-[14px] font-semibold rounded-xl hover:bg-primary-light transition-all shadow-lg shadow-primary/15 active:scale-[0.98]"
+          >
+            <UserPlus className="h-4.5 w-4.5" />
+            Add User
+          </button>
+        </div>
       </div>
 
       {/* Create / Edit modal */}
@@ -264,10 +333,11 @@ function UsersTab() {
                 <tr className="border-b border-border bg-background/50">
                   <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Name</th>
                   <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Staff ID</th>
-                  <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Grade</th>
+                  <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide hidden md:table-cell">Grade</th>
+                  <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide hidden lg:table-cell">Phone</th>
                   <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Dir</th>
                   <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Role</th>
-                  <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Status</th>
+                  <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Readiness</th>
                   <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide hidden xl:table-cell">Last Login</th>
                   <th className="text-right px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Actions</th>
                 </tr>
@@ -288,8 +358,11 @@ function UsersTab() {
                       <td className="px-6 py-4">
                         <span className="text-[14px] font-mono font-medium text-foreground">{user.staff_id ?? '—'}</span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 hidden md:table-cell">
                         <span className="text-[14px] text-muted">{user.grade ?? '—'}</span>
+                      </td>
+                      <td className="px-6 py-4 hidden lg:table-cell">
+                        <span className="text-[13px] font-mono text-muted">{user.phone ?? '—'}</span>
                       </td>
                       <td className="px-6 py-4">
                         {user.directorate_abbr ? (
@@ -307,18 +380,20 @@ function UsersTab() {
                         </span>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={cn(
-                          'inline-flex items-center gap-1.5 text-[13px] font-medium',
-                          user.is_active ? 'text-success' : 'text-muted-foreground'
-                        )}>
-                          <div className={cn(
-                            'w-2 h-2 rounded-full',
-                            user.is_active ? 'bg-success' : 'bg-muted-foreground'
-                          )} />
-                          {user.is_active ? 'Active' : 'Inactive'}
-                        </span>
+                        {(() => {
+                          const r = getReadiness(user);
+                          const cfg = READINESS_BADGE[r];
+                          return (
+                            <span className={cn(
+                              'inline-flex items-center gap-1.5 h-6 px-2.5 text-[11px] font-bold rounded-lg uppercase tracking-wide',
+                              cfg.cls
+                            )}>
+                              {cfg.label}
+                            </span>
+                          );
+                        })()}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 hidden xl:table-cell">
                         <span className="text-[13px] text-muted">
                           {user.last_login_at ? formatDate(user.last_login_at) : 'Never'}
                         </span>
@@ -363,7 +438,7 @@ function UsersTab() {
 function CreateUserModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const form = useForm<CreateUserForm>({
     resolver: zodResolver(createUserSchema),
-    defaultValues: { name: '', email: '', staff_id: '', pin: '', role: 'staff', grade: '', directorate_code: '' },
+    defaultValues: { name: '', email: '', staff_id: '', pin: '', role: 'staff', grade: '', phone: '', directorate_code: '' },
   });
 
   const mutation = useMutation({
@@ -411,9 +486,12 @@ function CreateUserModal({ onClose, onSuccess }: { onClose: () => void; onSucces
             </FormField>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <FormField label="Grade / Designation">
               <input {...form.register('grade')} className={inputCls} placeholder="e.g. Snr IT/IM Technician" />
+            </FormField>
+            <FormField label="Phone">
+              <input {...form.register('phone')} type="tel" className={inputCls} placeholder="0241234567" inputMode="tel" />
             </FormField>
             <FormField label="Directorate Code">
               <input {...form.register('directorate_code')} className={cn(inputCls, 'uppercase')} placeholder="e.g. RSIMD" />
@@ -455,6 +533,7 @@ function EditUserModal({ user, onClose, onSuccess }: { user: UserRecord; onClose
       staff_id: user.staff_id ?? '',
       role: user.role as EditUserForm['role'],
       grade: user.grade ?? '',
+      phone: user.phone ?? '',
       directorate_code: user.directorate_abbr ?? '',
       pin: '',
     },
@@ -509,9 +588,12 @@ function EditUserModal({ user, onClose, onSuccess }: { user: UserRecord; onClose
             </FormField>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <FormField label="Grade / Designation">
               <input {...form.register('grade')} className={inputCls} placeholder="e.g. Snr IT/IM Technician" />
+            </FormField>
+            <FormField label="Phone">
+              <input {...form.register('phone')} type="tel" className={inputCls} inputMode="tel" />
             </FormField>
             <FormField label="Directorate Code">
               <input {...form.register('directorate_code')} className={cn(inputCls, 'uppercase')} placeholder="e.g. RSIMD" />
