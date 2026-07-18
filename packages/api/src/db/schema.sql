@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS users (
     intern_code         TEXT,
     institution         TEXT,
     programme           TEXT,
-    supervisor_user_id  TEXT REFERENCES users(id)
+    supervisor_user_id  TEXT REFERENCES users(id),
+    phone               TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_staff_id ON users(staff_id);
