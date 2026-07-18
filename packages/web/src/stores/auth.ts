@@ -6,7 +6,10 @@ interface User {
   id: string;
   name: string;
   email: string;
+  staff_id: string | null;
+  phone: string | null;
   role: string;
+  pin_acknowledged?: boolean;
 }
 
 interface AuthState {
@@ -17,6 +20,7 @@ interface AuthState {
   verify: (email: string, code: string, remember: boolean) => Promise<void>;
   logout: () => Promise<void>;
   checkSession: () => Promise<void>;
+  updateProfile: (patch: { phone?: string; email?: string; current_pin?: string }) => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -68,5 +72,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch {
       set({ user: null, isLoading: false });
     }
+  },
+
+  updateProfile: async (patch) => {
+    const res = await api.patch<{ user: User }>('/auth/profile', patch);
+    const u = res.data?.user;
+    if (u) set((s) => ({ user: s.user ? { ...s.user, ...u } : u }));
   },
 }));
