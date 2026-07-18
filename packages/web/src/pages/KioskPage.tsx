@@ -12,7 +12,7 @@ import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
 import { OfficerCombobox } from '@/components/checkin/OfficerCombobox';
 import { suggestDirectorate, groupDirectorates } from '@/lib/directorate-routing';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
-import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert, MapPin, CalendarDays, Clock3 } from 'lucide-react';
+import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert, MapPin, CalendarDays, Clock3, Calendar, ArrowLeft } from 'lucide-react';
 
 const visitorSchema = z.object({
   first_name: z.string().min(1, 'First name is required').max(100),
@@ -27,7 +27,21 @@ const visitorSchema = z.object({
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
 
-type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-pin' | 'checkout-confirm' | 'checkout-done';
+type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-pin' | 'checkout-confirm' | 'checkout-done' | 'appointment' | 'appointment-confirm' | 'appointment-done';
+
+interface AppointmentLookup {
+  id: string;
+  officer_name: string;
+  officer_title?: string;
+  directorate_name: string;
+  visitor_name: string;
+  visitor_phone: string;
+  appointment_date: string;
+  time_slot: string;
+  status: string;
+  reference_code: string;
+  purpose: string;
+}
 
 // Short banner/label for a closed office, by reason.
 function officeBannerText(o: KioskOfficeStatus): string {
@@ -59,6 +73,11 @@ export function KioskPage() {
   const [pinSubmitting, setPinSubmitting] = useState(false);
   const checkingInRef = useRef(false);
   const checkingOutRef = useRef(false);
+
+  const [apptRef, setApptRef] = useState('');
+  const [apptData, setApptData] = useState<AppointmentLookup | null>(null);
+  const [apptLoading, setApptLoading] = useState(false);
+  const [apptError, setApptError] = useState('');
 
   const form = useForm<VisitorForm>({
     resolver: zodResolver(visitorSchema),
@@ -170,6 +189,10 @@ export function KioskPage() {
     setCheckoutVisit(null);
     checkingInRef.current = false;
     checkingOutRef.current = false;
+    setApptRef('');
+    setApptData(null);
+    setApptLoading(false);
+    setApptError('');
     setMode('welcome');
   }
 
@@ -254,6 +277,9 @@ export function KioskPage() {
             </button>
             <button onClick={() => { setSubmitError(null); setMode('checkout-scan'); }} className="w-full h-14 bg-surface text-foreground text-base font-semibold rounded-xl border border-border inline-flex items-center justify-center gap-2 active:scale-[0.99]">
               <LogOut className="h-5 w-5" /> Check Out
+            </button>
+            <button onClick={() => { setApptRef(''); setMode('appointment'); }} className="w-full h-14 bg-surface text-foreground text-base font-semibold rounded-xl border border-border inline-flex items-center justify-center gap-2 active:scale-[0.99]">
+              <Calendar className="h-5 w-5" /> I Have an Appointment
             </button>
           </div>
         )}
@@ -540,6 +566,207 @@ export function KioskPage() {
             <button onClick={resetAll} className="h-11 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Done</button>
           </div>
         )}
+
+        {mode === 'appointment' && (
+          <div className="mt-6 space-y-5">
+            <button
+              type="button"
+              onClick={() => setMode('welcome')}
+              className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4" /> Back
+            </button>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">I Have an Appointment</h2>
+              <p className="text-sm text-muted mt-0.5">Enter your reference code to check in</p>
+            </div>
+            <div className="bg-surface rounded-xl border border-border shadow-sm p-5 space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted uppercase tracking-wide">Reference Code</label>
+                <input
+                  type="text"
+                  value={apptRef}
+                  onChange={(e) => setApptRef(e.target.value.toUpperCase())}
+                  maxLength={6}
+                  placeholder="e.g. ABC123"
+                  className="w-full h-12 px-3 rounded-lg border border-border bg-background text-sm font-mono uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-primary text-center text-base font-bold"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && apptRef.length >= 3 && !apptLoading) {
+                      e.preventDefault();
+                      void (async () => {
+                        setApptLoading(true);
+                        setApptError('');
+                        try {
+                          const res = await fetch(`/api/appointments/public/ref/${apptRef.trim()}`);
+                          const data = await res.json() as { appointment?: AppointmentLookup; message?: string };
+                          if (!res.ok) {
+                            setApptError(data.message ?? 'Appointment not found.');
+                          } else {
+                            setApptData(data.appointment ?? null);
+                            setMode('appointment-confirm');
+                          }
+                        } catch {
+                          setApptError('Could not connect. Please try again.');
+                        } finally {
+                          setApptLoading(false);
+                        }
+                      })();
+                    }
+                  }}
+                />
+              </div>
+              {apptError && (
+                <p className="text-danger text-sm">{apptError}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              disabled={apptRef.length < 3 || apptLoading}
+              onClick={async () => {
+                setApptLoading(true);
+                setApptError('');
+                try {
+                  const res = await fetch(`/api/appointments/public/ref/${apptRef.trim()}`);
+                  const data = await res.json() as { appointment?: AppointmentLookup; message?: string };
+                  if (!res.ok) {
+                    setApptError(data.message ?? 'Appointment not found.');
+                  } else {
+                    setApptData(data.appointment ?? null);
+                    setMode('appointment-confirm');
+                  }
+                } catch {
+                  setApptError('Could not connect. Please try again.');
+                } finally {
+                  setApptLoading(false);
+                }
+              }}
+              className="w-full h-14 bg-primary text-white text-base font-semibold rounded-xl inline-flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.99]"
+            >
+              {apptLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Calendar className="h-5 w-5" />}
+              {apptLoading ? 'Looking up…' : 'Look Up'}
+            </button>
+          </div>
+        )}
+
+        {mode === 'appointment-confirm' && apptData && (
+          <div className="mt-6 space-y-5">
+            <button
+              type="button"
+              onClick={() => { setApptData(null); setMode('appointment'); }}
+              className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4" /> Back
+            </button>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Your Appointment</h2>
+            </div>
+            <div className="bg-surface rounded-xl border border-border shadow-sm overflow-hidden">
+              <div className="bg-primary/8 px-4 py-2.5 border-b border-primary/15 flex items-center gap-2">
+                <Calendar className="h-3.5 w-3.5 text-primary shrink-0" />
+                <p className="text-[11px] font-semibold text-primary tracking-wide uppercase">Appointment Details</p>
+              </div>
+              <div className="divide-y divide-border/60">
+                <div className="flex items-start gap-3 px-4 py-2.5">
+                  <span className="mt-0.5 text-muted shrink-0"><User className="h-3.5 w-3.5" /></span>
+                  <span className="w-24 shrink-0 text-[11px] font-medium text-muted">Meeting with</span>
+                  <span className="text-[13px] font-semibold text-foreground leading-snug">
+                    {apptData.officer_name}
+                    {apptData.officer_title && <span className="font-normal text-muted"> — {apptData.officer_title}</span>}
+                  </span>
+                </div>
+                <div className="flex items-start gap-3 px-4 py-2.5">
+                  <span className="mt-0.5 text-muted shrink-0"><Building2 className="h-3.5 w-3.5" /></span>
+                  <span className="w-24 shrink-0 text-[11px] font-medium text-muted">Directorate</span>
+                  <span className="text-[13px] font-semibold text-foreground leading-snug">{apptData.directorate_name}</span>
+                </div>
+                <div className="flex items-start gap-3 px-4 py-2.5">
+                  <span className="mt-0.5 text-muted shrink-0"><CalendarDays className="h-3.5 w-3.5" /></span>
+                  <span className="w-24 shrink-0 text-[11px] font-medium text-muted">Date</span>
+                  <span className="text-[13px] font-semibold text-foreground leading-snug">
+                    {new Date(apptData.appointment_date).toLocaleDateString('en-GH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                  </span>
+                </div>
+                <div className="flex items-start gap-3 px-4 py-2.5">
+                  <span className="mt-0.5 text-muted shrink-0"><Clock3 className="h-3.5 w-3.5" /></span>
+                  <span className="w-24 shrink-0 text-[11px] font-medium text-muted">Time</span>
+                  <span className="text-[13px] font-semibold text-foreground leading-snug">{apptData.time_slot}</span>
+                </div>
+                <div className="flex items-start gap-3 px-4 py-2.5">
+                  <span className="mt-0.5 text-muted shrink-0"><User className="h-3.5 w-3.5" /></span>
+                  <span className="w-24 shrink-0 text-[11px] font-medium text-muted">Name</span>
+                  <span className="text-[13px] font-semibold text-foreground leading-snug">{apptData.visitor_name}</span>
+                </div>
+                <div className="flex items-start gap-3 px-4 py-2.5">
+                  <span className="mt-0.5 text-muted shrink-0"><MapPin className="h-3.5 w-3.5" /></span>
+                  <span className="w-24 shrink-0 text-[11px] font-medium text-muted">Reference</span>
+                  <span className="text-[13px] font-mono font-bold text-accent leading-snug tracking-widest">{apptData.reference_code}</span>
+                </div>
+              </div>
+            </div>
+
+            {apptData.status !== 'confirmed' && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-accent/30 bg-accent/10 px-4 py-3">
+                <ShieldAlert className="h-4.5 w-4.5 text-accent-warm shrink-0 mt-0.5" />
+                <p className="text-[13px] text-foreground">
+                  {apptData.status === 'pending' && 'Your appointment is pending approval. Please check back later or contact reception.'}
+                  {apptData.status === 'completed' && 'This appointment has already been checked in.'}
+                  {(apptData.status === 'declined' || apptData.status === 'cancelled') && 'This appointment was cancelled. Please contact reception.'}
+                </p>
+              </div>
+            )}
+
+            {apptError && <p className="text-danger text-sm">{apptError}</p>}
+
+            {apptData.status === 'confirmed' ? (
+              <button
+                type="button"
+                disabled={apptLoading}
+                onClick={async () => {
+                  setApptLoading(true);
+                  setApptError('');
+                  try {
+                    const res = await fetch('/api/appointments/public/arrive', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ reference_code: apptData.reference_code }),
+                    });
+                    const data = await res.json() as { code?: string; message?: string };
+                    if (!res.ok) {
+                      if (data.code === 'APPT_WRONG_DATE') {
+                        setApptError('Your appointment is not scheduled for today.');
+                      } else {
+                        setApptError(data.message ?? 'Could not confirm arrival. Please see reception.');
+                      }
+                    } else {
+                      setMode('appointment-done');
+                    }
+                  } catch {
+                    setApptError('Could not connect. Please try again.');
+                  } finally {
+                    setApptLoading(false);
+                  }
+                }}
+                className="w-full h-14 bg-primary text-white text-base font-semibold rounded-xl inline-flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.99]"
+              >
+                {apptLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <CheckCircle2 className="h-5 w-5" />}
+                {apptLoading ? 'Confirming…' : 'Confirm My Arrival'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={resetAll}
+                className="w-full h-14 bg-surface text-foreground text-base font-semibold rounded-xl border border-border inline-flex items-center justify-center gap-2 active:scale-[0.99]"
+              >
+                Return to Start
+              </button>
+            )}
+          </div>
+        )}
+
+        {mode === 'appointment-done' && apptData && (
+          <AppointmentDoneScreen apptData={apptData} onReset={resetAll} />
+        )}
       </div>
     </div>
   );
@@ -566,6 +793,36 @@ function KioskBadgeQr({ badgeCode }: { badgeCode: string }) {
     });
   }, [badgeCode]);
   return <canvas ref={canvasRef} className="mx-auto rounded-lg" />;
+}
+
+function AppointmentDoneScreen({ apptData, onReset }: { apptData: AppointmentLookup; onReset: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onReset, 10_000);
+    return () => clearTimeout(timer);
+  }, [onReset]);
+
+  return (
+    <div className="mt-6 text-center space-y-5">
+      <div className="w-16 h-16 bg-success/10 rounded-full flex items-center justify-center mx-auto">
+        <CheckCircle2 className="h-8 w-8 text-success" />
+      </div>
+      <div>
+        <h2 className="text-xl font-bold text-foreground">Welcome!</h2>
+        <p className="text-sm text-muted mt-1">
+          Your arrival has been confirmed. Please proceed to the{' '}
+          <span className="font-semibold text-foreground">{apptData.directorate_name}</span> office.
+        </p>
+      </div>
+      <p className="text-xs text-muted">A member of staff will attend to you shortly.</p>
+      <button
+        type="button"
+        onClick={onReset}
+        className="h-12 px-6 bg-primary text-white text-sm font-semibold rounded-xl inline-flex items-center gap-2"
+      >
+        Return to Start
+      </button>
+    </div>
+  );
 }
 
 function VisitInfoCard({ visit }: { visit: import('@/lib/kioskApi').KioskVisit }) {
