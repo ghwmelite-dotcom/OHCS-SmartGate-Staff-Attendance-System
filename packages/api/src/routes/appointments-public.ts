@@ -105,7 +105,7 @@ appointmentsPublicRoutes.get('/officers', async (c) => {
      FROM bookable_officers bo
      JOIN officers o ON o.id = bo.officer_id
      JOIN directorates d ON d.id = o.directorate_id
-     WHERE bo.is_active = 1 AND o.is_active = 1
+     WHERE bo.is_active = 1 AND o.is_available = 1
      ORDER BY o.name`
   ).all();
   return success(c, { officers: rows.results ?? [] });
@@ -185,7 +185,7 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
             o.name as officer_name
      FROM bookable_officers bo
      JOIN officers o ON o.id = bo.officer_id
-     WHERE bo.officer_id = ? AND bo.is_active = 1 AND o.is_active = 1`
+     WHERE bo.officer_id = ? AND bo.is_active = 1 AND o.is_available = 1`
   ).bind(body.officer_id).first<BookableOfficerRow & { officer_name: string }>();
 
   if (!config) {
