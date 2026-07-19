@@ -38,6 +38,7 @@ import { attendanceRoutes } from './routes/attendance';
 import { sendDailySummary as sendDailySummaryFn } from './services/daily-summary';
 import { sendClockReminders, sendMonthlyReportReady } from './services/reminders';
 import { runNssEndOfServiceCheck } from './services/nss-eos';
+import { runCheckoutSweep } from './services/checkout-sweep';
 import { purgeExpiredVisitorPhotos } from './services/photo-purge';
 import { exportBackupToR2, verifyLatestBackup } from './services/backup';
 import { alertAdminError } from './lib/error-alert';
@@ -189,6 +190,14 @@ export default {
           } catch (err) {
             console.error(`[scheduled] nss-eos failed: ${err instanceof Error ? err.message : String(err)}`);
             await alertAdminError(env, 'cron:nss-eos', err);
+          }
+          break;
+        case '15 17 * * 1-5':
+          try {
+            await runCheckoutSweep(env);
+          } catch (err) {
+            console.error(`[scheduled] checkout-sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+            await alertAdminError(env, 'cron:checkout-sweep', err);
           }
           break;
         case '0 2 * * *':

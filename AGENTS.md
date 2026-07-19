@@ -113,7 +113,9 @@ relevant conventions; the user says "work the loop" to activate it.
 |---|---|---|
 | Presence QR (rotating proof-of-presence) | **Shipped dark** (`presence_qr_mode=0`); display at `/presence-display`; scan-first clock flow; deep-link prefill; enforce-on-clock-in / flag-on-clock-out | Mount reception tablet (`docs/ops/presence-display-setup.md`) → mode 1 (shadow) → real-device test → mode 2 after ~2 wks |
 | Attendance risk fusion | **Shipped dark** (`risk_fusion_mode=0`); scoring persists on every clock event; distribution + disposition endpoints live | Set mode 1 anytime (free calibration data); tune `WEIGHTS` in `risk-score.ts` after 2 wks; block band via separate `risk_fusion_block_enabled` |
-| Telegram arrival actions | **Shipped live** (no flag — additive UX); host alerts carry Coming down / Waiting area / Reschedule buttons; first response wins; chips in dashboard + visit log | Needs `migration-visits-host-response` applied on prod; then one real test check-in to a Telegram-linked officer |
+| Telegram arrival actions | **Shipped live** (no flag — additive UX); host alerts carry Coming down / Waiting area / Reschedule buttons; first response wins; chips in dashboard + visit log | Migration applied (54/54); pending one real-world tap test |
+| Appointment email QR + kiosk scan | **Shipped live**; confirmed-appointment email carries an email-safe HTML-table QR of the ref code; kiosk appointment mode has "Scan QR instead" converging on the same lookup | Manual: real confirmation email → phone → kiosk scan |
+| Auto-checkout sweep | **Shipped live**; cron `15 17 * * 1-5` (skips weekends/holidays) alerts reception via in-app/push (`checkout_sweep` type) + Telegram admin chat; `POST /visits/bulk-checkout` + amber dashboard banner after close | Confirm new cron trigger registered after deploy; watch first weekday 17:15 run |
 | Face-match (enrolled reference) | **Design-only** — specs from 2026-04 exist, no implementation | Its own project; risk-fusion input stays optional until then |
 | Comms (announcements/feedback/chat) | Plans exist in `docs/superpowers/plans/2026-04-28-*`, not built | Chat plan has policy prerequisites flagged |
 

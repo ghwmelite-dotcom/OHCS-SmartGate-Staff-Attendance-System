@@ -6,6 +6,7 @@ import { apiOrQueue } from '@/lib/offlineQueue';
 import { cn, formatTime, timeAgo } from '@/lib/utils';
 import { VisitorAvatar } from '@/components/VisitorAvatar';
 import { HostResponseChip } from '@/components/HostResponseChip';
+import type { AppSettings } from '@/components/admin/SettingsModal';
 import { toast } from '@/stores/toast';
 import { playCheckOutChime } from '@/lib/sounds';
 import {
@@ -17,6 +18,7 @@ import {
   ArrowRight,
   Search,
   Flame,
+  AlertTriangle,
 } from 'lucide-react';
 
 export function DashboardPage() {
@@ -38,6 +40,15 @@ export function DashboardPage() {
       ),
   });
 
+  // Office close time for the still-in-building banner. Receptionists can't
+  // read /admin/settings (403) — the query just fails and we fall back to the
+  // 17:00 default.
+  const { data: settingsData } = useQuery({
+    queryKey: ['app-settings'],
+    queryFn: () => api.get<AppSettings>('/admin/settings'),
+    staleTime: 60_000,
+  });
+
   const checkOutMutation = useMutation({
     mutationFn: (visitId: string) => apiOrQueue<unknown>('visit-queue', `/visits/${visitId}/check-out`, {}),
     onSuccess: () => {
@@ -48,8 +59,26 @@ export function DashboardPage() {
     },
   });
 
+  const bulkCheckOutMutation = useMutation({
+    mutationFn: () => api.post<{ checked_out: number }>('/visits/bulk-checkout', {}),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['visits'] });
+      toast.success(`Checked out ${res.data?.checked_out ?? 0} visitor(s)`);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Bulk checkout failed');
+    },
+  });
+
   const active = activeVisits?.data ?? [];
   const today = todayVisits?.data ?? [];
+
+  // Past office close? Ghana is UTC+0 year-round, so local browser time at the
+  // office matches working-hours settings.
+  const closeTime = settingsData?.data?.work_end_time ?? '17:00';
+  const [closeH, closeM] = closeTime.split(':').map(Number);
+  const now = new Date();
+  const pastClose = now.getHours() * 60 + now.getMinutes() >= (closeH ?? 17) * 60 + (closeM ?? 0);
   const checkedOutToday = today.filter((v) => v.status === 'checked_out').length;
   const avgDuration =
     today.filter((v) => v.duration_minutes).length > 0
@@ -125,6 +154,35 @@ export function DashboardPage() {
           Find Visitor
         </button>
       </div>
+
+      {/* Still-in-building banner — only after office close with open visits */}
+      {pastClose && active.length > 0 && (
+        <div className="bg-accent/10 rounded-2xl border border-accent/15 shadow-sm p-4 flex flex-wrap items-center gap-3 animate-fade-in-up">
+          <div className="w-9 h-9 rounded-xl bg-accent/15 flex items-center justify-center shrink-0">
+            <AlertTriangle className="h-4 w-4 text-accent-warm" />
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <p className="text-[14px] font-semibold text-foreground">
+              {active.length} visitor{active.length === 1 ? '' : 's'} still marked in building.
+            </p>
+            <p className="text-[12px] text-muted mt-0.5">
+              The office has closed — please verify and check them out.
+            </p>
+          </div>
+          <button
+            onClick={() => bulkCheckOutMutation.mutate()}
+            disabled={bulkCheckOutMutation.isPending}
+            className={cn(
+              'inline-flex items-center gap-2 h-9 px-4 text-[12px] font-semibold rounded-xl transition-all shrink-0',
+              'bg-accent text-white hover:bg-accent-warm shadow-sm active:scale-[0.98]',
+              bulkCheckOutMutation.isPending && 'opacity-50 cursor-wait'
+            )}
+          >
+            <LogOutIcon className="h-3.5 w-3.5" />
+            {bulkCheckOutMutation.isPending ? 'Checking out...' : 'Check out all'}
+          </button>
+        </div>
+      )}
 
       {/* Active visits - live feed */}
       <div className="bg-surface rounded-2xl border border-border shadow-sm overflow-hidden animate-fade-in-up stagger-4">

@@ -7,6 +7,7 @@ import { requireRole } from '../lib/require-role';
 import { resolveDirectorateScope } from '../lib/directorate-scope';
 import { checkOutById } from '../services/check-out';
 import { performCheckIn } from '../services/check-in';
+import { recordAudit, auditActorFromContext } from '../services/audit';
 import { z } from 'zod';
 
 export const visitRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
@@ -139,6 +140,43 @@ visitRoutes.post('/check-in', zValidator('json', CheckInSchema), async (c) => {
 
   if (!result.ok) return notFound(c, 'Visitor');
   return created(c, result.visit);
+});
+
+const bulkCheckoutSchema = z.object({
+  ids: z.array(z.string()).optional(),
+});
+
+// End-of-day cleanup (spec §2): close all open visits, or only the given ids,
+// in one guarded UPDATE. Deliberately does NOT fan out per-visit host
+// notifications (end-of-day cleanup should not spam hosts) and never touches
+// checkout_pin records.
+visitRoutes.post('/bulk-checkout', zValidator('json', bulkCheckoutSchema), async (c) => {
+  const blocked = requireRole(c, 'receptionist', 'admin', 'superadmin');
+  if (blocked) return blocked;
+  const { ids } = c.req.valid('json');
+  const session = c.get('session');
+  const now = new Date().toISOString();
+
+  // Maintains the same field triplet checkOutById sets: status + check_out_at
+  // + duration_minutes, guarded so already-closed/cancelled rows never match.
+  let sql = `UPDATE visits
+             SET status = 'checked_out', check_out_at = ?,
+                 duration_minutes = CAST(ROUND((julianday(?) - julianday(check_in_at)) * 1440) AS INTEGER)
+             WHERE status = 'checked_in' AND check_out_at IS NULL`;
+  const params: unknown[] = [now, now];
+  if (ids && ids.length > 0) {
+    sql += ` AND id IN (${ids.map(() => '?').join(',')})`;
+    params.push(...ids);
+  }
+  const res = await c.env.DB.prepare(sql).bind(...params).run();
+  const checkedOut = res.meta?.changes ?? 0;
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'visit.bulk_checkout',
+    entityType: 'visit',
+    summary: `Bulk checkout — ${checkedOut} visit(s) closed by ${session.name}${ids?.length ? ` (${ids.length} id(s) specified)` : ' (all open)'}`,
+  });
+  return success(c, { checked_out: checkedOut });
 });
 
 visitRoutes.post('/:id/check-out', async (c) => {

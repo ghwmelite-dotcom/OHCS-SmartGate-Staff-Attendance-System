@@ -7,7 +7,7 @@ import { recordNotifyOutcome, isDeadPushStatus } from '../lib/notify-metrics';
 
 const PERSONAL_CATEGORIES = ['personal_visit'];
 
-const PUSH_WHITELIST = new Set(['visitor_arrival', 'clock_reminder', 'late_clock_alert', 'monthly_report_ready', 'absence_notice']);
+const PUSH_WHITELIST = new Set(['visitor_arrival', 'clock_reminder', 'late_clock_alert', 'monthly_report_ready', 'absence_notice', 'checkout_sweep']);
 
 interface VisitNotifyData {
   visit_id: string;
