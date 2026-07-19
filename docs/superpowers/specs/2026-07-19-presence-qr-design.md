@@ -76,12 +76,13 @@ New key: `presence_qr_mode` — `0` off (default), `1` shadow (record-only), `2`
 
 **New public route:** `/presence-display` in `packages/web` (served from `smartgate.ohcsghana.org`; the tablet loads it directly). No auth.
 
-Fullscreen page, dark background (Kente token palette), showing:
-- Large centered QR (`qrcode` package already in `packages/web`) encoding `https://staff-attendance.ohcsghana.org/clock?presence=<token>`
-- Current time + date, `office_open` status line
-- Small countdown ring showing time to next rotation
+Fullscreen page, dark Kente gradient with a gold hairline deco frame. Two-panel layout on landscape tablets (brand + clock + office status left, QR badge right), stacked on portrait, showing:
+- Brand row: OHCS logo in a gold-ringed frame, "OHCS Presence Display", and the scan instruction line
+- Large Playfair clock (gold seconds) + date, and an office open/closed status pill
+- The QR badge: a white rounded card with a hairline-framed QR inset (`qrcode` package already in `packages/web`) encoding `https://staff-attendance.ohcsghana.org/clock?presence=<token>`, an ambient gold halo, and an in-card countdown hairline + "refreshes in Ns" caption
+- QR card is sized in vh units only (never % of flex height) so it can never crowd the clock or the flag bar; canvas is absolutely positioned so its intrinsic bitmap size can't distort the card
 - On fetch failure: explicit "QR UNAVAILABLE — see reception" state (never a stale QR)
-- Subtle position jitter (±2% translate per rotation) to mitigate OLED burn-in
+- ±2% position jitter per rotation to mitigate OLED burn-in; Ghana flag bar with gold glow at the bottom edge
 
 Polls `GET /api/presence/current` every 20s; re-renders only when the token changes.
 
