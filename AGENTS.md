@@ -116,6 +116,12 @@ relevant conventions; the user says "work the loop" to activate it.
 | Telegram arrival actions | **Shipped live** (no flag — additive UX); host alerts carry Coming down / Waiting area / Reschedule buttons; first response wins; chips in dashboard + visit log | Migration applied (54/54); pending one real-world tap test |
 | Appointment email QR + kiosk scan | **Shipped live**; confirmed-appointment email carries an email-safe HTML-table QR of the ref code; kiosk appointment mode has "Scan QR instead" converging on the same lookup | Manual: real confirmation email → phone → kiosk scan |
 | Auto-checkout sweep | **Shipped live**; cron `15 17 * * 1-5` (skips weekends/holidays) alerts reception via in-app/push (`checkout_sweep` type) + Telegram admin chat; `POST /visits/bulk-checkout` + amber dashboard banner after close | Confirm new cron trigger registered after deploy; watch first weekday 17:15 run |
+| Host availability status | **Shipped live**; `officers.availability_status` (available/in_meeting/out_of_office, NULL⇒available); bot commands `/available` `/meeting` `/out`; profile control; dots+warnings in combobox + kiosk | Run migration after deploy + `POST /api/admin/telegram/sync-commands` to publish new bot commands |
+| Delegation mode | **Shipped live** (reception check-in); `visits.party_size/party_names`; +N chips on badge/visit log/visitor detail | Run migration after deploy |
+| Watchlist (VIP/banned) | **Shipped live**; `visitors.flag`; superadmin manage on VisitorDetail; VIP→leadership+admin chat, banned→silent reception alert (poker-face UI) | Run migration after deploy |
+| Waiting-time SLA | **Shipped live**; cron `*/15 8-17 * * 1-5` escalates unanswered visits ≥30 min to directorate receivers (`sla_breach`, KV-deduped); dashboard wait colors + waiting-first sort | Cron registers on deploy |
+| Evacuation roll | **Shipped live**; `GET /reports/evacuation` + `/notify`; dashboard modal with print stylesheet | — |
+| Returning-visitor fast lane | **Shipped live**; kiosk `GET /kiosk/visitor-by-phone` (no-oracle 404, rate-limited) + "Been here before?" flow with locked identity | Manual kiosk test with a known returning visitor |
 | Face-match (enrolled reference) | **Design-only** — specs from 2026-04 exist, no implementation | Its own project; risk-fusion input stays optional until then |
 | Comms (announcements/feedback/chat) | Plans exist in `docs/superpowers/plans/2026-04-28-*`, not built | Chat plan has policy prerequisites flagged |
 
