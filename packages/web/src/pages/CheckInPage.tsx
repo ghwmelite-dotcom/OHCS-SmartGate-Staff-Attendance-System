@@ -30,6 +30,10 @@ import {
   ArrowRight,
   CheckCircle2,
   X,
+  Users,
+  Minus,
+  Plus,
+  Star,
 } from 'lucide-react';
 
 /* ---- Schemas ---- */
@@ -63,6 +67,10 @@ const checkInSchema = z.object({
 });
 type CheckInForm = z.infer<typeof checkInSchema>;
 
+/* ---- Watchlist flag rides on visitor rows (api.ts `Visitor` is shared; the
+   flag fields are additive, so extend locally rather than touch shared types) ---- */
+type VisitorWithFlag = Visitor & { flag?: 'vip' | 'banned' | null };
+
 /* ---- Steps ---- */
 type Step = 'search' | 'new-visitor' | 'photo' | 'id-photo' | 'check-in' | 'success';
 
@@ -75,6 +83,10 @@ export function CheckInPage() {
   const [selectedVisitor, setSelectedVisitor] = useState<Visitor | null>(null);
   const [createdVisit, setCreatedVisit] = useState<Visit | null>(null);
   const [queuedOffline, setQueuedOffline] = useState(false);
+  // Delegation mode: 1 = solo (no member inputs); 2–20 shows name inputs for
+  // the accompanying members (lead excluded). One badge covers the party.
+  const [partySize, setPartySize] = useState(1);
+  const [partyNames, setPartyNames] = useState<string[]>([]);
 
   /* ---- Data queries ---- */
   const { data: searchResults, isFetching: isSearching } = useQuery({
@@ -137,6 +149,11 @@ export function CheckInPage() {
       return await apiOrQueue<Visit>('visit-queue', '/visits/check-in', {
         visitor_id: selectedVisitor!.id,
         ...data,
+        party_size: partySize,
+        party_names: partyNames
+          .slice(0, Math.max(0, partySize - 1))
+          .map((n) => n.trim())
+          .filter(Boolean),
       });
     },
     onSuccess: (res) => {
@@ -161,6 +178,8 @@ export function CheckInPage() {
   /* ---- Select existing visitor ---- */
   function selectVisitor(visitor: Visitor) {
     setSelectedVisitor(visitor);
+    setPartySize(1);
+    setPartyNames([]);
     setStep('photo');
   }
 
@@ -225,6 +244,8 @@ export function CheckInPage() {
     setSelectedVisitor(null);
     setCreatedVisit(null);
     setQueuedOffline(false);
+    setPartySize(1);
+    setPartyNames([]);
     newVisitorForm.reset();
     checkInForm.reset();
   }
@@ -474,6 +495,15 @@ export function CheckInPage() {
             </button>
           </div>
 
+          {/* VIP ribbon — reception sees it and expedites. A banned flag shows
+              NOTHING here on purpose (poker face; security is alerted silently). */}
+          {(selectedVisitor as VisitorWithFlag).flag === 'vip' && (
+            <div className="rounded-xl border border-accent/40 bg-warning-light px-4 py-2.5 flex items-center gap-2">
+              <Star className="h-4 w-4 text-accent-warm shrink-0" />
+              <p className="text-sm font-semibold text-accent-warm">VIP — expedite this visitor</p>
+            </div>
+          )}
+
           <form
             onSubmit={checkInForm.handleSubmit((data) => checkInMutation.mutate(data))}
             className="bg-surface rounded-2xl border border-border shadow-sm p-5 space-y-4"
@@ -537,6 +567,60 @@ export function CheckInPage() {
                 }}
               />
             </FieldWrapper>
+
+            {/* 4. DELEGATION — optional; one badge covers the whole party */}
+            <div className="rounded-xl border border-border bg-background/50 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Users className="h-4 w-4 text-muted shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground">Delegation</p>
+                    <p className="text-xs text-muted">Group visit? One badge covers the party.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setPartySize((n) => Math.max(1, n - 1))}
+                    disabled={partySize <= 1}
+                    aria-label="Fewer people"
+                    className="h-8 w-8 rounded-lg border border-border bg-surface text-foreground flex items-center justify-center hover:bg-background transition-colors disabled:opacity-40"
+                  >
+                    <Minus className="h-4 w-4" />
+                  </button>
+                  <span className="w-7 text-center text-sm font-bold text-foreground">{partySize}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPartySize((n) => Math.min(20, n + 1))}
+                    disabled={partySize >= 20}
+                    aria-label="More people"
+                    className="h-8 w-8 rounded-lg border border-border bg-surface text-foreground flex items-center justify-center hover:bg-background transition-colors disabled:opacity-40"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              {partySize > 1 && (
+                <div className="space-y-2">
+                  {Array.from({ length: partySize - 1 }, (_, i) => (
+                    <input
+                      key={i}
+                      value={partyNames[i] ?? ''}
+                      onChange={(e) =>
+                        setPartyNames((names) => {
+                          const next = [...names];
+                          next[i] = e.target.value;
+                          return next;
+                        })
+                      }
+                      maxLength={80}
+                      placeholder={`Member ${i + 2} name`}
+                      className={fieldCls}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
 
             {checkInMutation.isError && (
               <p className="text-danger text-xs">

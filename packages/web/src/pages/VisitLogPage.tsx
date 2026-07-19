@@ -6,7 +6,26 @@ import { cn, formatDate, formatTime } from '@/lib/utils';
 import { VISIT_STATUS } from '@/lib/constants';
 import { IdCheckBadge } from '@/components/IdCheckBadge';
 import { HostResponseChip } from '@/components/HostResponseChip';
-import { Search, Filter, X, ChevronDown } from 'lucide-react';
+import { Search, Filter, X, ChevronDown, Star } from 'lucide-react';
+
+/* ---- Watchlist + delegation fields ride on visit rows (additive, so extend
+   the shared Visit type locally instead of touching api.ts) ---- */
+type VisitWithPartyFlag = Visit & {
+  party_size?: number | null;
+  party_names?: string | null;
+  flag?: 'vip' | 'banned' | null;
+};
+
+// Tooltip content for the +N party chip: accompanying member names.
+function partyMembers(partyNames: string | null | undefined): string | undefined {
+  if (!partyNames) return undefined;
+  try {
+    const names = JSON.parse(partyNames) as unknown;
+    return Array.isArray(names) && names.length > 0 ? names.join(', ') : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export function VisitLogPage() {
   const navigate = useNavigate();
@@ -39,7 +58,7 @@ export function VisitLogPage() {
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['visit-log', search, from, to, status, directorateId, cursor],
-    queryFn: () => api.get<Visit[]>(buildUrl()),
+    queryFn: () => api.get<VisitWithPartyFlag[]>(buildUrl()),
     placeholderData: (prev) => prev,
   });
 
@@ -175,12 +194,28 @@ export function VisitLogPage() {
                           {formatDate(v.check_in_at)}
                         </td>
                         <td className="px-5 py-3">
-                          <button
-                            onClick={() => navigate(`/visitors/${v.visitor_id}`)}
-                            className="text-[14px] font-semibold text-primary hover:underline"
-                          >
-                            {v.first_name} {v.last_name}
-                          </button>
+                          <span className="inline-flex items-center gap-1.5">
+                            <button
+                              onClick={() => navigate(`/visitors/${v.visitor_id}`)}
+                              className="text-[14px] font-semibold text-primary hover:underline"
+                            >
+                              {v.first_name} {v.last_name}
+                            </button>
+                            {v.party_size != null && v.party_size > 1 && (
+                              <span
+                                className="inline-flex items-center h-5 px-1.5 text-[10px] font-bold bg-primary/10 text-primary rounded"
+                                title={partyMembers(v.party_names)}
+                              >
+                                +{v.party_size - 1}
+                              </span>
+                            )}
+                            {v.flag === 'vip' && (
+                              <span className="inline-flex items-center gap-0.5 h-5 px-1.5 text-[10px] font-bold rounded bg-warning-light text-accent-warm border border-accent/40">
+                                <Star className="h-2.5 w-2.5" />
+                                VIP
+                              </span>
+                            )}
+                          </span>
                         </td>
                         <td className="px-5 py-3 text-[14px] text-muted truncate max-w-[160px]">
                           {v.organisation ?? '—'}

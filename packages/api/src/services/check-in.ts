@@ -12,12 +12,14 @@ export interface CheckInParams {
   purpose_category?: string | null;
   idempotency_key?: string | null;
   id_photo_check?: string | null;
+  party_size?: number | null;
+  party_names?: string[] | null;
   created_by: string | null;
   check_in_source: 'staff' | 'kiosk';
 }
 
 export type CheckInOutcome =
-  | { ok: true; visit: Record<string, unknown>; deduped: boolean }
+  | { ok: true; visit: Record<string, unknown>; deduped: boolean; flag: string | null }
   | { ok: false; code: 'VISITOR_NOT_FOUND' };
 
 // Pure, testable badge-code builder. `timestamp` is ms since epoch, `rand` is
@@ -50,7 +52,10 @@ export async function performCheckIn(
   ctx: ExecutionContext,
   params: CheckInParams,
 ): Promise<CheckInOutcome> {
-  const visitor = await env.DB.prepare('SELECT id FROM visitors WHERE id = ?').bind(params.visitor_id).first();
+  // flag rides along so the route can fire watchlist alerts (VIP/banned) after
+  // the visit row exists — the service itself never blocks a check-in.
+  const visitor = await env.DB.prepare('SELECT id, flag FROM visitors WHERE id = ?')
+    .bind(params.visitor_id).first<{ id: string; flag: string | null }>();
   if (!visitor) return { ok: false, code: 'VISITOR_NOT_FOUND' };
 
   // Re-read an existing visit by idempotency key and return it in the dedup-hit
@@ -61,7 +66,7 @@ export async function performCheckIn(
       .first<{ id: string }>();
     if (!existing) return null;
     const dup = await env.DB.prepare(SELECT_VISIT_WITH_JOINS).bind(existing.id).first();
-    return { ok: true, visit: (dup ?? {}) as Record<string, unknown>, deduped: true };
+    return { ok: true, visit: (dup ?? {}) as Record<string, unknown>, deduped: true, flag: visitor.flag ?? null };
   };
 
   if (params.idempotency_key) {
@@ -73,16 +78,23 @@ export async function performCheckIn(
   let badgeCode = generateBadgeCode(Date.now(), crypto.getRandomValues(new Uint8Array(5)));
   let pin = generateCheckoutPin();
 
+  // Delegation mode: solo visits stay NULL (reads as party of 1); member names
+  // persist as a JSON array (lead excluded).
+  const partySize = params.party_size && params.party_size > 1 ? params.party_size : null;
+  const partyNames = params.party_names && params.party_names.length > 0
+    ? JSON.stringify(params.party_names)
+    : null;
+
   const insertBatch = (code: string, checkoutPin: string) =>
     env.DB.batch([
       env.DB.prepare(
-        `INSERT INTO visits (id, visitor_id, host_officer_id, host_name_manual, directorate_id, purpose_raw, purpose_category, badge_code, checkout_pin, status, created_by, idempotency_key, check_in_source, id_photo_check)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', ?, ?, ?, ?)`
+        `INSERT INTO visits (id, visitor_id, host_officer_id, host_name_manual, directorate_id, purpose_raw, purpose_category, badge_code, checkout_pin, status, created_by, idempotency_key, check_in_source, id_photo_check, party_size, party_names)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', ?, ?, ?, ?, ?, ?)`
       ).bind(
         visitId, params.visitor_id, params.host_officer_id || null, params.host_name_manual || null,
         params.directorate_id || null, params.purpose_raw || null, params.purpose_category || null,
         code, checkoutPin, params.created_by, params.idempotency_key ?? null, params.check_in_source,
-        params.id_photo_check ?? null,
+        params.id_photo_check ?? null, partySize, partyNames,
       ),
       env.DB.prepare(
         `UPDATE visitors SET total_visits = total_visits + 1, last_visit_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
@@ -136,5 +148,5 @@ export async function performCheckIn(
     );
   }
 
-  return { ok: true, visit: (visit ?? {}) as Record<string, unknown>, deduped: false };
+  return { ok: true, visit: (visit ?? {}) as Record<string, unknown>, deduped: false, flag: visitor.flag ?? null };
 }

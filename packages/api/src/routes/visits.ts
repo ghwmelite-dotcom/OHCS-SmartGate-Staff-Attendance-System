@@ -7,6 +7,7 @@ import { requireRole } from '../lib/require-role';
 import { resolveDirectorateScope } from '../lib/directorate-scope';
 import { checkOutById } from '../services/check-out';
 import { performCheckIn } from '../services/check-in';
+import { notifyWatchlist } from '../services/notifier';
 import { recordAudit, auditActorFromContext } from '../services/audit';
 import { z } from 'zod';
 
@@ -39,7 +40,7 @@ visitRoutes.get('/', zValidator('query', listSchema), async (c) => {
   // Directors are isolated to their own directorate — override any incoming filter.
   const directorScope = await resolveDirectorateScope(c);
   const directorate_id = directorScope ?? c.req.valid('query').directorate_id;
-  let sql = `SELECT v.*, vis.first_name, vis.last_name, vis.organisation, vis.phone,
+  let sql = `SELECT v.*, vis.first_name, vis.last_name, vis.organisation, vis.phone, vis.flag,
              COALESCE(o.name, v.host_name_manual) as host_name, d.abbreviation as directorate_abbr
              FROM visits v
              JOIN visitors vis ON v.visitor_id = vis.id
@@ -102,7 +103,7 @@ visitRoutes.get('/active', async (c) => {
   if (blocked) return blocked;
   // Directors only see active visits for their own directorate.
   const directorScope = await resolveDirectorateScope(c);
-  let sql = `SELECT v.*, vis.first_name, vis.last_name, vis.organisation,
+  let sql = `SELECT v.*, vis.first_name, vis.last_name, vis.organisation, vis.flag,
             COALESCE(o.name, v.host_name_manual) as host_name, d.abbreviation as directorate_abbr
      FROM visits v
      JOIN visitors vis ON v.visitor_id = vis.id
@@ -134,11 +135,31 @@ visitRoutes.post('/check-in', zValidator('json', CheckInSchema), async (c) => {
     purpose_raw: body.purpose_raw,
     purpose_category: body.purpose_category,
     idempotency_key: body.idempotency_key,
+    party_size: body.party_size,
+    party_names: body.party_names,
     created_by: session.userId,
     check_in_source: 'staff',
   });
 
   if (!result.ok) return notFound(c, 'Visitor');
+
+  // Watchlist (VIP/banned): fire only on a genuinely new visit — a dedup retry
+  // must not re-alert. Poker-faced by design: the response is unaffected.
+  if (result.flag && !result.deduped) {
+    const v = result.visit;
+    c.executionCtx.waitUntil(
+      notifyWatchlist(c.env, {
+        first_name: String(v.first_name ?? ''),
+        last_name: String(v.last_name ?? ''),
+        flag: result.flag,
+      }, {
+        id: String(v.id ?? ''),
+        host_name: (v.host_name as string | null) ?? null,
+        directorate_id: (v.directorate_id as string | null) ?? null,
+      })
+    );
+  }
+
   return created(c, result.visit);
 });
 

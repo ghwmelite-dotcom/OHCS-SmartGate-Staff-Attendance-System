@@ -5,13 +5,15 @@ import { CreateVisitorSchema, UpdateVisitorSchema } from '../lib/validation';
 import { success, created, notFound, error } from '../lib/response';
 import { requireRole } from '../lib/require-role';
 import { resolveDirectorateScope } from '../lib/directorate-scope';
+import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
 import { z } from 'zod';
 
 export const visitorRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
 // Explicit columns (no SELECT *) so a future sensitive column can't auto-leak.
 const VISITOR_COLUMNS = `id, first_name, last_name, phone, email, organisation, id_type,
-  id_number, photo_url, id_photo_url, total_visits, last_visit_at, created_at, updated_at`;
+  id_number, photo_url, id_photo_url, total_visits, last_visit_at, created_at, updated_at,
+  flag, flag_note, flag_updated_at, flag_updated_by`;
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -131,6 +133,49 @@ visitorRoutes.put('/:id', zValidator('json', UpdateVisitorSchema), async (c) => 
     values.push(id);
     await c.env.DB.prepare(`UPDATE visitors SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
   }
+
+  const visitor = await c.env.DB.prepare(`SELECT ${VISITOR_COLUMNS} FROM visitors WHERE id = ?`).bind(id).first();
+  return success(c, visitor);
+});
+
+// Watchlist flag (spec 2026-07-19-delegation-and-watchlist-design §B).
+// Superadmin-only: VIPs get expedited + a leadership alert on arrival; banned
+// visitors trigger a discreet security alert. Clearing also clears the note.
+// Exported for the guard/schema test (visitors-flag.test.ts).
+export const visitorFlagSchema = z.object({
+  flag: z.enum(['vip', 'banned']).nullable(),
+  note: z.string().max(200).optional(),
+});
+
+visitorRoutes.put('/:id/flag', zValidator('json', visitorFlagSchema), async (c) => {
+  const blocked = requireRole(c, 'superadmin');
+  if (blocked) return blocked;
+  const session = c.get('session');
+  const id = c.req.param('id');
+  const body = c.req.valid('json');
+
+  const existing = await c.env.DB.prepare(`SELECT ${VISITOR_COLUMNS} FROM visitors WHERE id = ?`)
+    .bind(id).first<Record<string, unknown>>();
+  if (!existing) return notFound(c, 'Visitor');
+
+  const note = body.flag ? (body.note?.trim() || null) : null;
+  await c.env.DB.prepare(
+    `UPDATE visitors SET flag = ?, flag_note = ?, flag_updated_at = ?, flag_updated_by = ?,
+     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?`
+  ).bind(body.flag, note, new Date().toISOString(), session.userId, id).run();
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'visitor.flag',
+    entityType: 'visitor',
+    entityId: id,
+    summary: body.flag
+      ? `Flagged ${existing.first_name} ${existing.last_name} as ${body.flag}${note ? ` — ${note}` : ''}`
+      : `Cleared flag on ${existing.first_name} ${existing.last_name}`,
+    changes: diffRecords(
+      { flag: existing.flag, flag_note: existing.flag_note },
+      { flag: body.flag, flag_note: note },
+    ),
+  });
 
   const visitor = await c.env.DB.prepare(`SELECT ${VISITOR_COLUMNS} FROM visitors WHERE id = ?`).bind(id).first();
   return success(c, visitor);

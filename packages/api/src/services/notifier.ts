@@ -7,7 +7,7 @@ import { recordNotifyOutcome, isDeadPushStatus } from '../lib/notify-metrics';
 
 const PERSONAL_CATEGORIES = ['personal_visit'];
 
-const PUSH_WHITELIST = new Set(['visitor_arrival', 'clock_reminder', 'late_clock_alert', 'monthly_report_ready', 'absence_notice', 'checkout_sweep']);
+const PUSH_WHITELIST = new Set(['visitor_arrival', 'clock_reminder', 'late_clock_alert', 'monthly_report_ready', 'absence_notice', 'checkout_sweep', 'sla_breach', 'watchlist_alert']);
 
 interface VisitNotifyData {
   visit_id: string;
@@ -205,6 +205,121 @@ async function findUserByOfficer(
   }
   return env.DB.prepare('SELECT id FROM users WHERE name = ?')
     .bind(officer.name).first<{ id: string }>();
+}
+
+// ---------------------------------------------------------------------------
+// Watchlist alerts (spec 2026-07-19-delegation-and-watchlist-design §B).
+// Fired by the check-in route AFTER the visit row exists. Both kinds share the
+// in-app type `watchlist_alert` (already push-whitelisted) and the Telegram
+// admin chat. Neither ever blocks or visibly alters the check-in itself.
+// ---------------------------------------------------------------------------
+
+export interface WatchlistVisitorInfo {
+  first_name: string;
+  last_name: string;
+  flag: string | null;
+}
+
+export interface WatchlistVisitInfo {
+  id: string;
+  host_name: string | null;
+  directorate_id: string | null;
+}
+
+export async function notifyWatchlist(
+  env: Env,
+  visitor: WatchlistVisitorInfo,
+  visit: WatchlistVisitInfo,
+): Promise<void> {
+  if (visitor.flag !== 'vip' && visitor.flag !== 'banned') return;
+  const name = `${visitor.first_name} ${visitor.last_name}`.trim();
+
+  if (visitor.flag === 'vip') {
+    // VIP: directorate leadership (same title query the arrival fanout uses) +
+    // Telegram admin chat, so the visit gets expedited.
+    const title = `VIP arrival: ${name}`;
+    const body = `${name} has arrived${visit.host_name ? ` for ${visit.host_name}` : ''} — please expedite.`;
+    const telegram = [
+      `\u{2B50} <b>VIP Arrival — OHCS VMS</b>`,
+      '',
+      `VIP <b>${escapeHtml(name)}</b> has arrived${visit.host_name ? ` for <b>${escapeHtml(visit.host_name)}</b>` : ''}.`,
+      'Please expedite.',
+      '',
+      `\u2014 OHCS VMS`,
+    ].join('\n');
+
+    if (visit.directorate_id) {
+      const leaders = await env.DB.prepare(
+        `SELECT o.id, o.name, o.email, o.telegram_chat_id
+         FROM officers o
+         WHERE o.directorate_id = ? AND (
+           o.title LIKE '%Director%' OR o.title LIKE '%Deputy%' OR
+           o.title LIKE '%Head%' OR o.title LIKE '%Chief%'
+         )`
+      ).bind(visit.directorate_id).all<{ id: string; name: string; email: string | null; telegram_chat_id: string | null }>();
+
+      for (const leader of leaders.results ?? []) {
+        if (leader.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
+          const ok = await sendTelegramMessage({
+            chatId: leader.telegram_chat_id,
+            text: telegram,
+            token: env.TELEGRAM_BOT_TOKEN,
+          });
+          await recordNotifyOutcome(env, 'telegram', ok);
+        }
+        const user = await findUserByOfficer(leader, env);
+        if (user) {
+          await sendTypedNotification(env, {
+            userId: user.id,
+            type: 'watchlist_alert',
+            title,
+            body,
+            url: `/visit/${visit.id}`,
+            visitId: visit.id,
+          });
+        }
+      }
+    }
+    await notifyTelegramAdminChat(env, telegram);
+    return;
+  }
+
+  // Banned: poker face at the desk — silent alert to reception/admin users +
+  // Telegram admin chat. Security handles it in person.
+  const title = 'Flagged visitor checked in';
+  const body = `⚠️ Flagged visitor ${name} (banned) just checked in — assess discreetly.`;
+  const telegram = [
+    `\u{26A0}\u{FE0F} <b>Flagged Visitor — OHCS VMS</b>`,
+    '',
+    `Flagged visitor <b>${escapeHtml(name)}</b> (banned) just checked in${visit.host_name ? ` to see <b>${escapeHtml(visit.host_name)}</b>` : ''}.`,
+    'Assess discreetly — the visitor has not been alerted.',
+    '',
+    `\u2014 OHCS VMS`,
+  ].join('\n');
+
+  const users = await env.DB.prepare(
+    "SELECT id FROM users WHERE role IN ('receptionist', 'admin', 'superadmin') AND is_active = 1"
+  ).all<{ id: string }>();
+  for (const u of users.results ?? []) {
+    await sendTypedNotification(env, {
+      userId: u.id,
+      type: 'watchlist_alert',
+      title,
+      body,
+      url: `/visit/${visit.id}`,
+      visitId: visit.id,
+    });
+  }
+  await notifyTelegramAdminChat(env, telegram);
+}
+
+// Telegram admin chat (same KV key the daily summary / checkout sweep use).
+async function notifyTelegramAdminChat(env: Env, text: string): Promise<void> {
+  const adminChatId = await env.KV.get('telegram-admin-chat-id');
+  if (adminChatId && env.TELEGRAM_BOT_TOKEN) {
+    const ok = await sendTelegramMessage({ chatId: adminChatId, text, token: env.TELEGRAM_BOT_TOKEN });
+    await recordNotifyOutcome(env, 'telegram', ok);
+  }
 }
 
 export async function sendTypedNotification(env: Env, opts: {

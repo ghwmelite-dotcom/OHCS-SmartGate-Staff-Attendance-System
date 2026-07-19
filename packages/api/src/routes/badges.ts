@@ -27,9 +27,12 @@ interface BadgeData {
   wing: string | null;
   check_in_at: string;
   check_out_at: string | null;
+  party_size: number | null;
+  party_names: string | null;
 }
 
 const BADGE_QUERY = `SELECT v.badge_code, v.status, v.check_in_at, v.check_out_at,
+       v.party_size, v.party_names,
        vis.first_name || ' ' || vis.last_name as visitor_name,
        vis.organisation, vis.photo_url,
        o.name as host_name,
@@ -95,6 +98,8 @@ export async function serveBadgePage(c: Context<{ Bindings: Env }>) {
   }
 
   const isActive = visit.status === 'checked_in';
+  // Delegation mode: lead's badge covers the whole party — "Name +N".
+  const partyExtra = Math.max(0, (visit.party_size ?? 1) - 1);
   const checkInTime = new Date(visit.check_in_at).toLocaleTimeString('en-US', {
     hour: 'numeric', minute: '2-digit', hour12: true,
   });
@@ -156,6 +161,7 @@ export async function serveBadgePage(c: Context<{ Bindings: Env }>) {
     .status.expired { background: #F3F4F6; color: #6B7280; }
     .content { padding: 24px; }
     .visitor-name { font-size: 22px; font-weight: 700; color: #111827; }
+    .party-size { font-size: 12px; font-weight: 700; color: #92400E; margin-top: 2px; }
     .organisation { font-size: 13px; color: #6B7280; margin-top: 2px; }
     .details { margin-top: 20px; display: flex; flex-direction: column; gap: 12px; }
     .detail { display: flex; align-items: flex-start; gap: 10px; }
@@ -198,6 +204,7 @@ export async function serveBadgePage(c: Context<{ Bindings: Env }>) {
     <div class="content">
       ${visit.photo_url ? `<div style="width:80px;height:80px;border-radius:12px;overflow:hidden;margin:0 auto 12px;border:2px solid #E8DFC9"><img src="/api/badges/${encodeURIComponent(visit.badge_code)}/photo" style="width:100%;height:100%;object-fit:cover" alt=""></div>` : ''}
       <div class="visitor-name">${escapeHtml(visit.visitor_name)}</div>
+      ${partyExtra > 0 ? `<div class="party-size">+${partyExtra} accompanying</div>` : ''}
       ${visit.organisation ? `<div class="organisation">${escapeHtml(visit.organisation)}</div>` : ''}
       <div class="details">
         ${visit.host_name ? `<div class="detail"><div class="detail-label">Host</div><div class="detail-value">${escapeHtml(visit.host_name)}</div></div>` : ''}
