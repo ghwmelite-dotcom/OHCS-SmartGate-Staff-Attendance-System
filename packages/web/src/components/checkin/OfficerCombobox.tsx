@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { matchesOfficerName } from '@/lib/officer-search';
 
 export interface OfficerOption {
   id: string;
@@ -58,7 +59,7 @@ export function OfficerCombobox({
   const filtered =
     query.length >= 1
       ? officers
-          .filter((o) => o.name.toLowerCase().includes(query.toLowerCase()))
+          .filter((o) => matchesOfficerName(o.name, query))
           .slice(0, MAX_RESULTS)
       : [];
 
