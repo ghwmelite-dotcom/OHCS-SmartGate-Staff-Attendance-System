@@ -5,6 +5,7 @@ import {
   generateLinkCode, consumeLinkCode, sendTelegramMessage, parseCommand,
   answerCallbackQuery, editMessageText, parseArrivalCallback,
   ARRIVAL_ACTIONS, type ArrivalAction,
+  AVAILABILITY_STATUSES, type AvailabilityStatus,
 } from '../services/telegram';
 import { recordAudit, systemActor } from '../services/audit';
 import { success, error } from '../lib/response';
@@ -63,6 +64,9 @@ export async function telegramWebhook(c: Context<{ Bindings: Env }>) {
     case 'unlink': await handleUnlink(c, chatId); break;
     case 'admin':  await handleAdmin(c, chatId); break;
     case 'stop':   await handleStop(c, chatId); break;
+    case 'available': await handleAvailability(c, chatId, 'available'); break;
+    case 'meeting':   await handleAvailability(c, chatId, 'in_meeting'); break;
+    case 'out':       await handleAvailability(c, chatId, 'out_of_office'); break;
     default:
       await sendTelegramMessage({ chatId: String(chatId), text: 'I don’t recognise that command. Send /help to see what I can do.', token: c.env.TELEGRAM_BOT_TOKEN });
   }
@@ -181,6 +185,9 @@ async function handleHelp(c: Ctx, chatId: number): Promise<void> {
       '',
       `/link &lt;StaffID&gt; — Link your account to receive alerts`,
       `/status — Check your link &amp; alert status`,
+      `/available — Mark yourself available`,
+      `/meeting — Mark yourself in a meeting`,
+      `/out — Mark yourself out of office`,
       `/unlink — Stop receiving visitor alerts`,
       `/admin — Get daily attendance summaries`,
       `/stop — Stop daily summaries`,
@@ -215,13 +222,17 @@ async function handleLink(c: Ctx, chatId: number, args: string): Promise<void> {
 
 async function handleStatus(c: Ctx, chatId: number): Promise<void> {
   const officer = await c.env.DB.prepare(
-    `SELECT o.name, d.abbreviation AS dir FROM officers o LEFT JOIN directorates d ON o.directorate_id = d.id WHERE o.telegram_chat_id = ? LIMIT 1`
-  ).bind(String(chatId)).first<{ name: string; dir: string | null }>();
+    `SELECT o.name, d.abbreviation AS dir, o.availability_status FROM officers o LEFT JOIN directorates d ON o.directorate_id = d.id WHERE o.telegram_chat_id = ? LIMIT 1`
+  ).bind(String(chatId)).first<{ name: string; dir: string | null; availability_status: AvailabilityStatus | null }>();
   const summariesOn = (await c.env.KV.get('telegram-admin-chat-id')) === String(chatId);
   const lines = [`\u{1F4CB} <b>Your status</b>`, ''];
   lines.push(officer
     ? `Visitor alerts: <b>ON</b> — linked as ${officer.name}${officer.dir ? ` (${officer.dir})` : ''}.`
     : `Visitor alerts: <b>OFF</b> — not linked. Send /link &lt;StaffID&gt;, or use the link from reception.`);
+  if (officer) {
+    const avail = AVAILABILITY_STATUSES[officer.availability_status ?? 'available'];
+    lines.push(`Availability: ${avail.emoji} <b>${avail.label}</b> — change with /available, /meeting, /out.`);
+  }
   lines.push(`Daily summaries: <b>${summariesOn ? 'ON' : 'OFF'}</b>.`);
   await sendTelegramMessage({ chatId: String(chatId), text: lines.join('\n'), token: c.env.TELEGRAM_BOT_TOKEN });
 }
@@ -251,6 +262,33 @@ async function handleAdmin(c: Ctx, chatId: number): Promise<void> {
 async function handleStop(c: Ctx, chatId: number): Promise<void> {
   await c.env.KV.delete('telegram-admin-chat-id');
   await sendTelegramMessage({ chatId: String(chatId), text: `Daily summaries disabled. Send /admin to re-enable.`, token: c.env.TELEGRAM_BOT_TOKEN });
+}
+
+// Host availability commands (spec: 2026-07-19-host-availability-design) —
+// /available, /meeting, /out set the linked officer's availability_status.
+async function handleAvailability(c: Ctx, chatId: number, status: AvailabilityStatus): Promise<void> {
+  const officer = await c.env.DB.prepare(
+    'SELECT id, name FROM officers WHERE telegram_chat_id = ? LIMIT 1'
+  ).bind(String(chatId)).first<{ id: string; name: string }>();
+  if (!officer) {
+    await sendTelegramMessage({
+      chatId: String(chatId),
+      text: `Your chat isn’t linked to an officer record yet — send /link &lt;StaffID&gt; first.`,
+      token: c.env.TELEGRAM_BOT_TOKEN,
+    });
+    return;
+  }
+  await c.env.DB.prepare(
+    `UPDATE officers SET availability_status = ?, availability_updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?`
+  ).bind(status, officer.id).run();
+  const { emoji, label } = AVAILABILITY_STATUSES[status];
+  await sendTelegramMessage({
+    chatId: String(chatId),
+    text: status === 'available'
+      ? `${emoji} Availability set to <b>${label}</b>.`
+      : `${emoji} Availability set to <b>${label}</b>. Send /available when you're back.`,
+    token: c.env.TELEGRAM_BOT_TOKEN,
+  });
 }
 
 // Protected — link Telegram account to officer

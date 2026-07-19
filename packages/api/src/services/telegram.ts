@@ -137,6 +137,16 @@ export function formatVisitorArrivalMessage(visitor: {
   return lines.join('\n');
 }
 
+// Host availability (spec: 2026-07-19-host-availability-design) — set via the
+// /available, /meeting, /out bot commands; NULL in the DB reads as 'available'.
+export const AVAILABILITY_STATUSES = {
+  available:     { emoji: '🟢', label: 'Available' },
+  in_meeting:    { emoji: '🟡', label: 'In a meeting' },
+  out_of_office: { emoji: '⚪', label: 'Out of office' },
+} as const;
+
+export type AvailabilityStatus = keyof typeof AVAILABILITY_STATUSES;
+
 export function parseCommand(text: string): { command: string; args: string } | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith('/')) return null;
@@ -155,6 +165,9 @@ export const BOT_COMMANDS: Array<{ command: string; description: string }> = [
   { command: 'unlink', description: 'Stop receiving visitor alerts' },
   { command: 'admin',  description: 'Get daily attendance summaries' },
   { command: 'stop',   description: 'Stop daily summaries' },
+  { command: 'available', description: 'Mark yourself available' },
+  { command: 'meeting',   description: 'Mark yourself in a meeting' },
+  { command: 'out',       description: 'Mark yourself out of office' },
 ];
 
 // Publish the command menu to Telegram (global; persists until re-pushed). Best-effort.

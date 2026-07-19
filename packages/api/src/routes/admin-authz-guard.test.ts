@@ -126,6 +126,11 @@ const ALLOWLIST = new Set<string>([
   // Read YOUR OWN active absence notice — query scoped to session.userId.
   // No role token in the handler; legitimately self-scoped.
   'attendance.ts GET /absence-notice/today',
+  // Set YOUR OWN host availability — resolves the caller's officer row via
+  // session email→name and updates only that row. Officers can hold any role
+  // (incl. plain staff), so a role gate would break legitimate self-service;
+  // the row resolution is the authorization (spec: 2026-07-19-host-availability-design).
+  'officers.ts PUT /me/availability',
   // NOTE: GET /leave is NOT listed — its handler branches on
   // `session.role === 'superadmin' | 'admin'` (admins see all, others see their
   // own), so the scanner already counts it as guarded. It is still effectively

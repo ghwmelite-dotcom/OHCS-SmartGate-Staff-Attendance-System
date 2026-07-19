@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { sendTelegramMessage, parseCommand, BOT_COMMANDS, buildArrivalKeyboard, parseArrivalCallback, ARRIVAL_ACTIONS } from './telegram';
+import { sendTelegramMessage, parseCommand, BOT_COMMANDS, buildArrivalKeyboard, parseArrivalCallback, ARRIVAL_ACTIONS, AVAILABILITY_STATUSES } from './telegram';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -41,6 +41,14 @@ describe('parseCommand', () => {
     expect(parseCommand('hello')).toBeNull();
     expect(parseCommand('/')).toBeNull();
   });
+  it('parses the availability commands as bare commands', () => {
+    expect(parseCommand('/available')).toEqual({ command: 'available', args: '' });
+    expect(parseCommand('/meeting')).toEqual({ command: 'meeting', args: '' });
+    expect(parseCommand('/out')).toEqual({ command: 'out', args: '' });
+  });
+  it('parses availability commands with a @BotName suffix', () => {
+    expect(parseCommand('/Meeting@ohcs_smartgate_bot')).toEqual({ command: 'meeting', args: '' });
+  });
 });
 
 describe('BOT_COMMANDS', () => {
@@ -50,6 +58,21 @@ describe('BOT_COMMANDS', () => {
       expect(c.command).toMatch(/^[a-z0-9_]{1,32}$/);
       expect(c.description.length).toBeGreaterThan(0);
       expect(c.description.length).toBeLessThanOrEqual(256);
+    }
+  });
+  it('includes the three availability commands', () => {
+    expect(BOT_COMMANDS.map((c) => c.command)).toEqual(
+      expect.arrayContaining(['available', 'meeting', 'out']),
+    );
+  });
+});
+
+describe('AVAILABILITY_STATUSES', () => {
+  it('covers exactly the contract statuses (NULL reads as available)', () => {
+    expect(Object.keys(AVAILABILITY_STATUSES).sort()).toEqual(['available', 'in_meeting', 'out_of_office']);
+    for (const s of Object.values(AVAILABILITY_STATUSES)) {
+      expect(s.emoji.length).toBeGreaterThan(0);
+      expect(s.label.length).toBeGreaterThan(0);
     }
   });
 });

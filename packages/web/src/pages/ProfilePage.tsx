@@ -1,7 +1,24 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/stores/auth';
+import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { UserCircle, Phone, Mail, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
+
+type Availability = 'available' | 'in_meeting' | 'out_of_office';
+
+const AVAILABILITY_OPTIONS: Array<{ value: Availability; label: string; dot: string }> = [
+  { value: 'available',     label: 'Available',     dot: 'bg-success' },
+  { value: 'in_meeting',    label: 'In a meeting',  dot: 'bg-warning' },
+  { value: 'out_of_office', label: 'Out of office', dot: 'bg-muted-foreground' },
+];
+
+// Local row shape — only what the availability card reads from GET /officers.
+interface OfficerRow {
+  id: string;
+  name: string;
+  email: string | null;
+  availability_status?: Availability | null;
+}
 
 export function ProfilePage() {
   const user = useAuthStore((s) => s.user);
@@ -12,6 +29,49 @@ export function ProfilePage() {
   const [pin, setPin] = useState('');
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  // Host availability — only shown when the account maps to an officer row.
+  const [officerFound, setOfficerFound] = useState(false);
+  const [availability, setAvailability] = useState<Availability>('available');
+  const [availabilitySaving, setAvailabilitySaving] = useState(false);
+  const [availabilityResult, setAvailabilityResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  const userEmail = user?.email;
+  const userName = user?.name;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get<OfficerRow[]>('/officers');
+        const rows = res.data ?? [];
+        // Same resolution as the server: email first, then name.
+        const me = rows.find((o) => o.email && o.email === userEmail)
+          ?? rows.find((o) => o.name === userName);
+        if (!cancelled && me) {
+          setOfficerFound(true);
+          setAvailability(me.availability_status ?? 'available');
+        }
+      } catch {
+        // No officer-list access (or no officer row) → keep the control hidden.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userEmail, userName]);
+
+  async function handleAvailability(status: Availability) {
+    if (status === availability || availabilitySaving) return;
+    setAvailabilitySaving(true);
+    setAvailabilityResult(null);
+    try {
+      await api.put('/officers/me/availability', { status });
+      setAvailability(status);
+      setAvailabilityResult({ ok: true, msg: 'Availability updated.' });
+    } catch (err) {
+      setAvailabilityResult({ ok: false, msg: err instanceof Error ? err.message : 'Failed to update availability.' });
+    } finally {
+      setAvailabilitySaving(false);
+    }
+  }
 
   if (!user) return null;
 
@@ -71,6 +131,55 @@ export function ProfilePage() {
           </div>
         </div>
       </div>
+
+      {/* Availability — only for accounts that map to an officer row */}
+      {officerFound && (
+        <div className="bg-surface rounded-2xl border border-border shadow-sm overflow-hidden animate-fade-in-up stagger-2">
+          <div className="h-[2px]" style={{ background: 'linear-gradient(90deg, #D4A017, #F5D76E, #D4A017)' }} />
+          <div className="p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-bold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
+                My Availability
+              </h2>
+              <p className="text-[13px] text-muted mt-0.5">
+                Shown to reception and the kiosk when they pick you as a host.
+              </p>
+            </div>
+            <div className="flex rounded-xl border border-border divide-x divide-border overflow-hidden" role="radiogroup" aria-label="My availability">
+              {AVAILABILITY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={availability === opt.value}
+                  disabled={availabilitySaving}
+                  onClick={() => handleAvailability(opt.value)}
+                  className={cn(
+                    'flex-1 h-11 text-[13px] font-semibold flex items-center justify-center gap-1.5 transition-all disabled:opacity-50',
+                    availability === opt.value
+                      ? 'bg-primary/10 text-foreground'
+                      : 'bg-surface text-muted hover:bg-background-warm',
+                  )}
+                >
+                  <span className={cn('h-2 w-2 rounded-full shrink-0', opt.dot)} />
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {availabilityResult && (
+              <div className={cn(
+                'flex items-center gap-2 text-[13px] font-medium',
+                availabilityResult.ok ? 'text-success' : 'text-danger'
+              )}>
+                {availabilityResult.ok
+                  ? <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  : <AlertCircle className="h-4 w-4 shrink-0" />}
+                {availabilityResult.msg}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Edit form */}
       <form onSubmit={handleSubmit} className="bg-surface rounded-2xl border border-border shadow-sm overflow-hidden animate-fade-in-up stagger-2">

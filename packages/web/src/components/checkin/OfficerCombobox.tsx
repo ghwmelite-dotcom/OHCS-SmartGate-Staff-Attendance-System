@@ -8,6 +8,21 @@ export interface OfficerOption {
   title?: string | null;
   directorate_id: string;
   directorate_abbr?: string | null;
+  /** Host availability (spec: 2026-07-19-host-availability-design); NULL ⇒ available. */
+  availability_status?: 'available' | 'in_meeting' | 'out_of_office' | null;
+}
+
+type Availability = 'available' | 'in_meeting' | 'out_of_office';
+
+const AVAILABILITY_META: Record<Availability, { dot: string; label: string; phrase: string }> = {
+  available:     { dot: 'bg-success',          label: 'Available',     phrase: 'available' },
+  in_meeting:    { dot: 'bg-warning',          label: 'In a meeting',  phrase: 'in a meeting' },
+  out_of_office: { dot: 'bg-muted-foreground', label: 'Out of office', phrase: 'out of office' },
+};
+
+function availabilityOf(o: OfficerOption): Availability {
+  const s = o.availability_status;
+  return s === 'in_meeting' || s === 'out_of_office' ? s : 'available';
 }
 
 interface OfficerComboboxProps {
@@ -36,6 +51,8 @@ export function OfficerCombobox({
   const [isOpen, setIsOpen] = useState(false);
   const [selectedName, setSelectedName] = useState('');
   const [highlighted, setHighlighted] = useState(-1);
+  /** Non-available officer awaiting the "notify anyway?" inline confirm. */
+  const [pending, setPending] = useState<OfficerOption | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const filtered =
@@ -61,11 +78,13 @@ export function OfficerCombobox({
     setQuery(value);
     setSelectedName('');
     setHighlighted(-1);
+    setPending(null);
     onManual(value);
     setIsOpen(value.length >= 1);
   }
 
-  function handleSelect(o: OfficerOption) {
+  function commitSelect(o: OfficerOption) {
+    setPending(null);
     setSelectedName(o.name);
     setQuery('');
     setIsOpen(false);
@@ -73,11 +92,23 @@ export function OfficerCombobox({
     onSelect(o);
   }
 
+  function handleSelect(o: OfficerOption) {
+    // Non-available hosts warn, never block — confirm inside the component.
+    if (availabilityOf(o) !== 'available') {
+      setPending(o);
+      setIsOpen(false);
+      setHighlighted(-1);
+      return;
+    }
+    commitSelect(o);
+  }
+
   function clear() {
     setQuery('');
     setSelectedName('');
     setIsOpen(false);
     setHighlighted(-1);
+    setPending(null);
     onManual('');
     onSelect({ id: '', name: '', directorate_id: '', directorate_abbr: '' });
   }
@@ -103,7 +134,36 @@ export function OfficerCombobox({
 
   return (
     <div ref={containerRef} className="relative">
-      {selectedName ? (
+      {pending ? (
+        <div className={cn('rounded-xl border border-warning/30 bg-warning-light px-4 space-y-2 animate-fade-in', isLg ? 'py-3' : 'py-2.5')}>
+          <p className="text-[13px] text-foreground">
+            <span className={cn('inline-block h-2 w-2 rounded-full mr-1.5', AVAILABILITY_META[availabilityOf(pending)].dot)} />
+            {pending.name} is {AVAILABILITY_META[availabilityOf(pending)].phrase} — notify anyway?
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => commitSelect(pending)}
+              className={cn(
+                'bg-primary text-white font-semibold rounded-lg hover:bg-primary-light transition-all',
+                isLg ? 'h-10 px-4 text-[13px]' : 'h-8 px-3 text-[12px]',
+              )}
+            >
+              Notify anyway
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPending(null); setIsOpen(query.length >= 1); }}
+              className={cn(
+                'font-medium text-muted border border-border rounded-lg hover:bg-background-warm transition-all',
+                isLg ? 'h-10 px-4 text-[13px]' : 'h-8 px-3 text-[12px]',
+              )}
+            >
+              Pick another
+            </button>
+          </div>
+        </div>
+      ) : selectedName ? (
         <div className="flex items-center gap-2">
           <div className={cn(inputClassName, 'flex items-center text-sm text-foreground flex-1')}>
             {selectedName}
@@ -146,7 +206,9 @@ export function OfficerCombobox({
           role="listbox"
           className="absolute z-20 top-full mt-1 left-0 right-0 bg-surface rounded-xl border border-border shadow-lg max-h-56 overflow-y-auto"
         >
-          {filtered.map((o, i) => (
+          {filtered.map((o, i) => {
+            const meta = AVAILABILITY_META[availabilityOf(o)];
+            return (
             <li key={o.id} role="option" aria-selected={i === highlighted}>
               <button
                 type="button"
@@ -158,11 +220,19 @@ export function OfficerCombobox({
                   i > 0 && 'border-t border-border/40',
                 )}
               >
-                <span>
-                  <span className="font-medium text-foreground text-[14px]">{o.name}</span>
-                  {o.title && (
-                    <span className="text-muted text-[12px] font-normal"> — {o.title}</span>
-                  )}
+                <span className="flex items-center gap-2 min-w-0">
+                  <span
+                    role="img"
+                    aria-label={meta.label}
+                    title={meta.label}
+                    className={cn('h-2 w-2 rounded-full shrink-0', meta.dot)}
+                  />
+                  <span className="truncate">
+                    <span className="font-medium text-foreground text-[14px]">{o.name}</span>
+                    {o.title && (
+                      <span className="text-muted text-[12px] font-normal"> — {o.title}</span>
+                    )}
+                  </span>
                 </span>
                 {o.directorate_abbr && (
                   <span className="text-[10px] font-bold bg-primary/8 text-primary px-2 py-0.5 rounded-md ml-2 shrink-0">
@@ -171,7 +241,8 @@ export function OfficerCombobox({
                 )}
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>

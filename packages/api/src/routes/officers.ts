@@ -1,13 +1,16 @@
 import { Hono } from 'hono';
 import type { Env, SessionData } from '../types';
-import { success, notFound } from '../lib/response';
+import { success, error, notFound } from '../lib/response';
 import { requireRole } from '../lib/require-role';
+import { UpdateAvailabilitySchema } from '../lib/validation';
+import { recordAudit, auditActorFromContext } from '../services/audit';
 
 export const officerRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
 // Explicit column list — never expose officers.telegram_chat_id to API consumers.
 const OFFICER_COLUMNS = `o.id, o.name, o.title, o.directorate_id, o.email, o.phone,
        o.office_number, o.is_available, o.staff_id, o.created_at, o.updated_at,
+       o.availability_status,
        (o.override_pin_hash IS NOT NULL) as has_override_pin,
        (o.staff_id IS NOT NULL AND EXISTS(
          SELECT 1 FROM users u WHERE u.staff_id = o.staff_id
@@ -43,4 +46,40 @@ officerRoutes.get('/:id', async (c) => {
   ).bind(id).first();
   if (!officer) return notFound(c, 'Officer');
   return success(c, officer);
+});
+
+// Self-service availability toggle (spec: 2026-07-19-host-availability-design) —
+// open to any authenticated user whose account maps to an officer row; no role
+// gate, the row resolution below is the authorization.
+officerRoutes.put('/me/availability', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = UpdateAvailabilitySchema.safeParse(body);
+  if (!parsed.success) {
+    return error(c, 'VALIDATION_ERROR', 'status must be one of: available, in_meeting, out_of_office', 400);
+  }
+
+  const session = c.get('session');
+  // Resolve the caller's officer row — email first, then name (same lookup
+  // pattern as the telegram link handlers).
+  let officer = await c.env.DB.prepare(
+    'SELECT id FROM officers WHERE email = ?'
+  ).bind(session.email).first<{ id: string }>();
+  if (!officer) {
+    officer = await c.env.DB.prepare(
+      'SELECT id FROM officers WHERE name = ?'
+    ).bind(session.name).first<{ id: string }>();
+  }
+  if (!officer) return notFound(c, 'Officer record');
+
+  const status = parsed.data.status;
+  await c.env.DB.prepare(
+    `UPDATE officers SET availability_status = ?, availability_updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?`
+  ).bind(status, officer.id).run();
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'officer.availability', entityType: 'officer', entityId: officer.id,
+    summary: `Availability set to ${status}`,
+  });
+
+  return success(c, { availability_status: status });
 });
