@@ -97,16 +97,19 @@ Polls `GET /api/presence/current` every 20s; re-renders only when the token chan
 
 ## Section 4 — Staff App Clock Flow
 
-`packages/staff/src/pages/ClockPage.tsx` gains a scan step between geofence pre-check and liveness prompt:
+`packages/staff/src/pages/ClockPage.tsx` runs the scan step **first**, in parallel with GPS acquisition:
 
-1. GPS fix → client geofence pre-check (unchanged)
-2. **Scan presence QR** — in-app scanner using `jsqr` (add dependency; pattern copied from `packages/web/src/components/QrScanner.tsx`). Parses `presence` param from the scanned URL.
-3. Liveness prompt + burst + re-auth (unchanged)
-4. `submitClock` includes `presence_token`
+1. Tap Clock In/Out → the scan step opens immediately **and** GPS acquisition starts in the background (MediaPipe WASM warms alongside, as before)
+2. **Scan presence QR** — in-app scanner using `jsqr` (pattern copied from `packages/web/src/components/QrScanner.tsx`). Parses `presence` param from the scanned URL via `parsePresenceToken`
+3. Scan resolves (token scanned, deep-link prefill, or Skip) → client geofence pre-check — the fix has usually settled by then; if GPS is still acquiring, the existing "Locating you…" state shows until it resolves or errors. GPS failure / geofence-outside still block before liveness with the same messages
+4. Liveness prompt + burst + re-auth (unchanged)
+5. `submitClock` includes `presence_token` (unchanged)
+
+**Deep-link prefill:** the QR encodes `https://staff-attendance.ohcsghana.org/clock?presence=<token>`, so scanning it with the phone's camera app opens the PWA directly. The app stashes `{ token, at }` in `sessionStorage` (`ohcs.presence.deeplink`), strips the param with `history.replaceState`, and serves `/clock` as a route rendering ClockPage (no 404; the stash survives the `/login` detour). On entering the scan step, a valid (UUID-shaped, ≤3 min old) stash is consumed as if scanned; a fresh in-app scan always wins over the stash, and the stash is cleared once consumed or when a clock submit succeeds.
 
 **Degraded paths:**
 - `presence_qr_mode=1` (shadow): scan step is skippable; unsubmitted tokens record `presence_method='none'`
-- `presence_qr_mode=2` (enforce): scan required; "QR unavailable" → reception override PIN modal (existing component pattern from kiosk)
+- `presence_qr_mode=2` (enforce): **clock-in only** — scan required; a skipped clock-in is rejected with `PRESENCE_REQUIRED` (scan step re-shows with the reception override-PIN control). Clock-out never blocks: with no/invalid token it proceeds and records `presence_method='none'` / `'qr_pending'` (flag semantics, exactly the shadow behavior, plus a devLog)
 - Camera broken / accessibility: reception override path, same as today
 
 ---

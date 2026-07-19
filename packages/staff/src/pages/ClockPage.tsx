@@ -16,6 +16,7 @@ import { api, fetchClockPrompt, submitClock as apiSubmitClock, type ClockPrompt 
 import { getDeviceId } from '@/lib/deviceId';
 import { getToken } from '@/lib/tokenStore';
 import { apiOrQueue, type ApiOrQueueResult } from '@/lib/offlineQueue';
+import { consumePresenceDeeplink, clearPresenceDeeplink } from '@/lib/presence';
 import { cn, formatTime } from '@/lib/utils';
 import { withinGeofence, distanceToPolygonMeters, MAX_GPS_ACCURACY_METERS } from '@/lib/geofence';
 import { useAuthStore } from '@/stores/auth';
@@ -86,6 +87,10 @@ export function ClockPage() {
   // event; cleared on every new clock attempt and on reset.
   const presenceTokenRef = useRef<string | null>(null);
   const capturedAtRef = useRef<string | null>(null);
+  // Scan-first coordination: the scan step opens immediately while GPS acquires
+  // in the background; resolveScan() and finish() rendezvous through these refs.
+  const scanResolvedRef = useRef(false);
+  const gpsFixRef = useRef<{ lat: number; lng: number; accuracy: number } | null>(null);
 
   const { data: statusData } = useQuery({
     queryKey: ['clock-status'],
@@ -164,6 +169,9 @@ export function ClockPage() {
       return res;
     },
     onSuccess: async (res: ApiOrQueueResult<ClockResult>) => {
+      // A successful submit retires any stashed deep-link token so it can't
+      // leak into a later attempt.
+      clearPresenceDeeplink();
       const ts = 'queued' in res ? new Date().toISOString() : res.data.timestamp;
       // Optimistically update the Today card immediately so it reflects the
       // new clock-in/out state without waiting for the refetch to land. The
@@ -230,6 +238,7 @@ export function ClockPage() {
         // reception override-PIN control is shown alongside the scanner.
         setErrorMsg(variables?.presenceOverridePin ? 'Incorrect PIN — please ask reception' : msg);
         setPresenceRejected(true);
+        scanResolvedRef.current = false;
         setPhase('scan');
         return;
       }
@@ -286,10 +295,12 @@ export function ClockPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, prompt]);
 
-  // Get GPS location
+  // Scan-first: open the scan step immediately and acquire GPS in the
+  // background; the geofence pre-check runs in finish() and the flow proceeds
+  // to liveness once both the scan and the fix have resolved (resolveScan /
+  // finish rendezvous via scanResolvedRef + gpsFixRef).
   function startClock(type: 'clock_in' | 'clock_out') {
     setClockType(type);
-    setPhase('locating');
     setErrorMsg('');
     setPhotoBlob(null);
     setPrompt(null);
@@ -304,8 +315,24 @@ export function ClockPage() {
     requestedManualReviewRef.current = false;
     presenceTokenRef.current = null;
     capturedAtRef.current = null;
+    scanResolvedRef.current = false;
+    gpsFixRef.current = null;
+    setLocation(null);
     // Warm MediaPipe WASM in parallel with geolocation
     void import('../lib/liveness/mediapipeRunner');
+
+    // Deep-link prefill: a token stashed from the display QR's URL
+    // (?presence=…) counts as the scan step already done. A fresh in-app scan
+    // always wins — the stash only fills an empty slot.
+    const deeplink = consumePresenceDeeplink(presenceTokenRef.current);
+    if (deeplink) {
+      presenceTokenRef.current = deeplink.token;
+      capturedAtRef.current = new Date(deeplink.at).toISOString();
+      // Scan already resolved → show the acquiring state until the fix lands.
+      resolveScan();
+    } else {
+      setPhase('scan');
+    }
 
     // Watch for the first fix that is good enough to trust (≤15m), or settle
     // for the best reading we've seen after 20s. Tight target because the
@@ -339,8 +366,12 @@ export function ClockPage() {
         return;
       }
 
+      gpsFixRef.current = pos;
       setLocation(pos);
-      setPhase('scan');
+      // Scan-first rendezvous: if the scan step already resolved while GPS was
+      // acquiring, run straight into liveness; otherwise the scanner stays
+      // open and resolveScan() picks this fix up when the scan resolves.
+      if (scanResolvedRef.current) void proceedToLiveness();
     };
 
     watchId = navigator.geolocation.watchPosition(
@@ -369,6 +400,15 @@ export function ClockPage() {
         setPhase('error');
       }
     }, SETTLE_MS);
+  }
+
+  // The scan step resolved (token scanned, deep-link prefill, or Skip). If the
+  // GPS fix already landed, run straight into liveness; otherwise show the
+  // acquiring state until finish() picks the resolved scan up.
+  function resolveScan() {
+    scanResolvedRef.current = true;
+    if (gpsFixRef.current) void proceedToLiveness();
+    else setPhase('locating');
   }
 
   // After the presence scan step: fetch a fresh single-use prompt before the
@@ -518,6 +558,8 @@ export function ClockPage() {
     requestedManualReviewRef.current = false;
     presenceTokenRef.current = null;
     capturedAtRef.current = null;
+    scanResolvedRef.current = false;
+    gpsFixRef.current = null;
   }
 
   const now = new Date();
@@ -691,11 +733,11 @@ export function ClockPage() {
                   capturedAtRef.current = new Date().toISOString();
                   setPresenceRejected(false);
                   setErrorMsg('');
-                  void proceedToLiveness();
+                  resolveScan();
                 }}
                 onSkip={() => {
                   capturedAtRef.current = new Date().toISOString();
-                  void proceedToLiveness();
+                  resolveScan();
                 }}
               />
               {presenceRejected && (

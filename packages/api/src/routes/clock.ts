@@ -325,7 +325,13 @@ clockRoutes.post('/', async (c) => {
     }
     presenceMethod ??= 'none';
 
-    if (presenceMode === 2 && presenceMethod === 'none') {
+    if (presenceMode === 2 && type === 'clock_out' && presenceMethod === 'none') {
+      // Enforce is clock-in only: a clock-out never blocks on presence — it
+      // records the 'none' flag, exactly the shadow behavior.
+      devLog(c.env, `[PRESENCE] enforce: clock-out without presence allowed user=${session.userId}`);
+    }
+
+    if (presenceMode === 2 && type === 'clock_in' && presenceMethod === 'none') {
       // Reception override escape valve (per-officer PINs first, shared PIN
       // fallback — same resolveOverride the kiosk uses). Per-user cap bounds
       // PIN brute-force from an authenticated session.

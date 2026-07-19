@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LoginPage } from './pages/LoginPage';
 import { ClockPage } from './pages/ClockPage';
@@ -7,6 +7,7 @@ import { useAuthStore } from './stores/auth';
 import { OfflineBanner } from './components/OfflineBanner';
 import { InstallPrompt } from './components/InstallPrompt';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { stashPresenceDeeplink } from './lib/presence';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, retry: 1 } },
@@ -16,6 +17,24 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
+}
+
+// Captures ?presence=<token> from any URL (the reception display's QR deep
+// link opens the PWA at /clock?presence=...), stashes it for the next clock
+// attempt's scan step, and strips it from the URL. Runs on in-app navigations
+// too, and survives the /login detour via sessionStorage.
+function PresenceDeeplinkCapture() {
+  const location = useLocation();
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const raw = params.get('presence');
+    if (!raw) return;
+    stashPresenceDeeplink(raw);
+    params.delete('presence');
+    const search = params.toString();
+    window.history.replaceState(null, '', `${location.pathname}${search ? `?${search}` : ''}${location.hash}`);
+  }, [location]);
+  return null;
 }
 
 export function App() {
@@ -144,9 +163,12 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <OfflineBanner />
         <BrowserRouter>
+          <PresenceDeeplinkCapture />
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/" element={<ProtectedRoute><ClockPage /></ProtectedRoute>} />
+            {/* Deep-link target of the reception display QR — same page as / */}
+            <Route path="/clock" element={<ProtectedRoute><ClockPage /></ProtectedRoute>} />
           </Routes>
         </BrowserRouter>
         <InstallPrompt />
