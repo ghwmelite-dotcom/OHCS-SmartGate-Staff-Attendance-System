@@ -39,6 +39,7 @@ import { sendDailySummary as sendDailySummaryFn } from './services/daily-summary
 import { sendClockReminders, sendMonthlyReportReady } from './services/reminders';
 import { runNssEndOfServiceCheck } from './services/nss-eos';
 import { runCheckoutSweep } from './services/checkout-sweep';
+import { runSlaEscalation } from './services/sla-escalation';
 import { purgeExpiredVisitorPhotos } from './services/photo-purge';
 import { exportBackupToR2, verifyLatestBackup } from './services/backup';
 import { alertAdminError } from './lib/error-alert';
@@ -198,6 +199,14 @@ export default {
           } catch (err) {
             console.error(`[scheduled] checkout-sweep failed: ${err instanceof Error ? err.message : String(err)}`);
             await alertAdminError(env, 'cron:checkout-sweep', err);
+          }
+          break;
+        case '*/15 8-17 * * 1-5':
+          try {
+            await runSlaEscalation(env);
+          } catch (err) {
+            console.error(`[scheduled] sla-escalation failed: ${err instanceof Error ? err.message : String(err)}`);
+            await alertAdminError(env, 'cron:sla-escalation', err);
           }
           break;
         case '0 2 * * *':

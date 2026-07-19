@@ -3,12 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, type Visit } from '@/lib/api';
 import { apiOrQueue } from '@/lib/offlineQueue';
-import { cn, formatTime, timeAgo } from '@/lib/utils';
+import { cn, formatTime, formatDateTime } from '@/lib/utils';
 import { VisitorAvatar } from '@/components/VisitorAvatar';
 import { HostResponseChip } from '@/components/HostResponseChip';
 import type { AppSettings } from '@/components/admin/SettingsModal';
 import { toast } from '@/stores/toast';
 import { playCheckOutChime } from '@/lib/sounds';
+import { useAuthStore } from '@/stores/auth';
 import {
   Users,
   LogIn,
@@ -19,12 +20,19 @@ import {
   Search,
   Flame,
   AlertTriangle,
+  Siren,
+  Printer,
+  Send,
+  X,
 } from 'lucide-react';
 
 export function DashboardPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
+  const user = useAuthStore((s) => s.user);
+  const canEvacuate = ['receptionist', 'admin', 'superadmin', 'it'].includes(user?.role ?? '');
+  const [evacOpen, setEvacOpen] = useState(false);
 
   const { data: activeVisits, isLoading } = useQuery({
     queryKey: ['visits', 'active'],
@@ -95,6 +103,18 @@ export function DashboardPage() {
     checkOutMutation.mutate(visitId);
   }
 
+  // Waiting-time SLA (spec 2026-07-19-sla-and-evacuation-design §Feature A):
+  // minutes since check-in; unanswered visits (host_response unset) sort above
+  // answered ones, longest wait first.
+  const waitMinutes = (v: Visit) =>
+    Math.max(0, Math.floor((now.getTime() - new Date(v.check_in_at).getTime()) / 60_000));
+  const sortedActive = [...active].sort((a, b) => {
+    const aAnswered = a.host_response ? 1 : 0;
+    const bAnswered = b.host_response ? 1 : 0;
+    if (aAnswered !== bAnswered) return aAnswered - bAnswered;
+    return new Date(a.check_in_at).getTime() - new Date(b.check_in_at).getTime();
+  });
+
   return (
     <div className="space-y-6">
       {/* Page title */}
@@ -153,6 +173,15 @@ export function DashboardPage() {
           <Search className="h-4 w-4 text-muted" />
           Find Visitor
         </button>
+        {canEvacuate && (
+          <button
+            onClick={() => setEvacOpen(true)}
+            className="inline-flex items-center gap-2 h-11 px-5 bg-surface text-foreground text-[14px] font-medium rounded-xl border border-border hover:border-accent/40 hover:shadow-sm transition-all"
+          >
+            <Siren className="h-4 w-4 text-danger" />
+            Evacuation Roll
+          </button>
+        )}
       </div>
 
       {/* Still-in-building banner — only after office close with open visits */}
@@ -236,7 +265,17 @@ export function DashboardPage() {
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {active.map((visit, i) => (
+            {sortedActive.map((visit, i) => {
+              // SLA tone: colored only while waiting (no host response yet).
+              const wait = waitMinutes(visit);
+              const waitTone = visit.host_response
+                ? 'text-muted-foreground'
+                : wait >= 30
+                  ? 'text-danger font-bold'
+                  : wait >= 15
+                    ? 'text-warning font-semibold'
+                    : 'text-muted-foreground';
+              return (
               <div
                 key={visit.id}
                 className={cn(
@@ -277,13 +316,13 @@ export function DashboardPage() {
                   </span>
                 )}
 
-                {/* Time */}
+                {/* Time + SLA wait */}
                 <div className="text-right shrink-0 hidden sm:block">
                   <p className="text-[11px] font-medium text-foreground">
                     {formatTime(visit.check_in_at)}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {timeAgo(visit.check_in_at)}
+                  <p className={cn('text-[10px]', waitTone)}>
+                    {wait}m wait
                   </p>
                 </div>
 
@@ -308,10 +347,14 @@ export function DashboardPage() {
                   {checkingOut === visit.id ? 'Leaving...' : 'Check Out'}
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
+
+      {/* Evacuation roll — "who is in the building right now" */}
+      {evacOpen && <EvacuationRollModal onClose={() => setEvacOpen(false)} />}
     </div>
   );
 }
@@ -351,6 +394,190 @@ function StatCard({
           {value}
         </p>
         <p className="text-[13px] text-muted font-medium mt-0.5">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+/* ---- Evacuation roll (spec 2026-07-19-sla-and-evacuation-design §Feature B) ---- */
+
+interface EvacuationRoll {
+  generated_at: string;
+  visitors: {
+    name: string;
+    badge_code: string | null;
+    host_name: string | null;
+    directorate: string | null;
+    since: string;
+    party_size: number | null;
+  }[];
+  staff: {
+    name: string;
+    staff_id: string | null;
+    directorate: string | null;
+    since: string;
+  }[];
+  counts: { visitors: number; staff: number; total: number };
+}
+
+function EvacuationRollModal({ onClose }: { onClose: () => void }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['reports', 'evacuation'],
+    queryFn: () => api.get<EvacuationRoll>('/reports/evacuation'),
+  });
+
+  const notifyMutation = useMutation({
+    mutationFn: () => api.post<{ sent: boolean }>('/reports/evacuation/notify', {}),
+    onSuccess: () => toast.success('Evacuation roll sent to Telegram'),
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to send to Telegram'),
+  });
+
+  const roll = data?.data;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      {/* Print only the roll itself — every other element (app chrome included)
+          is visibility-hidden, and the roll is lifted out of the modal flow. */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #evacuation-roll, #evacuation-roll * { visibility: visible; }
+          #evacuation-roll { position: absolute; left: 0; top: 0; width: 100%; max-height: none; overflow: visible; }
+        }
+      `}</style>
+      <div
+        className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="h-[2px]" style={{ background: 'linear-gradient(90deg, #D4A017, #F5D76E, #D4A017)' }} />
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <div className="flex items-center gap-2.5">
+            <Siren className="h-5 w-5 text-danger" />
+            <div>
+              <h3 className="text-[17px] font-bold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
+                Evacuation Roll
+              </h3>
+              <p className="text-[12px] text-muted">Who is in the building right now</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => window.print()}
+              disabled={!roll}
+              className="inline-flex items-center gap-1.5 h-8 px-3 text-[12px] font-semibold rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all disabled:opacity-50"
+            >
+              <Printer className="h-3.5 w-3.5" />
+              Print
+            </button>
+            <button
+              onClick={() => notifyMutation.mutate()}
+              disabled={notifyMutation.isPending}
+              className="inline-flex items-center gap-1.5 h-8 px-3 text-[12px] font-semibold rounded-lg bg-secondary/10 text-secondary hover:bg-secondary hover:text-white transition-all disabled:opacity-50"
+            >
+              <Send className="h-3.5 w-3.5" />
+              {notifyMutation.isPending ? 'Sending...' : 'Telegram'}
+            </button>
+            <button
+              onClick={onClose}
+              className="h-8 w-8 flex items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-foreground/5 transition-all"
+              title="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-y-auto px-6 py-4">
+          {isLoading || !roll ? (
+            <div className="p-10 text-center text-muted text-sm">
+              <div className="h-5 w-5 border-2 border-primary/20 border-t-primary rounded-full animate-spin mx-auto mb-3" />
+              Building the roll...
+            </div>
+          ) : (
+            <div id="evacuation-roll" className="space-y-5">
+              <div>
+                <p className="text-[12px] text-muted">Generated {formatDateTime(roll.generated_at)}</p>
+                <p className="text-[15px] font-bold text-foreground mt-1">
+                  {roll.counts.total} {roll.counts.total === 1 ? 'person' : 'people'} in building
+                  — {roll.counts.visitors} visitor{roll.counts.visitors === 1 ? '' : 's'},{' '}
+                  {roll.counts.staff} staff
+                </p>
+              </div>
+
+              <div>
+                <h4 className="text-[13px] font-bold text-foreground mb-2">
+                  Visitors ({roll.counts.visitors})
+                </h4>
+                {roll.visitors.length === 0 ? (
+                  <p className="text-[13px] text-muted">No visitors in building.</p>
+                ) : (
+                  <table className="w-full text-[13px]">
+                    <thead>
+                      <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground border-b border-border">
+                        <th className="py-1.5 pr-3 font-semibold">Name</th>
+                        <th className="py-1.5 pr-3 font-semibold">Badge</th>
+                        <th className="py-1.5 pr-3 font-semibold">Host</th>
+                        <th className="py-1.5 pr-3 font-semibold">Directorate</th>
+                        <th className="py-1.5 font-semibold">Since</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {roll.visitors.map((v, i) => (
+                        <tr key={i} className="border-b border-border last:border-0">
+                          <td className="py-1.5 pr-3 font-medium text-foreground">
+                            {v.name}
+                            {(v.party_size ?? 1) > 1 && (
+                              <span className="text-muted"> ×{v.party_size}</span>
+                            )}
+                          </td>
+                          <td className="py-1.5 pr-3 font-mono text-[12px] text-muted">{v.badge_code ?? '—'}</td>
+                          <td className="py-1.5 pr-3 text-muted">{v.host_name ?? '—'}</td>
+                          <td className="py-1.5 pr-3 text-muted">{v.directorate ?? '—'}</td>
+                          <td className="py-1.5 text-muted">{formatTime(v.since)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div>
+                <h4 className="text-[13px] font-bold text-foreground mb-2">
+                  Staff ({roll.counts.staff})
+                </h4>
+                {roll.staff.length === 0 ? (
+                  <p className="text-[13px] text-muted">No staff clocked in.</p>
+                ) : (
+                  <table className="w-full text-[13px]">
+                    <thead>
+                      <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground border-b border-border">
+                        <th className="py-1.5 pr-3 font-semibold">Name</th>
+                        <th className="py-1.5 pr-3 font-semibold">Staff ID</th>
+                        <th className="py-1.5 pr-3 font-semibold">Directorate</th>
+                        <th className="py-1.5 font-semibold">Since</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {roll.staff.map((s, i) => (
+                        <tr key={i} className="border-b border-border last:border-0">
+                          <td className="py-1.5 pr-3 font-medium text-foreground">{s.name}</td>
+                          <td className="py-1.5 pr-3 font-mono text-[12px] text-muted">{s.staff_id ?? '—'}</td>
+                          <td className="py-1.5 pr-3 text-muted">{s.directorate ?? '—'}</td>
+                          <td className="py-1.5 text-muted">{formatTime(s.since)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <p className="text-[11px] text-muted-foreground border-t border-border pt-2">
+                Staff presence is based on today's clock records — anyone clocked in and not
+                yet clocked out is listed (NSS and interns included).
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

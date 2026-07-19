@@ -25,9 +25,10 @@ rules = [
 # Daily summary: 9 AM Mon-Fri | Weekly: 4 PM Friday | Monthly: 9 AM 1st | Yearly: 9 AM Jan 1
 # NSS end-of-service: 00:30 daily — auto-deactivate ended postings, alert on next 7 days
 # Checkout sweep: 17:15 Mon-Fri — flag visitors still marked in building after close
+# SLA escalation: every 15 min 8-17 Mon-Fri — escalate visitors waiting 30+ min with no host response
 # Maintenance: 02:00 daily — purge expired visitor ID/face photos (+ backup, later)
 [triggers]
-crons = ["*/15 7-9 * * 1-5", "0 9 * * 1-5", "0 16 * * 5", "0 9 1 * *", "0 9 1 1 *", "30 0 * * *", "15 17 * * 1-5", "0 2 * * *"]
+crons = ["*/15 7-9 * * 1-5", "0 9 * * 1-5", "0 16 * * 5", "0 9 1 * *", "0 9 1 1 *", "30 0 * * *", "15 17 * * 1-5", "*/15 8-17 * * 1-5", "0 2 * * *"]
 
 [vars]
 ENVIRONMENT = "production"
