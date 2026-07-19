@@ -5,6 +5,7 @@ import { api, type Visit, type Directorate } from '@/lib/api';
 import { cn, formatDate, formatTime } from '@/lib/utils';
 import { VISIT_STATUS } from '@/lib/constants';
 import { IdCheckBadge } from '@/components/IdCheckBadge';
+import { HostResponseChip } from '@/components/HostResponseChip';
 import { Search, Filter, X, ChevronDown } from 'lucide-react';
 
 export function VisitLogPage() {
@@ -185,7 +186,10 @@ export function VisitLogPage() {
                           {v.organisation ?? '—'}
                         </td>
                         <td className="px-5 py-3 text-[14px] text-muted truncate max-w-[140px]">
-                          {v.host_name ?? '—'}
+                          <span className="inline-flex items-center gap-1.5">
+                            {v.host_name ?? '—'}
+                            <HostResponseChip value={v.host_response} />
+                          </span>
                         </td>
                         <td className="px-5 py-3">
                           {v.directorate_abbr ? (

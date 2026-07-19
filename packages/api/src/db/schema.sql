@@ -144,6 +144,10 @@ CREATE TABLE IF NOT EXISTS visits (
     id_photo_check   TEXT,
     created_by       TEXT REFERENCES users(id),
     idempotency_key  TEXT,
+    -- Host Telegram arrival response (added by migration-visits-host-response.sql)
+    host_response    TEXT,
+    host_response_at TEXT,
+    host_response_by TEXT,
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_visits_visitor ON visits(visitor_id);

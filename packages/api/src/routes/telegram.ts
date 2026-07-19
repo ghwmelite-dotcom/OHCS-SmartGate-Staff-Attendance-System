@@ -1,9 +1,21 @@
 import { z } from 'zod';
 import type { Context } from 'hono';
 import type { Env, SessionData } from '../types';
-import { generateLinkCode, consumeLinkCode, sendTelegramMessage, parseCommand } from '../services/telegram';
+import {
+  generateLinkCode, consumeLinkCode, sendTelegramMessage, parseCommand,
+  answerCallbackQuery, editMessageText, parseArrivalCallback,
+  ARRIVAL_ACTIONS, type ArrivalAction,
+} from '../services/telegram';
+import { recordAudit, systemActor } from '../services/audit';
 import { success, error } from '../lib/response';
 import { escapeHtml } from '../lib/html';
+
+interface ArrivalCallbackQuery {
+  id: string;
+  from?: { id: number };
+  data?: string;
+  message?: { message_id: number; chat?: { id: number }; text?: string };
+}
 
 // Public — receives updates from Telegram
 export async function telegramWebhook(c: Context<{ Bindings: Env }>) {
@@ -24,8 +36,16 @@ export async function telegramWebhook(c: Context<{ Bindings: Env }>) {
   }
 
   const body = await c.req.json() as {
+    callback_query?: ArrivalCallbackQuery;
     message?: { chat?: { id: number }; text?: string };
   };
+
+  // Inline-keyboard taps arrive as callback_query updates — handle before messages.
+  const cb = body.callback_query;
+  if (cb?.data && cb.message) {
+    await handleArrivalCallback(c, cb);
+    return c.json({ ok: true });
+  }
 
   const chatId = body.message?.chat?.id;
   const text = body.message?.text?.trim();
@@ -50,6 +70,77 @@ export async function telegramWebhook(c: Context<{ Bindings: Env }>) {
 }
 
 type Ctx = Context<{ Bindings: Env }>;
+
+// Host tapped an arrival-alert inline button (spec §4). First response wins;
+// every callback gets an answer so Telegram stops retrying — failures are logged, never fatal.
+async function handleArrivalCallback(c: Ctx, cb: ArrivalCallbackQuery): Promise<void> {
+  const parsed = parseArrivalCallback(cb.data ?? '');
+  if (!parsed) return; // not one of our arrival buttons — other keyboards may exist later
+  const msg = cb.message;
+  if (!msg) return;
+  const { visitId, action } = parsed;
+  const answer = (text: string) =>
+    answerCallbackQuery({ token: c.env.TELEGRAM_BOT_TOKEN, callbackQueryId: cb.id, text });
+
+  try {
+    const visit = await c.env.DB.prepare(
+      `SELECT v.id, v.host_officer_id, v.host_response, o.telegram_chat_id, o.email, o.name
+       FROM visits v JOIN officers o ON o.id = v.host_officer_id WHERE v.id = ?`
+    ).bind(visitId).first<{
+      id: string; host_officer_id: string | null; host_response: string | null;
+      telegram_chat_id: string | null; email: string | null; name: string;
+    }>();
+    if (!visit) {
+      await answer('This visit could not be found.');
+      return;
+    }
+
+    // Authorization: the tap must come from the host's own linked chat —
+    // forwarded messages keep working keyboards, so verify `from` every time.
+    const chatId = String(cb.from?.id ?? '');
+    let authorized = chatId !== '' && chatId === visit.telegram_chat_id;
+    if (!authorized) {
+      let user = visit.email ? await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(visit.email).first<{ id: string }>() : null;
+      if (!user) user = await c.env.DB.prepare('SELECT id FROM users WHERE name = ?').bind(visit.name).first<{ id: string }>();
+      if (user) authorized = (await c.env.KV.get(`telegram-user:${user.id}`)) === chatId;
+    }
+    if (!authorized) {
+      await answer('This alert isn’t for you.');
+      return;
+    }
+
+    // First response wins — later taps (either button, any device) change nothing.
+    if (visit.host_response) {
+      const existing = ARRIVAL_ACTIONS[visit.host_response as ArrivalAction];
+      await answer(`Already responded: ${existing?.label ?? visit.host_response}.`);
+      return;
+    }
+
+    await c.env.DB.prepare(
+      'UPDATE visits SET host_response = ?, host_response_at = ?, host_response_by = ? WHERE id = ?'
+    ).bind(action, new Date().toISOString(), chatId, visitId).run();
+
+    const { label, confirm } = ARRIVAL_ACTIONS[action];
+    await answer(confirm);
+
+    // Append the decision to the original message; omitting reply_markup drops the keyboard.
+    const time = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    await editMessageText({
+      token: c.env.TELEGRAM_BOT_TOKEN,
+      chatId: String(msg.chat?.id ?? ''),
+      messageId: msg.message_id,
+      text: `${msg.text ?? ''}\n\n✅ ${label} — ${time}`,
+    });
+
+    await recordAudit(c.env, systemActor('telegram-webhook', c.req.header('cf-connecting-ip') ?? null), {
+      action: 'visit.host_response', entityType: 'visit', entityId: visitId,
+      summary: `Host responded "${label}" via Telegram (chat ${chatId})`,
+    });
+  } catch (err) {
+    console.error('[Telegram] Arrival callback failed:', err);
+    await answer('Something went wrong — please try again.');
+  }
+}
 
 async function handleStart(c: Ctx, chatId: number, args: string): Promise<void> {
   if (args) {

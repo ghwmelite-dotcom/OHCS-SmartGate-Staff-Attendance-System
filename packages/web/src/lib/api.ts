@@ -97,6 +97,8 @@ export interface Visit {
   created_by: string | null;
   created_at: string;
   id_photo_check?: string | null;
+  host_response?: 'coming_down' | 'waiting_area' | 'reschedule' | null;
+  host_response_at?: string | null;
   /* joined fields */
   first_name?: string;
   last_name?: string;

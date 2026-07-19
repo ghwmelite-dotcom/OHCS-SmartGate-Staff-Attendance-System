@@ -1,5 +1,5 @@
 import type { Env } from '../types';
-import { sendTelegramMessage } from './telegram';
+import { sendTelegramMessage, buildArrivalKeyboard } from './telegram';
 import { sendWebPush, type PushTarget } from '../lib/webpush';
 import { escapeHtml } from '../lib/html';
 import { devError } from '../lib/log';
@@ -88,8 +88,10 @@ export async function notifyOnCheckIn(data: VisitNotifyData, env: Env): Promise<
   }
 }
 
-// Notify a specific officer of a visit (shared per-officer notify path)
-async function notifyOfficerOfVisit(officerId: string, data: VisitNotifyData, env: Env): Promise<void> {
+// Notify a specific officer of a visit (shared per-officer notify path).
+// withKeyboard adds the arrival-action inline keyboard — host messages only
+// (spec §1); receivers/leadership stay FYI.
+async function notifyOfficerOfVisit(officerId: string, data: VisitNotifyData, env: Env, withKeyboard = false): Promise<void> {
   const officer = await env.DB.prepare(
     'SELECT id, name, email, telegram_chat_id FROM officers WHERE id = ?'
   ).bind(officerId).first<{
@@ -98,12 +100,15 @@ async function notifyOfficerOfVisit(officerId: string, data: VisitNotifyData, en
 
   if (!officer) return;
 
+  const replyMarkup = withKeyboard ? buildArrivalKeyboard(data.visit_id) : undefined;
+
   // Telegram to officer directly
   if (officer.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
     const ok = await sendTelegramMessage({
       chatId: officer.telegram_chat_id,
       text: formatVisitorMessage(data, 'host'),
       token: env.TELEGRAM_BOT_TOKEN,
+      replyMarkup,
     });
     await recordNotifyOutcome(env, 'telegram', ok);
   }
@@ -120,6 +125,7 @@ async function notifyOfficerOfVisit(officerId: string, data: VisitNotifyData, en
         chatId: kvChatId,
         text: formatVisitorMessage(data, 'host'),
         token: env.TELEGRAM_BOT_TOKEN,
+        replyMarkup,
       });
       await recordNotifyOutcome(env, 'telegram', ok);
     }
@@ -131,7 +137,7 @@ async function notifyOfficerOfVisit(officerId: string, data: VisitNotifyData, en
 
 // Notify the specific staff member being visited
 async function notifyHostStaff(data: VisitNotifyData, env: Env): Promise<void> {
-  await notifyOfficerOfVisit(data.host_officer_id, data, env);
+  await notifyOfficerOfVisit(data.host_officer_id, data, env, true);
 }
 
 // Notify Director and Deputy Director of the directorate

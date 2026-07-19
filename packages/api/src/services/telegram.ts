@@ -1,13 +1,24 @@
 import type { Env } from '../types';
 import { escapeHtml } from '../lib/html';
 
+// Telegram Bot API inline keyboard (subset we use)
+export interface InlineKeyboardButton {
+  text: string;
+  callback_data: string;
+}
+
+export interface InlineKeyboardMarkup {
+  inline_keyboard: InlineKeyboardButton[][];
+}
+
 interface SendMessageParams {
   chatId: string;
   text: string;
   token: string;
+  replyMarkup?: InlineKeyboardMarkup;
 }
 
-export async function sendTelegramMessage({ chatId, text, token }: SendMessageParams): Promise<boolean> {
+export async function sendTelegramMessage({ chatId, text, token, replyMarkup }: SendMessageParams): Promise<boolean> {
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
@@ -16,6 +27,7 @@ export async function sendTelegramMessage({ chatId, text, token }: SendMessagePa
         chat_id: chatId,
         text,
         parse_mode: 'HTML',
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       }),
     });
     if (!res.ok) console.warn(JSON.stringify({ kind: 'notify', channel: 'telegram', ok: false, detail: String(res.status) }));
@@ -24,6 +36,78 @@ export async function sendTelegramMessage({ chatId, text, token }: SendMessagePa
     console.error('[Telegram] Send failed:', err);
     return false;
   }
+}
+
+// Best-effort toast shown on the host's device after tapping an inline button.
+export async function answerCallbackQuery({ token, callbackQueryId, text }: {
+  token: string;
+  callbackQueryId: string;
+  text: string;
+}): Promise<boolean> {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
+    });
+    if (!res.ok) console.warn(JSON.stringify({ kind: 'notify', channel: 'telegram', ok: false, detail: String(res.status) }));
+    return res.ok;
+  } catch (err) {
+    console.error('[Telegram] answerCallbackQuery failed:', err);
+    return false;
+  }
+}
+
+// Replaces a message's text; omitting reply_markup drops its keyboard.
+export async function editMessageText({ token, chatId, messageId, text }: {
+  token: string;
+  chatId: string;
+  messageId: number;
+  text: string;
+}): Promise<boolean> {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        parse_mode: 'HTML',
+      }),
+    });
+    if (!res.ok) console.warn(JSON.stringify({ kind: 'notify', channel: 'telegram', ok: false, detail: String(res.status) }));
+    return res.ok;
+  } catch (err) {
+    console.error('[Telegram] editMessageText failed:', err);
+    return false;
+  }
+}
+
+// Arrival-alert actions (spec §1) — callback_data stays ≤ 64 bytes via the `va:` prefix.
+export const ARRIVAL_ACTIONS = {
+  coming_down:  { emoji: '⬇️', label: 'Coming down', confirm: "Noted — visitor told you're coming down." },
+  waiting_area: { emoji: '🪑', label: 'Waiting area', confirm: 'Noted — visitor will wait in the waiting area.' },
+  reschedule:   { emoji: '📅', label: 'Reschedule', confirm: 'Noted — reception will reschedule the visit.' },
+} as const;
+
+export type ArrivalAction = keyof typeof ARRIVAL_ACTIONS;
+
+export function buildArrivalKeyboard(visitId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      (Object.keys(ARRIVAL_ACTIONS) as ArrivalAction[]).map((action) => ({
+        text: `${ARRIVAL_ACTIONS[action].emoji} ${ARRIVAL_ACTIONS[action].label}`,
+        callback_data: `va:${visitId}:${action}`,
+      })),
+    ],
+  };
+}
+
+export function parseArrivalCallback(data: string): { visitId: string; action: ArrivalAction } | null {
+  const m = data.match(/^va:([^:]+):(coming_down|waiting_area|reschedule)$/);
+  if (!m) return null;
+  return { visitId: m[1]!, action: m[2]! as ArrivalAction };
 }
 
 export function formatVisitorArrivalMessage(visitor: {

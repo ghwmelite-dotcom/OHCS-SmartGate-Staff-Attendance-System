@@ -5,6 +5,7 @@ import { api, type Visit } from '@/lib/api';
 import { apiOrQueue } from '@/lib/offlineQueue';
 import { cn, formatTime, timeAgo } from '@/lib/utils';
 import { VisitorAvatar } from '@/components/VisitorAvatar';
+import { HostResponseChip } from '@/components/HostResponseChip';
 import { toast } from '@/stores/toast';
 import { playCheckOutChime } from '@/lib/sounds';
 import {
@@ -207,6 +208,7 @@ export function DashboardPage() {
                     {visit.host_name && (
                       <span className="truncate">Host: {visit.host_name}</span>
                     )}
+                    <HostResponseChip value={visit.host_response} />
                   </div>
                 </div>
 

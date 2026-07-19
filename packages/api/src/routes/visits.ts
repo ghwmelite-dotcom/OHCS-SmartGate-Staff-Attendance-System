@@ -11,6 +11,14 @@ import { z } from 'zod';
 
 export const visitRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
+// host_response_by (the responding Telegram chat id) is internal audit data —
+// strip it before serializing; host_response / host_response_at stay visible.
+function publicVisit(row: Record<string, unknown>): Record<string, unknown> {
+  const rest = { ...row };
+  delete rest.host_response_by;
+  return rest;
+}
+
 const listSchema = z.object({
   date: z.string().optional(),
   from: z.string().optional(),
@@ -80,7 +88,7 @@ visitRoutes.get('/', zValidator('query', listSchema), async (c) => {
   params.push(limit + 1);
 
   const results = await c.env.DB.prepare(sql).bind(...params).all();
-  const rows = results.results ?? [];
+  const rows = (results.results ?? []).map(publicVisit);
   const hasMore = rows.length > limit;
   const items = hasMore ? rows.slice(0, limit) : rows;
   const nextCursor = hasMore && items.length > 0 ? (items[items.length - 1] as { check_in_at: string }).check_in_at : undefined;
@@ -108,7 +116,7 @@ visitRoutes.get('/active', async (c) => {
   sql += ' ORDER BY v.check_in_at DESC';
   const results = await c.env.DB.prepare(sql).bind(...params).all();
 
-  return success(c, results.results ?? []);
+  return success(c, (results.results ?? []).map(publicVisit));
 });
 
 visitRoutes.post('/check-in', zValidator('json', CheckInSchema), async (c) => {
