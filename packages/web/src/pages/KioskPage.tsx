@@ -367,11 +367,11 @@ export function KioskPage() {
             <button onClick={() => { form.reset(); setMode('form'); }} className="w-full h-14 bg-primary text-white text-base font-semibold rounded-xl inline-flex items-center justify-center gap-2 active:scale-[0.99]">
               <LogIn className="h-5 w-5" /> Check In
             </button>
-            <button onClick={() => { setReturningPhone(''); setSubmitError(null); setMode('returning-phone'); }} className="w-full h-14 bg-surface text-foreground text-base font-semibold rounded-xl border border-border inline-flex items-center justify-center gap-2 active:scale-[0.99]">
-              <UserCheck className="h-5 w-5" /> Been Here Before?
-            </button>
             <button onClick={() => { setSubmitError(null); setMode('checkout-scan'); }} className="w-full h-14 bg-surface text-foreground text-base font-semibold rounded-xl border border-border inline-flex items-center justify-center gap-2 active:scale-[0.99]">
               <LogOut className="h-5 w-5" /> Check Out
+            </button>
+            <button onClick={() => { setReturningPhone(''); setSubmitError(null); setMode('returning-phone'); }} className="w-full h-14 bg-surface text-foreground text-base font-semibold rounded-xl border border-border inline-flex items-center justify-center gap-2 active:scale-[0.99]">
+              <UserCheck className="h-5 w-5" /> Been Here Before?
             </button>
             <button onClick={() => { setApptRef(''); setMode('appointment'); }} className="w-full h-14 bg-surface text-foreground text-base font-semibold rounded-xl border border-border inline-flex items-center justify-center gap-2 active:scale-[0.99]">
               <Calendar className="h-5 w-5" /> I Have an Appointment
