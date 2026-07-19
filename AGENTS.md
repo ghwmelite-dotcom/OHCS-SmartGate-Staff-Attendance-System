@@ -96,6 +96,10 @@ relevant conventions; the user says "work the loop" to activate it.
   `ea2e…8538`; prod resources live in `f4f2…8113`. Local `wrangler d1 … --remote`
   fails with 7403 — prod DB changes go through the app (migration runner) or a
   re-authenticated wrangler.
+- **Migration SQL: whole-line comments only.** The runner strips whole-line
+  comments and splits statements on `;\s*\n`; an inline trailing comment
+  (`... TEXT;  -- note`) fuses statements into one mega-statement. Keep every
+  comment on its own line and one statement per blank-line-separated block.
 - **Local D1 drift.** Fresh local DBs may miss later columns; apply the repo's own
   migration files with `wrangler d1 execute smartgate-db --local --file=…`.
 - **CI smoke check** curls the workers.dev host (bot protection 403s the branded
