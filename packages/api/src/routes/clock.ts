@@ -8,9 +8,14 @@ import { getAppSettings, hhmmToMinutes } from '../services/settings';
 import { verifyClockWebAuthnAssertion, verifyClockPin } from '../services/clock-reauth';
 import { devLog } from '../lib/log';
 import { recordAudit, auditActorFromContext } from '../services/audit';
+import { rateLimit } from '../lib/rate-limit';
+import { resolveOverride } from '../services/override';
+import { validatePresenceToken } from '../services/presence';
 import { isJpeg } from '../lib/image-magic';
 import { ALL_CHALLENGES, verifyLivenessBurst, getReviewCount, incrementReviewCount } from '../services/liveness';
 import type { LivenessChallenge, LivenessSignature } from '../services/liveness/types';
+import { computeRiskScore, riskBand, isBlockable, BLOCK_THRESHOLD, type RiskInput, type RiskFactor } from '../services/risk-score';
+import { sha256Hex } from '../db/migrations-index';
 
 export const clockRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -108,6 +113,18 @@ function distanceToNearestPolygonMeters(lat: number, lng: number): number {
   return min;
 }
 
+// Great-circle distance in metres between two lat/lng points (haversine) —
+// used by the impossible-travel risk factor over previous-event distances.
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (deg: number) => deg * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 // ---- Clock-in re-auth + liveness prompt ----
 // A randomised liveness challenge (one of 4 actions) is issued at the start
 // of every clock-in. Stored single-use in KV, bound to the userId so a
@@ -141,6 +158,12 @@ const clockSchema = z.object({
   prompt_id: z.string().uuid().optional(),
   webauthn_assertion: z.unknown().optional(),
   pin: z.string().min(4).max(10).optional(),
+  // Presence QR (optional; validated when app_settings.presence_qr_mode > 0).
+  presence_token: z.string().uuid().optional(),
+  presence_override_pin: z.string().min(4).max(12).optional(),
+  // Persistent client device id (IndexedDB-stored UUID; hashed server-side, no PII).
+  device_id: z.string().uuid().optional(),
+  captured_at: z.string().max(40).optional(), // client clock, untrusted — log/diagnostics only
 });
 
 clockRoutes.post('/prompt', async (c) => {
@@ -279,6 +302,57 @@ clockRoutes.post('/', async (c) => {
     return error(c, 'REAUTH_REQUIRED', 'Biometric or PIN verification is required to clock in.', 401);
   }
 
+  // ---- PRESENCE QR GATE (0 = off, 1 = shadow/record-only, 2 = enforce) ----
+  const presenceMode = settings.presence_qr_mode ?? 0; // ?? for pre-migration rows
+  let presenceMethod: 'qr' | 'qr_pending' | 'none' | 'override' | null = null;
+  let presenceWindow: 'current' | 'previous' | 'expired' | null = null;
+
+  if (presenceMode > 0) {
+    if (body.presence_token) {
+      const verdict = await validatePresenceToken(c.env, body.presence_token);
+      if (verdict === 'invalid') {
+        // Rotated out of KV: offline replay (or a very slow submit). Evidence
+        // only — classify as expired/pending, never as forgery.
+        const capturedMs = body.captured_at ? Date.parse(body.captured_at) : NaN;
+        const replay = Number.isFinite(capturedMs) && Date.now() - capturedMs > 3 * 60_000;
+        devLog(c.env, `[PRESENCE] token miss user=${session.userId} replay=${replay}`);
+        presenceWindow = 'expired';
+        presenceMethod = 'qr_pending';
+      } else {
+        presenceWindow = verdict;
+        presenceMethod = 'qr';
+      }
+    }
+    presenceMethod ??= 'none';
+
+    if (presenceMode === 2 && presenceMethod === 'none') {
+      // Reception override escape valve (per-officer PINs first, shared PIN
+      // fallback — same resolveOverride the kiosk uses). Per-user cap bounds
+      // PIN brute-force from an authenticated session.
+      if (body.presence_override_pin) {
+        const rl = await rateLimit(c.env, `presence-override:${session.userId}`, 10, 300);
+        if (!rl.allowed) {
+          c.header('Retry-After', String(rl.retryAfter));
+          return error(c, 'RATE_LIMITED', 'Too many override attempts. Try again shortly.', 429);
+        }
+        const override = await resolveOverride(c.env, body.presence_override_pin);
+        if (override.ok) {
+          presenceMethod = 'override';
+          await recordAudit(c.env, auditActorFromContext(c), {
+            action: 'clock.presence_missing', entityType: 'user', entityId: session.userId,
+            summary: `Presence-QR requirement overridden by ${override.label}`,
+          });
+        }
+      }
+      if (presenceMethod === 'none') {
+        return error(c, 'PRESENCE_REQUIRED',
+          'Please scan the QR code on the reception display to clock in. If it is unavailable, ask reception for the override PIN.', 400);
+      }
+    }
+    // mode 2 + qr_pending: insert proceeds, flagged for HR review (manual-review
+    // escape valve). Never silent-accept as 'qr', never reject a replay.
+  }
+
   // ---- LIVENESS GATE ----
   let livenessSignature: LivenessSignature | null = null;
   let livenessDecision: LivenessSignature['decision'] | null = null;
@@ -388,14 +462,89 @@ clockRoutes.post('/', async (c) => {
     }
   }
 
+  // ---- RISK FUSION (0 = off, 1 = shadow/persist+log, 2 = enforce bands) ----
+  // Scored after re-auth/liveness verdicts and geofence math exist, before the
+  // INSERT so a block can still prevent it. Mode 0 short-circuits before any
+  // extra query. Spec: docs/superpowers/specs/2026-07-19-attendance-risk-fusion-design.md
+  let riskInput: RiskInput | null = null;
+  let riskScore: number | null = null;
+  let riskFactors: RiskFactor[] | null = null;
+
+  if (settings.risk_fusion_mode > 0) {
+    // Device novelty — KV set of sha256(device_id) hashes per user, no PII.
+    // Read-modify-write race is benign (worst case: novelty double-fires, +10).
+    let deviceFirstSeen = false;
+    if (body.device_id) {
+      const hash = await sha256Hex(body.device_id);
+      const key = `device:${session.userId}`;
+      const set: string[] = JSON.parse((await c.env.KV.get(key)) ?? '[]');
+      if (!set.includes(hash)) {
+        deviceFirstSeen = true;
+        set.push(hash);
+        await c.env.KV.put(key, JSON.stringify(set.slice(-20)), { expirationTtl: 180 * 86400 }); // sliding, self-cleaning
+      }
+    }
+
+    // Impossible travel — previous clock event for this user.
+    const prev = await c.env.DB.prepare(
+      'SELECT latitude, longitude, timestamp FROM clock_records WHERE user_id = ? ORDER BY timestamp DESC LIMIT 1'
+    ).bind(session.userId).first<{ latitude: number | null; longitude: number | null; timestamp: string }>();
+
+    riskInput = {
+      faceMatchStatus: null, // face-match not shipped (2026-04-29 spec); wire match_status here when it lands
+      livenessDecision,      // null in liveness-shadow mode — recomputed in the waitUntil below
+      reauthMethod,
+      geofence: {
+        inside,
+        edgeMarginMeters: inside ? distanceToNearestPolygonMeters(latitude, longitude) : null,
+        outsideDistanceMeters: distance,
+        wallBufferMeters: WALL_BUFFER_METERS,
+      },
+      gpsAccuracyMeters: accuracy,
+      // Presence-QR wiring point (plan cross-dependency): consume the gate's
+      // verdict when presence is live; 'not_deployed' otherwise. Weights stay
+      // inert (all 0) until the intended -15/+10/+20 values are switched on.
+      presence: presenceMode > 0
+        ? (presenceMethod === 'qr' ? 'valid' : presenceMethod === 'override' ? 'override' : 'none_or_pending')
+        : 'not_deployed',
+      previousEvent: prev?.latitude != null && prev?.longitude != null
+        ? { distanceMeters: haversineMeters(prev.latitude, prev.longitude, latitude, longitude),
+            minutesAgo: (Date.now() - new Date(prev.timestamp).getTime()) / 60000 }
+        : null,
+      deviceFirstSeen,
+    };
+    const r = computeRiskScore(riskInput);
+    riskScore = r.score;
+    riskFactors = r.factors;
+
+    // Band enforcement — enforce mode only; shadow (1) never reaches this.
+    // With liveness in shadow mode the verdict is still pending here, so
+    // isBlockable is false and no block can fire — intended proportionality.
+    if (settings.risk_fusion_mode === 2 && riskScore >= BLOCK_THRESHOLD) {
+      const stepUpClean = livenessDecision === 'pass' && reauthMethod === 'webauthn'; // PIN fallback not accepted
+      if (!stepUpClean) {
+        if (settings.risk_fusion_block_enabled === 1 && isBlockable(riskFactors)) {
+          await recordAudit(c.env, auditActorFromContext(c), {
+            action: 'clock.risk_block', entityType: 'user', entityId: session.userId,
+            summary: `Clock ${type} blocked: risk ${riskScore} (${riskFactors.map((f) => `${f.name}:${f.condition}`).join(', ')})`,
+          });
+          return error(c, 'RISK_BLOCK', 'This clock-in needs verification. Please see reception to complete it.', 422);
+        }
+        // Guardrail or flags-only stage: allow, flag, and let the High-risk filter route it to review.
+        devLog(c.env, `[CLOCK_RISK] high score ${riskScore} allowed (guardrail/flags-only) user=${session.userId}`);
+      }
+    }
+  }
+
   const id = crypto.randomUUID().replace(/-/g, '');
 
   try {
     await c.env.DB.prepare(
       `INSERT INTO clock_records
         (id, user_id, type, latitude, longitude, within_geofence, idempotency_key,
-         reauth_method, liveness_challenge, liveness_decision, liveness_signature)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         reauth_method, liveness_challenge, liveness_decision, liveness_signature,
+         presence_method, presence_token_window, risk_score, risk_factors)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       id,
       session.userId,
@@ -408,6 +557,10 @@ clockRoutes.post('/', async (c) => {
       challengeAction,
       livenessDecision,
       livenessSignature ? JSON.stringify(livenessSignature) : null,
+      presenceMethod,
+      presenceWindow,
+      riskScore,
+      riskFactors ? JSON.stringify(riskFactors) : null,
     ).run();
   } catch (e) {
     // Idempotency-key race: a concurrent clock request with the same
@@ -437,6 +590,12 @@ clockRoutes.post('/', async (c) => {
     throw e;
   }
 
+  // Shadow-mode calibration log (dev/staging only — the persisted columns are
+  // the production calibration dataset).
+  if (riskScore !== null && riskFactors !== null) {
+    devLog(c.env, `[CLOCK_RISK] ${id} score=${riskScore} band=${riskBand(riskScore)} factors=${riskFactors.map((f) => `${f.name}:${f.condition}:${f.weight > 0 ? '+' : ''}${f.weight}`).join(', ')}`);
+  }
+
   // Write canonical frame to R2 when verification produced one. We persist for
   // both confident passes AND manual_review decisions so HR has an image to
   // adjudicate; only `skipped` (AI unavailable — frame is not a verified
@@ -456,6 +615,8 @@ clockRoutes.post('/', async (c) => {
     const challenge = challengeAction;
     const capturedFrames = frames;
     const modelVersion = settings.clockin_liveness_model_version;
+    // Captured for the deferred risk recompute (null when risk_fusion_mode = 0).
+    const capturedRiskInput = riskInput;
     c.executionCtx.waitUntil((async () => {
       try {
         const verification = await verifyLivenessBurst({
@@ -471,6 +632,16 @@ clockRoutes.post('/', async (c) => {
           JSON.stringify(verification.signature),
           id,
         ).run();
+        // Risk recompute: the row was scored with a pending (null) liveness
+        // verdict; fold the real verdict in now. Bands are NOT re-enforced in
+        // the background — a late verdict moves the row into/out of review,
+        // never blocks after the fact.
+        if (capturedRiskInput) {
+          const rescored = computeRiskScore({ ...capturedRiskInput, livenessDecision: verification.decision });
+          await c.env.DB.prepare(
+            'UPDATE clock_records SET risk_score = ?, risk_factors = ? WHERE id = ?'
+          ).bind(rescored.score, JSON.stringify(rescored.factors), id).run();
+        }
         // Persist the canonical frame for passes AND manual_review (HR needs an
         // image to adjudicate review cases); only skip when AI was unavailable.
         if (verification.decision !== 'skipped') {
@@ -530,7 +701,7 @@ clockRoutes.post('/', async (c) => {
     'SELECT name, staff_id, current_streak, longest_streak FROM users WHERE id = ?'
   ).bind(session.userId).first<{ name: string; staff_id: string; current_streak: number; longest_streak: number }>();
 
-  devLog(c.env, `[CLOCK] ${user?.name} (${user?.staff_id}) — ${type} liveness=${livenessDecision ?? 'none'} reauth=${reauthMethod ?? 'none'}`);
+  devLog(c.env, `[CLOCK] ${user?.name} (${user?.staff_id}) — ${type} liveness=${livenessDecision ?? 'none'} reauth=${reauthMethod ?? 'none'} presence=${presenceMethod ?? 'off'}`);
 
   return success(c, {
     id,

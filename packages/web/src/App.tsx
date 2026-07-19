@@ -9,6 +9,7 @@ import { VisitorDetailPage } from './pages/VisitorDetailPage';
 import { LinkTelegramPage } from './pages/LinkTelegramPage';
 import { BadgeCheckoutPage } from './pages/BadgeCheckoutPage';
 import { KioskPage } from './pages/KioskPage';
+import { PresenceDisplayPage } from './pages/PresenceDisplayPage';
 import { BookingPage } from './pages/BookingPage';
 import { AdminPage } from './pages/AdminPage';
 import { VisitLogPage } from './pages/VisitLogPage';
@@ -157,6 +158,7 @@ export function App() {
           <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/kiosk" element={<KioskPage />} />
+          <Route path="/presence-display" element={<PresenceDisplayPage />} />
           <Route path="/book" element={<BookingPage />} />
           <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
             <Route index element={<DashboardPage />} />

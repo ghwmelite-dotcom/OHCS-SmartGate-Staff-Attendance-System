@@ -8,10 +8,12 @@ import { LetterReveal } from '@/components/LetterReveal';
 import { MagneticButton } from '@/components/MagneticButton';
 import { ConfettiBurst } from '@/components/ConfettiBurst';
 import { ReauthModal } from '@/components/ReauthModal';
+import { PresenceScanner } from '@/components/PresenceScanner';
 import { WebAuthnNudgeBanner } from '@/components/WebAuthnNudgeBanner';
 import { LivenessCapture } from '@/lib/liveness/LivenessCapture';
 import type { FrameBurst } from '@/lib/liveness/types';
 import { api, fetchClockPrompt, submitClock as apiSubmitClock, type ClockPrompt } from '@/lib/api';
+import { getDeviceId } from '@/lib/deviceId';
 import { getToken } from '@/lib/tokenStore';
 import { apiOrQueue, type ApiOrQueueResult } from '@/lib/offlineQueue';
 import { cn, formatTime } from '@/lib/utils';
@@ -53,7 +55,7 @@ interface ClockResult {
   longest_streak: number;
 }
 
-type Phase = 'idle' | 'locating' | 'photo' | 'reauth' | 'submitting' | 'success' | 'error';
+type Phase = 'idle' | 'locating' | 'scan' | 'photo' | 'reauth' | 'submitting' | 'success' | 'error';
 
 export function ClockPage() {
   const queryClient = useQueryClient();
@@ -70,6 +72,9 @@ export function ClockPage() {
   const [showNudge, setShowNudge] = useState(false);
   const [result, setResult] = useState<ClockResult | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+  // True when the server rejected a submit with PRESENCE_REQUIRED — the scan
+  // phase then shows the reception override-PIN control.
+  const [presenceRejected, setPresenceRejected] = useState(false);
   const [frameBurst, setFrameBurst] = useState<FrameBurst | null>(null);
   const [claimedCompleted, setClaimedCompleted] = useState(false);
   const [requestedManualReview, setRequestedManualReview] = useState(false);
@@ -77,6 +82,10 @@ export function ClockPage() {
   const frameBurstRef = useRef<FrameBurst | null>(null);
   const claimedCompletedRef = useRef(false);
   const requestedManualReviewRef = useRef(false);
+  // Presence-QR scan evidence — set in the scan phase, submitted with the clock
+  // event; cleared on every new clock attempt and on reset.
+  const presenceTokenRef = useRef<string | null>(null);
+  const capturedAtRef = useRef<string | null>(null);
 
   const { data: statusData } = useQuery({
     queryKey: ['clock-status'],
@@ -92,9 +101,12 @@ export function ClockPage() {
     mutationFn: async (data: {
       type: 'clock_in' | 'clock_out'; latitude: number; longitude: number; accuracy: number; photo: Blob | null;
       promptId?: string; webauthnAssertion?: unknown; pin?: string;
+      presenceToken?: string; presenceOverridePin?: string; capturedAt?: string;
       livenessBurst?: { frame0: Blob; frame1: Blob; frame2: Blob; claimedCompleted: boolean };
     }) => {
-      const { photo, promptId, webauthnAssertion, pin, livenessBurst, ...rest } = data;
+      const { photo, promptId, webauthnAssertion, pin, presenceToken, presenceOverridePin, capturedAt, livenessBurst, ...rest } = data;
+      // Risk-fusion device_novelty factor — stable per install, no PII.
+      const deviceId = await getDeviceId();
 
       // When frames are present we go straight to the multipart endpoint —
       // FormData can't be serialised into the offline queue.
@@ -107,17 +119,28 @@ export function ClockPage() {
           promptId,
           webauthnAssertion,
           pin,
+          presenceToken,
+          presenceOverridePin,
+          capturedAt,
+          deviceId,
           livenessBurst,
         });
         return { ok: true as const, data: clockResult as ClockResult };
       }
 
-      // No burst — use the offline-capable JSON path.
+      // No burst — use the offline-capable JSON path. The queue serialises the
+      // body at capture time, so replays carry the original presence token +
+      // captured_at (server treats them as untrusted diagnostics) and the
+      // original device_id.
       const clockData = {
         ...rest,
         prompt_id: promptId,
         webauthn_assertion: webauthnAssertion,
         pin,
+        presence_token: presenceToken,
+        presence_override_pin: presenceOverridePin,
+        captured_at: capturedAt,
+        device_id: deviceId,
       };
       const res = await apiOrQueue<ClockResult>('clock-queue', '/clock', clockData);
       if (!('queued' in res) && res.data && photo) {
@@ -201,6 +224,15 @@ export function ClockPage() {
         setReauthModalOpen(true);
         return;
       }
+      if (code === 'PRESENCE_REQUIRED') {
+        // Enforce mode rejected the submit for a missing presence token (or a
+        // wrong override PIN) — send the user back to the scan step, where the
+        // reception override-PIN control is shown alongside the scanner.
+        setErrorMsg(variables?.presenceOverridePin ? 'Incorrect PIN — please ask reception' : msg);
+        setPresenceRejected(true);
+        setPhase('scan');
+        return;
+      }
       // iOS Safari occasionally throws "The string did not match the
       // expected pattern" from inside its multipart upload pipeline when
       // FormData carries Blobs. The server in shadow mode accepts a
@@ -266,9 +298,12 @@ export function ClockPage() {
     setFrameBurst(null);
     setClaimedCompleted(false);
     setRequestedManualReview(false);
+    setPresenceRejected(false);
     frameBurstRef.current = null;
     claimedCompletedRef.current = false;
     requestedManualReviewRef.current = false;
+    presenceTokenRef.current = null;
+    capturedAtRef.current = null;
     // Warm MediaPipe WASM in parallel with geolocation
     void import('../lib/liveness/mediapipeRunner');
 
@@ -305,19 +340,7 @@ export function ClockPage() {
       }
 
       setLocation(pos);
-
-      // Fetch a fresh single-use prompt before the camera opens so it can be
-      // shown to the staff member during capture. If fetch fails (offline or
-      // server hiccup), proceed without it — soft-rollout server accepts
-      // no-prompt requests; enforce mode will reject with a clear message.
-      try {
-        const fresh = await fetchClockPrompt();
-        setPrompt(fresh);
-      } catch (e) {
-        console.warn('[clock] prompt fetch failed, proceeding without:', e);
-      }
-
-      setPhase('photo');
+      setPhase('scan');
     };
 
     watchId = navigator.geolocation.watchPosition(
@@ -346,6 +369,21 @@ export function ClockPage() {
         setPhase('error');
       }
     }, SETTLE_MS);
+  }
+
+  // After the presence scan step: fetch a fresh single-use prompt before the
+  // camera opens so it can be shown to the staff member during capture. If the
+  // fetch fails (offline or server hiccup), proceed without it — soft-rollout
+  // server accepts no-prompt requests; enforce mode will reject with a clear
+  // message.
+  async function proceedToLiveness() {
+    try {
+      const fresh = await fetchClockPrompt();
+      setPrompt(fresh);
+    } catch (e) {
+      console.warn('[clock] prompt fetch failed, proceeding without:', e);
+    }
+    setPhase('photo');
   }
 
   // Attempt WebAuthn re-auth; on ANY failure (including iOS Safari quirks
@@ -382,7 +420,7 @@ export function ClockPage() {
   }
 
   function submitClock(
-    opts?: { promptId?: string; webauthnAssertion?: unknown; pin?: string },
+    opts?: { promptId?: string; webauthnAssertion?: unknown; pin?: string; presenceOverridePin?: string },
   ) {
     if (!location) return;
     setPhase('submitting');
@@ -397,6 +435,9 @@ export function ClockPage() {
       promptId: opts?.promptId ?? prompt?.promptId,
       webauthnAssertion: opts?.webauthnAssertion,
       pin: opts?.pin,
+      presenceToken: presenceTokenRef.current ?? undefined,
+      presenceOverridePin: opts?.presenceOverridePin,
+      capturedAt: capturedAtRef.current ?? undefined,
       ...(burst && !manualReview ? {
         livenessBurst: {
           frame0: burst.frame0,
@@ -428,6 +469,8 @@ export function ClockPage() {
         photo: photoBlob,
         promptId: prompt.promptId,
         pin,
+        presenceToken: presenceTokenRef.current ?? undefined,
+        capturedAt: capturedAtRef.current ?? undefined,
         ...(burst && !manualReview ? {
           livenessBurst: {
             frame0: burst.frame0,
@@ -469,9 +512,12 @@ export function ClockPage() {
     setFrameBurst(null);
     setClaimedCompleted(false);
     setRequestedManualReview(false);
+    setPresenceRejected(false);
     frameBurstRef.current = null;
     claimedCompletedRef.current = false;
     requestedManualReviewRef.current = false;
+    presenceTokenRef.current = null;
+    capturedAtRef.current = null;
   }
 
   const now = new Date();
@@ -629,6 +675,40 @@ export function ClockPage() {
             </div>
           )}
 
+          {/* SCAN — presence QR on the reception display (skippable; enforce
+              mode rejects a skipped submit with PRESENCE_REQUIRED and lands
+              back here with the reception override-PIN control) */}
+          {phase === 'scan' && (
+            <div className="w-full space-y-4">
+              {presenceRejected && errorMsg && (
+                <p className="text-[14px] font-semibold text-danger text-center" role="alert">
+                  ⚠️ {errorMsg}
+                </p>
+              )}
+              <PresenceScanner
+                onScan={(t) => {
+                  presenceTokenRef.current = t;
+                  capturedAtRef.current = new Date().toISOString();
+                  setPresenceRejected(false);
+                  setErrorMsg('');
+                  void proceedToLiveness();
+                }}
+                onSkip={() => {
+                  capturedAtRef.current = new Date().toISOString();
+                  void proceedToLiveness();
+                }}
+              />
+              {presenceRejected && (
+                <PresenceOverrideForm
+                  onSubmit={(pin) => {
+                    setErrorMsg('');
+                    submitClock({ presenceOverridePin: pin });
+                  }}
+                />
+              )}
+            </div>
+          )}
+
           {/* PHOTO CAPTURE — liveness challenge */}
           {phase === 'photo' && prompt && (
             <div className="w-full aspect-square rounded-3xl overflow-hidden">
@@ -771,5 +851,44 @@ export function ClockPage() {
         onEnroll={() => { setShowNudge(false); /* Settings menu has BiometricToggle */ }}
       />
     </div>
+  );
+}
+
+// Reception override PIN — the enforce-mode escape valve when the reception
+// display can't be scanned (numeric input modelled on ReauthModal).
+function PresenceOverrideForm({ onSubmit }: { onSubmit: (pin: string) => void }) {
+  const [pin, setPin] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pin.length < 4) return;
+    onSubmit(pin);
+    setPin('');
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="w-full max-w-xs mx-auto">
+      <p className="text-[12px] text-muted text-center">
+        Display unavailable? Ask reception for the override PIN.
+      </p>
+      <input
+        type="password"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        maxLength={8}
+        value={pin}
+        onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+        className="mt-2 w-full px-4 py-3 text-2xl text-center tracking-widest border-2 border-border rounded-2xl focus:border-primary focus:outline-none bg-surface text-foreground"
+        placeholder="••••••"
+        aria-label="Reception override PIN"
+      />
+      <button
+        type="submit"
+        disabled={pin.length < 4}
+        className="mt-2 w-full px-4 py-3 rounded-2xl text-white bg-primary font-medium disabled:opacity-50"
+      >
+        Submit override PIN
+      </button>
+    </form>
   );
 }

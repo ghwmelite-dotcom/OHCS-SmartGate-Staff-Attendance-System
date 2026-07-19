@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import { XCircle, Clock, AlertTriangle, CheckCircle2, Loader2, CalendarDays, Plus, Trash2, Database, ShieldCheck, ShieldAlert, Rocket, Info } from 'lucide-react';
 
 export interface AppSettings {
@@ -11,6 +12,9 @@ export interface AppSettings {
   reception_override_pin_set?: boolean;
   clockin_reauth_enforce?: number;
   clockin_passive_liveness_enforce?: number;
+  presence_qr_mode?: number;
+  risk_fusion_mode?: number;
+  risk_fusion_block_enabled?: number;
   updated_by: string | null;
   updated_at: string;
 }
@@ -31,6 +35,9 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
   const [removeOverridePin, setRemoveOverridePin] = useState(false);
   const [enforceReauth, setEnforceReauth] = useState((current.clockin_reauth_enforce ?? 0) === 1);
   const [enforceLiveness, setEnforceLiveness] = useState((current.clockin_passive_liveness_enforce ?? 0) === 1);
+  const [presenceQrMode, setPresenceQrMode] = useState(current.presence_qr_mode ?? 0);
+  const [riskFusionMode, setRiskFusionMode] = useState(current.risk_fusion_mode ?? 0);
+  const [riskFusionBlock, setRiskFusionBlock] = useState((current.risk_fusion_block_enabled ?? 0) === 1);
   const [localErr, setLocalErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,10 +48,13 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
     setRemoveOverridePin(false);
     setEnforceReauth((current.clockin_reauth_enforce ?? 0) === 1);
     setEnforceLiveness((current.clockin_passive_liveness_enforce ?? 0) === 1);
+    setPresenceQrMode(current.presence_qr_mode ?? 0);
+    setRiskFusionMode(current.risk_fusion_mode ?? 0);
+    setRiskFusionBlock((current.risk_fusion_block_enabled ?? 0) === 1);
   }, [current]);
 
   const mutation = useMutation({
-    mutationFn: (body: { work_start_time: string; late_threshold_time: string; work_end_time: string; reception_override_pin?: string; clockin_reauth_enforce: number; clockin_passive_liveness_enforce: number }) =>
+    mutationFn: (body: { work_start_time: string; late_threshold_time: string; work_end_time: string; reception_override_pin?: string; clockin_reauth_enforce: number; clockin_passive_liveness_enforce: number; presence_qr_mode: number; risk_fusion_mode: number; risk_fusion_block_enabled: number }) =>
       api.put<AppSettings>('/admin/settings', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['app-settings'] });
@@ -73,6 +83,9 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
       ...overrideField,
       clockin_reauth_enforce: enforceReauth ? 1 : 0,
       clockin_passive_liveness_enforce: enforceLiveness ? 1 : 0,
+      presence_qr_mode: presenceQrMode,
+      risk_fusion_mode: riskFusionMode,
+      risk_fusion_block_enabled: riskFusionBlock ? 1 : 0,
     });
   }
 
@@ -165,7 +178,71 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
               <input type="checkbox" checked={enforceLiveness} onChange={e => setEnforceLiveness(e.target.checked)} disabled={!canEdit} className="h-4 w-4 mt-0.5 rounded border-border accent-primary disabled:opacity-50" />
               <span className="text-[13px] text-foreground">Enforce liveness <span className="text-muted">— reject clock-in photos that fail the anti-spoof check.</span></span>
             </label>
-            {(enforceReauth || enforceLiveness) && (
+            <div className="mt-3">
+              <span className="text-[13px] text-foreground font-medium">Presence QR</span>
+              <div className="inline-flex items-center gap-1 ml-3 bg-surface rounded-xl border border-border p-1 align-middle">
+                {([['Off', 0], ['Shadow', 1], ['Enforce', 2]] as const).map(([label, mode]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setPresenceQrMode(mode)}
+                    disabled={!canEdit}
+                    aria-pressed={presenceQrMode === mode}
+                    className={cn(
+                      'h-7 px-3 rounded-lg text-[12px] font-semibold transition-colors duration-200',
+                      'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50',
+                      presenceQrMode === mode ? 'bg-primary/10 text-primary' : 'text-muted hover:text-foreground',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted mt-1">
+                Shadow records presence without blocking; Enforce rejects clock-ins that skip the reception-display scan (reception override PIN still works).
+              </p>
+            </div>
+            <div className="mt-3">
+              <span className="text-[13px] text-foreground font-medium">Risk fusion</span>
+              <div className="inline-flex items-center gap-1 ml-3 bg-surface rounded-xl border border-border p-1 align-middle">
+                {([['Off', 0], ['Shadow', 1], ['Enforce', 2]] as const).map(([label, mode]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => { setRiskFusionMode(mode); if (mode !== 2) setRiskFusionBlock(false); }}
+                    disabled={!canEdit}
+                    aria-pressed={riskFusionMode === mode}
+                    className={cn(
+                      'h-7 px-3 rounded-lg text-[12px] font-semibold transition-colors duration-200',
+                      'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50',
+                      riskFusionMode === mode ? 'bg-primary/10 text-primary' : 'text-muted hover:text-foreground',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted mt-1">
+                Shadow records scores without affecting clock-ins. Enforce flags risky clock-ins for review; blocking requires the block band below.
+              </p>
+              <label className="flex items-start gap-2 mt-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={riskFusionBlock}
+                  onChange={e => setRiskFusionBlock(e.target.checked)}
+                  disabled={!canEdit || riskFusionMode !== 2}
+                  className="h-4 w-4 mt-0.5 rounded border-border accent-primary disabled:opacity-50"
+                />
+                <span className="text-[13px] text-foreground">Enable ≥60 block band</span>
+              </label>
+              {riskFusionBlock && riskFusionMode === 2 && (
+                <div className="flex items-start gap-2 mt-2 p-2 bg-accent/10 border border-accent/20 rounded-lg">
+                  <AlertTriangle className="h-3.5 w-3.5 text-accent-warm shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-foreground">Blocks only fire when liveness or face-match independently failed — but staff can still be turned to reception. Keep off for the first month of enforce.</p>
+                </div>
+              )}
+            </div>
+            {(enforceReauth || enforceLiveness || presenceQrMode === 2) && (
               <div className="flex items-start gap-2 mt-2 p-2 bg-accent/10 border border-accent/20 rounded-lg">
                 <AlertTriangle className="h-3.5 w-3.5 text-accent-warm shrink-0 mt-0.5" />
                 <p className="text-[11px] text-foreground">Enforcing can block legitimate clock-ins (liveness false-rejects, or offline clock-ins with no prompt). Roll out one at a time and watch the HR-review queue.</p>

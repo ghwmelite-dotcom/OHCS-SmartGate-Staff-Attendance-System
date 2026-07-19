@@ -6,13 +6,14 @@ import { success, error, notFound } from '../lib/response';
 import { invalidateSettingsCache, type AppSettings } from '../services/settings';
 import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
 
-const AUDITED_SETTINGS_FIELDS = ['work_start_time', 'late_threshold_time', 'work_end_time', 'reception_override_pin', 'clockin_reauth_enforce', 'clockin_passive_liveness_enforce'];
+const AUDITED_SETTINGS_FIELDS = ['work_start_time', 'late_threshold_time', 'work_end_time', 'reception_override_pin', 'clockin_reauth_enforce', 'clockin_passive_liveness_enforce', 'presence_qr_mode', 'risk_fusion_mode', 'risk_fusion_block_enabled'];
 
 // Response columns — NEVER return the cleartext reception_override_pin (a secret
 // readable by admins); expose only whether one is set.
 const SETTINGS_COLUMNS = `work_start_time, late_threshold_time, work_end_time,
   (reception_override_pin IS NOT NULL AND reception_override_pin <> '') AS reception_override_pin_set,
-  clockin_reauth_enforce, clockin_passive_liveness_enforce, updated_by, updated_at`;
+  clockin_reauth_enforce, clockin_passive_liveness_enforce, presence_qr_mode,
+  risk_fusion_mode, risk_fusion_block_enabled, updated_by, updated_at`;
 
 export const adminSettingsRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -26,6 +27,12 @@ const settingsSchema = z.object({
   // Clock-in security enforcement (0 = shadow/record-only, 1 = enforce/reject).
   clockin_reauth_enforce: z.number().int().min(0).max(1).optional(),
   clockin_passive_liveness_enforce: z.number().int().min(0).max(1).optional(),
+  // Presence QR (0 = off, 1 = shadow/record-only, 2 = enforce/reject).
+  presence_qr_mode: z.number().int().min(0).max(2).optional(),
+  // Attendance risk fusion (0 = off, 1 = shadow/persist+log only, 2 = enforce bands).
+  risk_fusion_mode: z.number().int().min(0).max(2).optional(),
+  // ≥60 block band (0 = flags only, 1 = may block — guardrail still applies).
+  risk_fusion_block_enabled: z.number().int().min(0).max(1).optional(),
 }).refine(
   (s) => s.work_start_time < s.late_threshold_time && s.late_threshold_time < s.work_end_time,
   { message: 'Times must satisfy: start < late < end' },
@@ -51,7 +58,8 @@ adminSettingsRoutes.put('/', zValidator('json', settingsSchema), async (c) => {
   const body = c.req.valid('json');
   const before = await c.env.DB.prepare(
     `SELECT work_start_time, late_threshold_time, work_end_time, reception_override_pin,
-            clockin_reauth_enforce, clockin_passive_liveness_enforce FROM app_settings WHERE id = 1`
+            clockin_reauth_enforce, clockin_passive_liveness_enforce, presence_qr_mode,
+            risk_fusion_mode, risk_fusion_block_enabled FROM app_settings WHERE id = 1`
   ).first<Record<string, number | string | null>>();
   // Write-only PIN: omitted = keep current; '' = clear (NULL); digits = set.
   const overridePin = body.reception_override_pin === undefined
@@ -60,14 +68,19 @@ adminSettingsRoutes.put('/', zValidator('json', settingsSchema), async (c) => {
   // Enforce flags are optional in the payload — keep the current value when omitted.
   const reauthEnforce = body.clockin_reauth_enforce ?? (before?.clockin_reauth_enforce ?? 0);
   const livenessEnforce = body.clockin_passive_liveness_enforce ?? (before?.clockin_passive_liveness_enforce ?? 0);
+  const presenceQrMode = body.presence_qr_mode ?? (before?.presence_qr_mode ?? 0);
+  const riskFusionMode = body.risk_fusion_mode ?? (before?.risk_fusion_mode ?? 0);
+  const riskFusionBlockEnabled = body.risk_fusion_block_enabled ?? (before?.risk_fusion_block_enabled ?? 0);
   await c.env.DB.prepare(
     `UPDATE app_settings
      SET work_start_time = ?, late_threshold_time = ?, work_end_time = ?,
          reception_override_pin = ?,
          clockin_reauth_enforce = ?, clockin_passive_liveness_enforce = ?,
+         presence_qr_mode = ?,
+         risk_fusion_mode = ?, risk_fusion_block_enabled = ?,
          updated_by = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
      WHERE id = 1`
-  ).bind(body.work_start_time, body.late_threshold_time, body.work_end_time, overridePin, reauthEnforce, livenessEnforce, session.userId).run();
+  ).bind(body.work_start_time, body.late_threshold_time, body.work_end_time, overridePin, reauthEnforce, livenessEnforce, presenceQrMode, riskFusionMode, riskFusionBlockEnabled, session.userId).run();
 
   await invalidateSettingsCache(c.env);
 

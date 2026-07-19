@@ -37,6 +37,12 @@ interface AttendanceRecord {
   clock_out_reauth_method: 'webauthn' | 'pin' | null;
   liveness_decision: 'pass' | 'fail' | 'manual_review' | 'skipped' | null;
   liveness_signature: string | null;
+  presence_method: 'qr' | 'qr_pending' | 'none' | 'override' | null;
+  presence_token_window: 'current' | 'previous' | 'expired' | null;
+  clock_in_id: string | null;
+  risk_score: number | null;
+  risk_factors: string | null;
+  risk_disposition: string | null;
   is_late: number;
   is_early_departure: number;
   current_streak: number;
@@ -57,14 +63,17 @@ export function AttendanceTab() {
   const [monthlyUser, setMonthlyUser] = useState<{ id: string; name: string } | null>(null);
   const [pdfExporting, setPdfExporting] = useState(false);
   const [search, setSearch] = useState('');
+  const [riskFilter, setRiskFilter] = useState<'all' | 'flagged' | 'high'>('all');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const currentUser = useAuthStore(s => s.user);
   const canEditSettings = currentUser?.role === 'superadmin';
   const isSuperadmin = currentUser?.role === 'superadmin';
+  const canReviewRisk = currentUser?.role === 'admin' || isSuperadmin;
   const queryClient = useQueryClient();
   const [clearingUserId, setClearingUserId] = useState<string | null>(null);
+  const [dispositionClockId, setDispositionClockId] = useState<string | null>(null);
 
   // TEMPORARY TEST TOOLING — paired with POST /api/clock/admin/clear-test-records.
   // Remove once the test cycle stabilises.
@@ -86,6 +95,22 @@ export function AttendanceTab() {
       setClearingUserId(null);
       // eslint-disable-next-line no-alert
       alert(`Failed to clear records: ${err instanceof Error ? err.message : 'unknown error'}`);
+    },
+  });
+
+  // Risk-fusion review — dismiss/escalate a flagged clock-in (audited server-side).
+  const dispositionMutation = useMutation({
+    mutationFn: async (input: { clockId: string; disposition: 'dismissed' | 'escalated' }) => {
+      await api.post(`/attendance/records/${input.clockId}/risk-disposition`, { disposition: input.disposition });
+    },
+    onSuccess: () => {
+      setDispositionClockId(null);
+      queryClient.invalidateQueries({ queryKey: ['attendance'] });
+    },
+    onError: (err) => {
+      setDispositionClockId(null);
+      // eslint-disable-next-line no-alert
+      alert(`Failed to record disposition: ${err instanceof Error ? err.message : 'unknown error'}`);
     },
   });
 
@@ -149,14 +174,18 @@ export function AttendanceTab() {
   const isToday = selectedDate === new Date().toISOString().slice(0, 10);
 
   const filteredRecords = useMemo(() => {
+    // Risk chips filter client-side — the payload is a single day's rows.
+    let out = records;
+    if (riskFilter === 'flagged') out = out.filter(r => r.risk_score !== null && r.risk_score >= 30 && r.risk_score < 60);
+    else if (riskFilter === 'high') out = out.filter(r => r.risk_score !== null && r.risk_score >= 60);
     const q = search.trim().toLowerCase();
-    if (!q) return records;
-    return records.filter(r =>
+    if (!q) return out;
+    return out.filter(r =>
       r.name.toLowerCase().includes(q) ||
       (r.staff_id ?? '').toLowerCase().includes(q) ||
       (r.directorate_abbr ?? '').toLowerCase().includes(q)
     );
-  }, [records, search]);
+  }, [records, search, riskFilter]);
 
   function segmentFilenameSlug(): string {
     if (segment === 'nss') return 'NSS-Attendance';
@@ -379,6 +408,23 @@ export function AttendanceTab() {
                 <option key={d.id} value={d.id}>{d.abbreviation}</option>
               ))}
             </select>
+            <div className="inline-flex items-center gap-1 bg-surface rounded-xl border border-border p-1" role="group" aria-label="Risk filter">
+              {([['all', 'All'], ['flagged', 'Flagged'], ['high', 'High-risk']] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setRiskFilter(key)}
+                  aria-pressed={riskFilter === key}
+                  className={cn(
+                    'h-7 px-3 rounded-lg text-[12px] font-semibold transition-colors duration-200',
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
+                    riskFilter === key ? 'bg-primary/10 text-primary' : 'text-muted hover:text-foreground',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -388,8 +434,17 @@ export function AttendanceTab() {
           <div className="p-10 text-center text-[14px] text-muted">No attendance records for this date</div>
         ) : filteredRecords.length === 0 ? (
           <div className="p-10 text-center text-[14px] text-muted">
-            No records match “{search}”.{' '}
-            <button onClick={() => setSearch('')} className="text-primary hover:underline">Clear search</button>
+            {search ? (
+              <>
+                No records match “{search}”.{' '}
+                <button onClick={() => setSearch('')} className="text-primary hover:underline">Clear search</button>
+              </>
+            ) : (
+              <>
+                No {riskFilter === 'high' ? 'high-risk' : 'flagged'} records for this date.{' '}
+                <button onClick={() => setRiskFilter('all')} className="text-primary hover:underline">Show all</button>
+              </>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -403,6 +458,8 @@ export function AttendanceTab() {
                   <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Clock Out</th>
                   <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Status</th>
                   <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Liveness</th>
+                  <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Risk</th>
+                  <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Presence</th>
                   <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Verified</th>
                   <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Streak</th>
                   <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Photo</th>
@@ -477,6 +534,38 @@ export function AttendanceTab() {
                         )}
                       </td>
                       <td className="px-5 py-3">
+                        <div className="flex flex-col items-start gap-1">
+                          <RiskPill record={r} />
+                          {canReviewRisk && r.clock_in_id && r.risk_score !== null && r.risk_score >= 30 && !r.risk_disposition && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => { setDispositionClockId(r.clock_in_id); dispositionMutation.mutate({ clockId: r.clock_in_id!, disposition: 'dismissed' }); }}
+                                disabled={dispositionClockId === r.clock_in_id}
+                                className="inline-flex items-center gap-1 h-6 px-2 text-[11px] font-medium rounded-md border border-border bg-surface text-muted hover:text-foreground hover:border-foreground/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                title={`Dismiss risk flag for ${r.name}`}
+                                aria-label={`Dismiss risk flag for ${r.name}`}
+                              >
+                                {dispositionClockId === r.clock_in_id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                                Dismiss
+                              </button>
+                              <button
+                                onClick={() => { setDispositionClockId(r.clock_in_id); dispositionMutation.mutate({ clockId: r.clock_in_id!, disposition: 'escalated' }); }}
+                                disabled={dispositionClockId === r.clock_in_id}
+                                className="inline-flex items-center gap-1 h-6 px-2 text-[11px] font-medium rounded-md border border-danger/30 bg-danger/5 text-danger hover:bg-danger/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                title={`Escalate risk flag for ${r.name}`}
+                                aria-label={`Escalate risk flag for ${r.name}`}
+                              >
+                                {dispositionClockId === r.clock_in_id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                                Escalate
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3">
+                        <PresencePill record={r} />
+                      </td>
+                      <td className="px-5 py-3">
                         {r.clock_in_reauth_method === 'webauthn' && (
                           <span className="inline-flex items-center gap-1 text-[12px] font-medium text-success">🔒 Bio</span>
                         )}
@@ -522,7 +611,7 @@ export function AttendanceTab() {
                     </tr>
                     {expandedRow === r.user_id && r.liveness_signature && (
                       <tr className="bg-zinc-50/60">
-                        <td colSpan={isSuperadmin ? 11 : 10} className="px-5 py-3">
+                        <td colSpan={isSuperadmin ? 13 : 12} className="px-5 py-3">
                           <LivenessEvidenceCard signature={JSON.parse(r.liveness_signature)} />
                         </td>
                       </tr>
@@ -546,6 +635,70 @@ function LivenessPill({ decision }: { decision: string | null }) {
     : 'bg-zinc-100 text-zinc-600';
   const label = decision ?? '—';
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>{label}</span>;
+}
+
+// Presence-QR evidence badge (migration-clock-presence.sql): green QR / amber
+// Pending (token rotated out — offline replay or slow submit) / blue Override
+// (reception PIN) / grey None. Rows with no clock-in show a plain dash.
+function PresencePill({ record }: { record: AttendanceRecord }) {
+  const method = record.presence_method;
+  if (!method && !record.clock_in_time) return <span className="text-muted-foreground">—</span>;
+  const cls =
+    method === 'qr' ? 'bg-emerald-100 text-emerald-800'
+    : method === 'qr_pending' ? 'bg-amber-100 text-amber-800'
+    : method === 'override' ? 'bg-sky-100 text-sky-800'
+    : 'bg-zinc-100 text-zinc-600';
+  const label =
+    method === 'qr' ? 'QR'
+    : method === 'qr_pending' ? 'Pending'
+    : method === 'override' ? 'Override'
+    : 'None';
+  return (
+    <span
+      title={method === 'qr' ? `Token window: ${record.presence_token_window ?? 'unknown'}` : undefined}
+      className={`px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+// Risk-fusion badge (migration-clock-risk.sql): green <30, amber 30–59,
+// red ≥60, plain dash for unscored rows (mode 0 / pre-migration). The tooltip
+// lists the contributing factors parsed from the risk_factors JSON; dismissed
+// rows render at reduced opacity with the disposition noted in the tooltip.
+function RiskPill({ record }: { record: AttendanceRecord }) {
+  const score = record.risk_score;
+  if (score === null || score === undefined) return <span className="text-muted-foreground">—</span>;
+  const cls =
+    score >= 60 ? 'bg-red-100 text-red-800'
+    : score >= 30 ? 'bg-amber-100 text-amber-800'
+    : 'bg-emerald-100 text-emerald-800';
+  const lines: string[] = [];
+  if (record.risk_factors) {
+    try {
+      const factors = JSON.parse(record.risk_factors) as Array<{ name: string; weight: number; detail?: string }>;
+      for (const f of factors) {
+        lines.push(`${f.name} ${f.weight >= 0 ? '+' : ''}${f.weight}${f.detail ? ` — ${f.detail}` : ''}`);
+      }
+    } catch {
+      // Malformed factors JSON — tooltip falls back to the score alone.
+    }
+  }
+  const dismissed = record.risk_disposition === 'dismissed';
+  const title = [
+    `Risk score ${score}`,
+    ...(lines.length > 0 ? lines : ['No contributing factors']),
+    ...(record.risk_disposition ? [`Disposition: ${record.risk_disposition}`] : []),
+  ].join('\n');
+  return (
+    <span
+      title={title}
+      className={`px-2 py-0.5 rounded-full text-xs font-medium ${cls}${dismissed ? ' opacity-50' : ''}`}
+    >
+      {score}
+    </span>
+  );
 }
 
 function MonthlyReportModal({ userId, userName, onClose }: { userId: string; userName: string; onClose: () => void }) {

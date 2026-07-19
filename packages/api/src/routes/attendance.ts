@@ -5,6 +5,8 @@ import type { Env, SessionData } from '../types';
 import { success, error } from '../lib/response';
 import { sendAbsenceNoticePush, type AbsenceNoticeInput } from '../services/reminders';
 import { getAppSettings, toSqlTime } from '../services/settings';
+import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
+import { riskBand, type RiskFactor } from '../services/risk-score';
 
 export const attendanceRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -129,6 +131,12 @@ attendanceRoutes.get('/records', async (c) => {
                     co.reauth_method as clock_out_reauth_method,
                     ci.liveness_decision as liveness_decision,
                     ci.liveness_signature as liveness_signature,
+                    ci.presence_method as presence_method,
+                    ci.presence_token_window as presence_token_window,
+                    ci.risk_score as risk_score,
+                    ci.risk_factors as risk_factors,
+                    ci.risk_disposition as risk_disposition,
+                    ci.id as clock_in_id,
                     CASE WHEN TIME(ci.timestamp) > ? THEN 1 ELSE 0 END as is_late,
                     CASE WHEN co.timestamp IS NOT NULL AND TIME(co.timestamp) < ? THEN 1 ELSE 0 END as is_early_departure,
                     u.current_streak
@@ -153,6 +161,101 @@ attendanceRoutes.get('/records', async (c) => {
 
   const results = await c.env.DB.prepare(sql).bind(...params).all();
   return success(c, results.results ?? []);
+});
+
+// Risk-score distribution — the shadow-phase calibration instrument (spec §4:
+// bands, histogram, per-directorate breakdown, top factors by frequency).
+// Aggregates in JS, mirroring /clock/admin/liveness-metrics. ?days default 14, clamp 1-30.
+attendanceRoutes.get('/risk-distribution', async (c) => {
+  if (!requireAdmin(c)) return error(c, 'FORBIDDEN', 'Admin access required', 403);
+
+  const days = Math.min(30, Math.max(1, Number(c.req.query('days') ?? 14)));
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+
+  const rows = await c.env.DB.prepare(
+    `SELECT cr.risk_score, cr.risk_factors, d.abbreviation
+     FROM clock_records cr
+     JOIN users u ON u.id = cr.user_id
+     LEFT JOIN directorates d ON d.id = u.directorate_id
+     WHERE cr.risk_score IS NOT NULL AND cr.timestamp >= ?`
+  ).bind(since).all<{ risk_score: number; risk_factors: string | null; abbreviation: string | null }>();
+
+  const all = rows.results ?? [];
+  const bands = { clear: 0, review: 0, high: 0 };
+  const histogram = Array.from({ length: 10 }, (_, i) => ({ min: i * 10, max: i * 10 + 9, count: 0 }));
+  const perDirectorate = new Map<string | null, { abbreviation: string | null; scored: number; score_sum: number; clear: number; review: number; high: number }>();
+  const factorCounts = new Map<string, { name: string; condition: string; count: number; total_weight: number }>();
+
+  for (const r of all) {
+    const band = riskBand(r.risk_score);
+    bands[band] += 1;
+    // Score 100 falls in the last bucket (labelled 90-99) — clamped, like the score itself.
+    histogram[Math.min(9, Math.floor(r.risk_score / 10))]!.count += 1;
+
+    const dir = perDirectorate.get(r.abbreviation)
+      ?? { abbreviation: r.abbreviation, scored: 0, score_sum: 0, clear: 0, review: 0, high: 0 };
+    dir.scored += 1;
+    dir.score_sum += r.risk_score;
+    dir[band] += 1;
+    perDirectorate.set(r.abbreviation, dir);
+
+    if (r.risk_factors) {
+      try {
+        for (const f of JSON.parse(r.risk_factors) as RiskFactor[]) {
+          const key = `${f.name}:${f.condition}`;
+          const slot = factorCounts.get(key) ?? { name: f.name, condition: f.condition, count: 0, total_weight: 0 };
+          slot.count += 1;
+          slot.total_weight += f.weight;
+          factorCounts.set(key, slot);
+        }
+      } catch { /* ignore parse errors — same discipline as liveness-metrics */ }
+    }
+  }
+
+  const per_directorate = [...perDirectorate.values()]
+    .map((d) => ({
+      abbreviation: d.abbreviation,
+      scored: d.scored,
+      avg_score: Math.round((d.score_sum / d.scored) * 10) / 10,
+      clear: d.clear,
+      review: d.review,
+      high: d.high,
+    }))
+    .sort((a, b) => String(a.abbreviation ?? '').localeCompare(String(b.abbreviation ?? '')));
+
+  const top_factors = [...factorCounts.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  return success(c, { days, since, total_scored: all.length, bands, histogram, per_directorate, top_factors });
+});
+
+// Manual-review disposition of a risk-flagged clock row (spec §4 — audited).
+const riskDispositionSchema = z.object({ disposition: z.enum(['dismissed', 'escalated']) });
+
+attendanceRoutes.post('/records/:clockId/risk-disposition', zValidator('json', riskDispositionSchema), async (c) => {
+  if (!requireAdmin(c)) return error(c, 'FORBIDDEN', 'Admin access required', 403);
+
+  const clockId = c.req.param('clockId');
+  const { disposition } = c.req.valid('json');
+
+  const before = await c.env.DB.prepare(
+    'SELECT id, risk_score, risk_disposition FROM clock_records WHERE id = ?'
+  ).bind(clockId).first<{ id: string; risk_score: number | null; risk_disposition: string | null }>();
+  if (!before || before.risk_score === null) {
+    return error(c, 'NOT_FOUND', 'Clock record not found (or not risk-scored)', 404);
+  }
+
+  await c.env.DB.prepare('UPDATE clock_records SET risk_disposition = ? WHERE id = ?')
+    .bind(disposition, clockId).run();
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'clock.risk_disposition', entityType: 'clock_record', entityId: clockId,
+    summary: `Risk disposition '${disposition}' on clock record (score ${before.risk_score})`,
+    changes: diffRecords(before, { ...before, risk_disposition: disposition }, ['risk_disposition']),
+  });
+
+  return success(c, { id: clockId, risk_disposition: disposition });
 });
 
 // Directorate breakdown

@@ -178,6 +178,16 @@ CREATE TABLE IF NOT EXISTS clock_records (
     liveness_decision  TEXT
       CHECK (liveness_decision IN ('pass','fail','manual_review','skipped') OR liveness_decision IS NULL),
     liveness_signature TEXT,
+    -- Rotating presence-QR proof-of-presence (added by migration-clock-presence.sql).
+    -- NULL on pre-existing rows reads as "no presence data".
+    presence_method        TEXT,  -- 'qr' | 'qr_pending' | 'none' | 'override'
+    presence_token_window  TEXT,  -- 'current' | 'previous' | 'expired' at validation time
+    -- Attendance risk fusion (added by migration-clock-risk.sql). NULL on
+    -- pre-existing rows and whenever risk_fusion_mode = 0 reads as "unscored".
+    risk_score       INTEGER,
+    risk_factors     TEXT,  -- JSON array of {name, condition, weight, detail}
+    risk_disposition TEXT
+      CHECK (risk_disposition IN ('dismissed','escalated') OR risk_disposition IS NULL),
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_clock_user_date ON clock_records(user_id, timestamp DESC);
@@ -187,6 +197,9 @@ CREATE INDEX IF NOT EXISTS idx_clock_date ON clock_records(timestamp DESC);
 -- now redundant and removed from this fresh-init schema
 -- (migration-idempotency-unique.sql). NOT dropped on prod — just no longer created.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_clock_user_idem_unique ON clock_records(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+-- Serves the flagged/high-risk admin filters and the risk-distribution endpoint
+-- without scanning unscored rows (added by migration-clock-risk.sql).
+CREATE INDEX IF NOT EXISTS idx_clock_records_risk_score ON clock_records(risk_score) WHERE risk_score >= 30;
 
 CREATE TABLE IF NOT EXISTS leave_requests (
     id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
@@ -279,14 +292,26 @@ CREATE TABLE IF NOT EXISTS app_settings (
     -- Days after a visitor's last checkout before their ID-document + face photos
     -- are auto-purged from R2 (audit record is kept). Added by
     -- migration-visitor-photo-retention.sql.
-    visitor_photo_retention_days          INTEGER NOT NULL DEFAULT 30
+    visitor_photo_retention_days          INTEGER NOT NULL DEFAULT 30,
+    -- Presence-QR mode (added by migration-clock-presence.sql; nullable on prod
+    -- like the passive-liveness keys, backfilled via UPDATE — D1 can't ADD COLUMN
+    -- with a non-constant DEFAULT): 0 = off, 1 = shadow (record-only), 2 = enforce.
+    presence_qr_mode                      INTEGER,
+    -- Attendance risk fusion (added by migration-clock-risk.sql; nullable on prod
+    -- like the other ALTER-added keys, backfilled via UPDATE).
+    -- risk_fusion_mode: 0 = off, 1 = shadow (persist+log only), 2 = enforce.
+    -- risk_fusion_block_enabled: 0 = ≥60 band flags only, 1 = ≥60 may block
+    -- (proportionality guardrail still applies).
+    risk_fusion_mode                      INTEGER,
+    risk_fusion_block_enabled             INTEGER
 );
 
 INSERT OR IGNORE INTO app_settings (
   id, work_start_time, late_threshold_time, work_end_time,
-  clockin_passive_liveness_enforce, clockin_liveness_review_cap_per_week, clockin_liveness_model_version
+  clockin_passive_liveness_enforce, clockin_liveness_review_cap_per_week, clockin_liveness_model_version,
+  presence_qr_mode, risk_fusion_mode, risk_fusion_block_enabled
 )
-VALUES (1, '08:00', '08:30', '17:00', 0, 2, 'buffalo_s_v1');
+VALUES (1, '08:00', '08:30', '17:00', 0, 2, 'buffalo_s_v1', 0, 0, 0);
 
 -- ---------------------------------------------------------------------------
 -- Directorate reception team (join table)

@@ -18,6 +18,11 @@ export interface AppSettings {
   reception_override_pin: string | null;           // NULL/empty = overrides disabled
   // Visitor photo retention (added by migration-visitor-photo-retention.sql)
   visitor_photo_retention_days: number;            // days after last checkout before ID/face photos are purged
+  // Presence QR (added by migration-clock-presence.sql)
+  presence_qr_mode: number; // 0 = off, 1 = shadow, 2 = enforce
+  // Attendance risk fusion (added by migration-clock-risk.sql)
+  risk_fusion_mode: number;           // 0 = off, 1 = shadow (persist+log only), 2 = enforce
+  risk_fusion_block_enabled: number;  // 0 = ≥60 band flags only, 1 = ≥60 may block (guardrail still applies)
 }
 
 const KV_KEY = 'app-settings:v2';
@@ -38,6 +43,9 @@ const DEFAULTS: AppSettings = {
   clockin_liveness_model_version: 'buffalo_s_v1',
   reception_override_pin: null,
   visitor_photo_retention_days: 30,
+  presence_qr_mode: 0,
+  risk_fusion_mode: 0,
+  risk_fusion_block_enabled: 0,
 };
 
 let memo: { value: AppSettings; ts: number } | null = null;
@@ -57,7 +65,8 @@ export async function getAppSettings(env: Env): Promise<AppSettings> {
             clockin_reauth_enforce, clockin_pin_attempt_cap, clockin_prompt_ttl_seconds,
             clockin_passive_liveness_enforce, clockin_liveness_review_cap_per_week,
             clockin_liveness_model_version, reception_override_pin,
-            visitor_photo_retention_days
+            visitor_photo_retention_days, presence_qr_mode,
+            risk_fusion_mode, risk_fusion_block_enabled
      FROM app_settings WHERE id = 1`
   ).first<AppSettings>();
 
