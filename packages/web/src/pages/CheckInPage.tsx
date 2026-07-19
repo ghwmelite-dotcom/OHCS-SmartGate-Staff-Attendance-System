@@ -11,7 +11,6 @@ import { cn, getInitials, formatDate } from '@/lib/utils';
 import { BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
-import { IdDocumentCapture } from '@/components/checkin/IdDocumentCapture';
 import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
 import { OfficerCombobox } from '@/components/checkin/OfficerCombobox';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
@@ -72,7 +71,7 @@ type CheckInForm = z.infer<typeof checkInSchema>;
 type VisitorWithFlag = Visitor & { flag?: 'vip' | 'banned' | null };
 
 /* ---- Steps ---- */
-type Step = 'search' | 'new-visitor' | 'photo' | 'id-photo' | 'check-in' | 'success';
+type Step = 'search' | 'new-visitor' | 'photo' | 'check-in' | 'success';
 
 export function CheckInPage() {
   const navigate = useNavigate();
@@ -197,30 +196,6 @@ export function CheckInPage() {
       queryClient.invalidateQueries({ queryKey: ['visitors'] });
     } catch {
       // Photo upload failed silently — continue
-    }
-    setStep('id-photo');
-  }
-
-  /* ---- ID photo upload (front, optional back for Ghana Card) ---- */
-  async function handleIdComplete({ front, back }: { front: Blob; back?: Blob }) {
-    if (!selectedVisitor) { setStep('check-in'); return; }
-    try {
-      await fetch(`/api/photos/visitors/${selectedVisitor.id}/id-photo`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'image/jpeg' },
-        body: await front.arrayBuffer(),
-      });
-      if (back) {
-        await fetch(`/api/photos/visitors/${selectedVisitor.id}/id-photo-back`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'image/jpeg' },
-          body: await back.arrayBuffer(),
-        });
-      }
-    } catch {
-      // ID photo upload failed silently — continue to check-in
     }
     setStep('check-in');
   }
@@ -442,27 +417,6 @@ export function CheckInPage() {
             <PhotoCapture
               existingPhotoUrl={(selectedVisitor as Visitor & { photo_url?: string }).photo_url || null}
               onCapture={handlePhotoCapture}
-              onSkip={() => setStep('check-in')}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* STEP 2c: ID photo capture */}
-      {step === 'id-photo' && selectedVisitor && (
-        <div className="space-y-4">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
-              ID Document Photo
-            </h2>
-            <p className="text-[14px] text-muted mt-0.5">
-              Photograph {selectedVisitor.first_name}'s ID document
-            </p>
-          </div>
-          <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
-            <IdDocumentCapture
-              idType={selectedVisitor.id_type ?? undefined}
-              onComplete={handleIdComplete}
               onSkip={() => setStep('check-in')}
             />
           </div>
