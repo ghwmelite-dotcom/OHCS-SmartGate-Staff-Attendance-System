@@ -25,6 +25,39 @@ cd packages/staff && npm run dev   # vite :5174
 Invoke tools via `node ../../node_modules/...` — the repo path contains spaces and
 `&`, which breaks bare `npx` invocations.
 
+## Workflow — the Loop (standing operating mode, set 2026-07-19)
+
+Pre-authorized default workflow. Do NOT pause for approval between stages.
+
+1. **Shape** — state the interpretation and approach in one short message. Only
+   stop for input when requirements are genuinely ambiguous or approaches differ
+   materially.
+2. **Spec** — write/update `docs/superpowers/specs/YYYY-MM-DD-*-design.md`.
+3. **Plan** — for non-trivial work, write `docs/superpowers/plans/YYYY-MM-DD-*.md`.
+4. **Implement** — code + tests per the conventions below.
+5. **Verify** — `tsc --noEmit` + `vitest run` per touched package; Playwright
+   screenshots (system Chrome) for UI changes.
+6. **Commit + push** — conventional message, straight to `main`.
+7. **Watch deploy** — CI to green; on failure diagnose and fix forward
+   autonomously; then report concisely.
+
+**Async review:** the user reviews artifacts after the fact and says "revise X" —
+corrections are fixed forward, never block the loop.
+
+**Hard gates — always stop for explicit confirmation first:**
+- Production database mutations (migrations, manual SQL of any kind)
+- Destructive/irreversible operations (deleting files/branches/data, force-push,
+  history rewrites)
+- New paid external services or credentials (e.g. an SMS provider signup)
+- Actions on shared state beyond this repo (PR/issue comments, external messages,
+  third-party uploads)
+
+Everything else — specs, plans, code, tests, commits, pushes, CI deploys, doc
+updates — proceeds without asking.
+
+**New projects:** seed that project's `AGENTS.md` with this Loop section plus the
+relevant conventions; the user says "work the loop" to activate it.
+
 ## Conventions
 
 - **Specs & plans first.** Every significant feature gets a design spec in
