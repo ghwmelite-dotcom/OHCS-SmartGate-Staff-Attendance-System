@@ -104,8 +104,10 @@ relevant conventions; the user says "work the loop" to activate it.
   migration files with `wrangler d1 execute smartgate-db --local --file=…`.
 - **CI smoke check** curls the workers.dev host (bot protection 403s the branded
   domain from CI). `/api/kiosk/status` is the payload-shape canary.
-- **Playwright visual verification** works via `channel: 'chrome'` (system Chrome);
-  browser binaries are not installed.
+- **Playwright visual verification** is a root devDependency; drive the system
+  Chrome via `channel: 'chrome'` (no browser binaries installed). Serve
+  `packages/web/dist` statically and mock `/api/*` routes (auth shape:
+  `{data:{user}}`) to screenshot authenticated pages.
 
 ## Feature state (as of 2026-07-19)
 

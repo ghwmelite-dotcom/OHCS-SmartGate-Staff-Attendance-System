@@ -3,10 +3,10 @@ import { useThemeStore } from '@/stores/theme';
 import { formatDate } from '@/lib/utils';
 import { NotificationBell } from '../NotificationBell';
 import { SettingsMenu } from '@/components/SettingsMenu';
-import { MapPin, Sun, Moon, Monitor, UserPlus } from 'lucide-react';
+import { MapPin, Sun, Moon, Monitor, UserPlus, HelpCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export function Header() {
+export function Header({ onOpenWizard }: { onOpenWizard: () => void }) {
   const user = useAuthStore((s) => s.user);
   const { theme, setTheme } = useThemeStore();
   const themeOptions = [
@@ -82,6 +82,16 @@ export function Header() {
 
         <SettingsMenu />
         <NotificationBell />
+
+        {/* Welcome tour — re-openable anytime, every page */}
+        <button
+          onClick={onOpenWizard}
+          className="h-9 w-9 flex items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-background transition-colors"
+          title="Take the welcome tour"
+          aria-label="Open the welcome tour"
+        >
+          <HelpCircle className="h-[18px] w-[18px]" />
+        </button>
 
         <div className="hidden md:block h-8 w-[1px] bg-border" />
 
