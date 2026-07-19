@@ -1,5 +1,6 @@
 import type { Env } from '../types';
 import { escapeHtml } from '../lib/html';
+import { qrTableHtml } from './qr-html';
 
 // Admin-type roles use the management/VMS portal; everyone else (staff, NSS,
 // interns) uses the staff attendance PWA. The welcome email links each user to
@@ -174,6 +175,10 @@ function appointmentConfirmedHtml(i: AppointmentEmailInput): string {
           <tr><td style="padding:0 16px 4px;font-size:11px;color:#166534;text-transform:uppercase;letter-spacing:.5px;border-top:1px solid #BBF7D0;">Reference Code</td></tr>
           <tr><td style="padding:0 16px 14px;font-size:22px;font-weight:700;font-family:monospace;color:#14532D;letter-spacing:4px;">${ref}</td></tr>
         </table>
+        <table role="presentation" style="margin:0 auto 6px;"><tr><td style="background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:16px;">
+          ${qrTableHtml(i.referenceCode)}
+        </td></tr></table>
+        <p style="margin:0 0 20px;font-size:12px;color:#6B7280;text-align:center;">Show this code at the reception kiosk — no typing needed.</p>
         <p style="margin:0 0 6px;font-size:13px;color:#6B7280;">Please arrive a few minutes early and present your reference code at the reception kiosk.</p>
       </div>
       <div style="padding:14px 24px;border-top:1px solid #E5E7EB;text-align:center;font-size:11px;color:#9CA3AF;">Office of the Head of the Civil Service</div>

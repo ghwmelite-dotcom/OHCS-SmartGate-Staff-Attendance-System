@@ -4,13 +4,19 @@ import { Camera, X } from 'lucide-react';
 import { parseBadgeCode } from '@/lib/badgeCode';
 
 interface QrScannerProps {
-  /** Called with the parsed SG-code once a badge QR is decoded. */
+  /** Called with the parsed code once a QR is decoded and accepted by `parse`. */
   onScan: (code: string) => void;
   /** Called when the user cancels scanning. */
   onCancel: () => void;
+  /** Extracts the expected code from raw QR text. Defaults to badge parsing. */
+  parse?: (raw: string) => string | null;
+  /** Called once when a QR decodes but `parse` rejects it (scanning stops). */
+  onReject?: (raw: string) => void;
+  /** Heading shown above the viewfinder. */
+  label?: string;
 }
 
-export function QrScanner({ onScan, onCancel }: QrScannerProps) {
+export function QrScanner({ onScan, onCancel, parse, onReject, label }: QrScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -50,10 +56,15 @@ export function QrScanner({ onScan, onCancel }: QrScannerProps) {
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const result = jsQR(img.data, img.width, img.height);
         if (result) {
-          const code = parseBadgeCode(result.data);
+          const code = (parse ?? parseBadgeCode)(result.data);
           if (code) {
             doneRef.current = true;
             onScan(code);
+            return;
+          }
+          if (onReject) {
+            doneRef.current = true;
+            onReject(result.data);
             return;
           }
         }
@@ -69,18 +80,18 @@ export function QrScanner({ onScan, onCancel }: QrScannerProps) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, [onScan]);
+  }, [onScan, parse, onReject]);
 
   return (
     <div className="text-center space-y-4">
-      <p className="text-sm font-medium text-foreground">Scan the visitor's badge QR code</p>
+      <p className="text-sm font-medium text-foreground">{label ?? "Scan the visitor's badge QR code"}</p>
       <div className="relative w-64 h-64 mx-auto rounded-2xl overflow-hidden bg-primary-deep">
         <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
         <div className="absolute inset-6 border-2 border-white/70 rounded-xl pointer-events-none" />
         {cameraError && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-background p-4">
             <Camera className="h-6 w-6 text-muted-foreground mb-2" />
-            <p className="text-xs text-muted text-center">Camera unavailable — enter the badge code manually.</p>
+            <p className="text-xs text-muted text-center">Camera unavailable — enter the code manually.</p>
           </div>
         )}
       </div>

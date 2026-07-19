@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { kioskApi, KioskApiError, type KioskVisit, type KioskDirectorate, type KioskOfficer, type KioskOfficeStatus } from '@/lib/kioskApi';
 import { API_BASE, BADGE_BASE } from '@/lib/constants';
+import { parseAppointmentRef } from '@/lib/parse-appointment-ref';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
@@ -12,7 +13,7 @@ import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
 import { OfficerCombobox } from '@/components/checkin/OfficerCombobox';
 import { suggestDirectorate, groupDirectorates } from '@/lib/directorate-routing';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
-import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert, MapPin, CalendarDays, Clock3, Calendar, ArrowLeft } from 'lucide-react';
+import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert, MapPin, CalendarDays, Clock3, Calendar, ArrowLeft, ScanLine } from 'lucide-react';
 
 const visitorSchema = z.object({
   first_name: z.string().min(1, 'First name is required').max(100),
@@ -27,7 +28,7 @@ const visitorSchema = z.object({
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
 
-type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-pin' | 'checkout-confirm' | 'checkout-done' | 'appointment' | 'appointment-confirm' | 'appointment-done';
+type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-pin' | 'checkout-confirm' | 'checkout-done' | 'appointment' | 'appointment-scan' | 'appointment-confirm' | 'appointment-done';
 
 interface AppointmentLookup {
   id: string;
@@ -201,6 +202,38 @@ export function KioskPage() {
   function handleScanned(code: string) {
     setCheckoutBadge(code);
     setMode('checkout-confirm');
+  }
+
+  // Single lookup path for appointment references — typed entry and QR scan
+  // converge here (same fetch, same confirm screen).
+  async function lookupAppointment(ref: string) {
+    setApptLoading(true);
+    setApptError('');
+    try {
+      const res = await fetch(`/api/appointments/public/ref/${ref.trim()}`);
+      const json = await res.json() as { data?: { appointment: AppointmentLookup }; error?: { message?: string } };
+      if (!res.ok) {
+        setApptError(json.error?.message ?? 'Appointment not found.');
+      } else {
+        setApptData(json.data?.appointment ?? null);
+        setMode('appointment-confirm');
+      }
+    } catch {
+      setApptError('Could not connect. Please try again.');
+    } finally {
+      setApptLoading(false);
+    }
+  }
+
+  function handleApptScanned(code: string) {
+    setApptRef(code);
+    setMode('appointment'); // any lookup error surfaces on the typed screen
+    void lookupAppointment(code);
+  }
+
+  function handleApptScanRejected() {
+    setApptError('Not an appointment QR — try typing the code');
+    setMode('appointment');
   }
 
   async function confirmCheckout() {
@@ -596,24 +629,7 @@ export function KioskPage() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && apptRef.length >= 3 && !apptLoading) {
                       e.preventDefault();
-                      void (async () => {
-                        setApptLoading(true);
-                        setApptError('');
-                        try {
-                          const res = await fetch(`/api/appointments/public/ref/${apptRef.trim()}`);
-                          const json = await res.json() as { data?: { appointment: AppointmentLookup }; error?: { message?: string } };
-                          if (!res.ok) {
-                            setApptError(json.error?.message ?? 'Appointment not found.');
-                          } else {
-                            setApptData(json.data?.appointment ?? null);
-                            setMode('appointment-confirm');
-                          }
-                        } catch {
-                          setApptError('Could not connect. Please try again.');
-                        } finally {
-                          setApptLoading(false);
-                        }
-                      })();
+                      void lookupAppointment(apptRef);
                     }
                   }}
                 />
@@ -625,29 +641,32 @@ export function KioskPage() {
             <button
               type="button"
               disabled={apptRef.length < 3 || apptLoading}
-              onClick={async () => {
-                setApptLoading(true);
-                setApptError('');
-                try {
-                  const res = await fetch(`/api/appointments/public/ref/${apptRef.trim()}`);
-                  const json = await res.json() as { data?: { appointment: AppointmentLookup }; error?: { message?: string } };
-                  if (!res.ok) {
-                    setApptError(json.error?.message ?? 'Appointment not found.');
-                  } else {
-                    setApptData(json.data?.appointment ?? null);
-                    setMode('appointment-confirm');
-                  }
-                } catch {
-                  setApptError('Could not connect. Please try again.');
-                } finally {
-                  setApptLoading(false);
-                }
-              }}
+              onClick={() => void lookupAppointment(apptRef)}
               className="w-full h-14 bg-primary text-white text-base font-semibold rounded-xl inline-flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.99]"
             >
               {apptLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Calendar className="h-5 w-5" />}
               {apptLoading ? 'Looking up…' : 'Look Up'}
             </button>
+            <button
+              type="button"
+              disabled={apptLoading}
+              onClick={() => { setApptError(''); setMode('appointment-scan'); }}
+              className="w-full h-14 bg-surface text-foreground text-base font-semibold rounded-xl border border-border inline-flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.99]"
+            >
+              <ScanLine className="h-5 w-5" /> Scan QR instead
+            </button>
+          </div>
+        )}
+
+        {mode === 'appointment-scan' && (
+          <div className="mt-6 space-y-4">
+            <QrScanner
+              label="Scan the QR code in your confirmation email"
+              parse={parseAppointmentRef}
+              onScan={handleApptScanned}
+              onReject={handleApptScanRejected}
+              onCancel={() => setMode('appointment')}
+            />
           </div>
         )}
 
