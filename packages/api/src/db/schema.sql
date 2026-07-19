@@ -90,6 +90,9 @@ CREATE TABLE IF NOT EXISTS officers (
     telegram_chat_id TEXT,
     -- Per-officer kiosk override PIN, PBKDF2-hashed (migration-officer-override-pin.sql).
     override_pin_hash TEXT,
+    -- Host availability status (added by migration-officers-availability.sql)
+    availability_status TEXT,
+    availability_updated_at TEXT,
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -112,6 +115,11 @@ CREATE TABLE IF NOT EXISTS visitors (
     id_photo_back_url TEXT,
     total_visits  INTEGER NOT NULL DEFAULT 0,
     last_visit_at TEXT,
+    -- Watchlist flag (added by migration-visitors-flag.sql)
+    flag          TEXT,
+    flag_note     TEXT,
+    flag_updated_at TEXT,
+    flag_updated_by TEXT,
     created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -148,6 +156,9 @@ CREATE TABLE IF NOT EXISTS visits (
     host_response    TEXT,
     host_response_at TEXT,
     host_response_by TEXT,
+    -- Delegation party (added by migration-visits-party.sql); NULL reads as solo
+    party_size       INTEGER,
+    party_names      TEXT,
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_visits_visitor ON visits(visitor_id);

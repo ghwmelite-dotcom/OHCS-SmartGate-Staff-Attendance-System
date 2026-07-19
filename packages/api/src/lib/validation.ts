@@ -33,6 +33,10 @@ export const KioskCreateVisitorSchema = z.object({
   id_number: z.string().max(50).optional().or(z.literal('')),
 });
 
+// Delegation mode (spec 2026-07-19-delegation-and-watchlist-design §A):
+// party_size counts the whole party INCLUDING the lead (1 = solo); party_names
+// lists accompanying members only (lead excluded, so ≤19). Names are trimmed
+// and blanks dropped server-side.
 export const CheckInSchema = z.object({
   visitor_id: z.string().min(1),
   host_officer_id: z.string().optional(),
@@ -42,6 +46,9 @@ export const CheckInSchema = z.object({
   purpose_category: z.string().optional(),
   notes: z.string().max(500).optional(),
   idempotency_key: z.string().min(1).max(100).optional(),
+  party_size: z.number().int().min(1).max(20).default(1),
+  party_names: z.array(z.string().trim().max(80)).max(19).optional()
+    .transform((arr) => (arr ? arr.filter((s) => s.length > 0) : arr)),
 });
 
 export const LoginSchema = z.object({
@@ -59,6 +66,14 @@ export const KioskCheckOutSchema = z.object({
 
 export const KioskCheckOutByPinSchema = z.object({
   pin: z.string().length(6).regex(/^\d{6}$/, 'PIN must be 6 digits'),
+});
+
+// Host availability (spec: 2026-07-19-host-availability-design) — NULL in the
+// officers row reads as 'available'.
+export const availabilityStatusSchema = z.enum(['available', 'in_meeting', 'out_of_office']);
+
+export const UpdateAvailabilitySchema = z.object({
+  status: availabilityStatusSchema,
 });
 
 // Mirrors IdCheckVerdict (lib/id-check.ts). Echoed back from the id-photo

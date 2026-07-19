@@ -52,6 +52,9 @@ import migrationAppointmentsRepair from './migration-appointments-repair.sql';
 import clockPresence from './migration-clock-presence.sql';
 import clockRisk from './migration-clock-risk.sql';
 import visitsHostResponse from './migration-visits-host-response.sql';
+import officersAvailability from './migration-officers-availability.sql';
+import visitsParty from './migration-visits-party.sql';
+import visitorsFlag from './migration-visitors-flag.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -108,6 +111,9 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-clock-presence.sql', sql: clockPresence },
   { filename: 'migration-clock-risk.sql', sql: clockRisk },
   { filename: 'migration-visits-host-response.sql', sql: visitsHostResponse },
+  { filename: 'migration-officers-availability.sql', sql: officersAvailability },
+  { filename: 'migration-visits-party.sql', sql: visitsParty },
+  { filename: 'migration-visitors-flag.sql', sql: visitorsFlag },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {
