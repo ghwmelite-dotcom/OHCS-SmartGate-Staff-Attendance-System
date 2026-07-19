@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, ClipboardCheck, Users, ScrollText, BarChart3, FileText, Settings, LogOut, ChevronsLeft, ChevronsRight, UserCircle } from 'lucide-react';
+import { LayoutDashboard, ClipboardCheck, Users, ScrollText, BarChart3, FileText, Settings, LogOut, ChevronsLeft, ChevronsRight, UserCircle, Calendar } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import { useSidebarStore } from '@/stores/sidebar';
 
@@ -12,6 +12,10 @@ const NAV_ITEMS = [
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/reports', icon: FileText, label: 'Reports' },
   { to: '/profile', icon: UserCircle, label: 'My Profile' },
+];
+
+const APPOINTMENTS_NAV = [
+  { to: '/appointments', icon: Calendar, label: 'Appointments' },
 ];
 
 const ADMIN_NAV_SUPER = [
@@ -32,6 +36,7 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
   const isSuperadmin = user?.role === 'superadmin';
   const isAdmin = user?.role === 'admin';
   const canSeeAdmin = isSuperadmin || isAdmin;
+  const canSeeAppointments = ['receptionist', 'admin', 'superadmin'].includes(user?.role ?? '');
   const { isCollapsed, toggleCollapse } = useSidebarStore();
 
   const collapsed = forceExpanded ? false : isCollapsed;
@@ -91,6 +96,11 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
       {/* Navigation */}
       <nav className={cn('flex-1 py-2 space-y-1 relative', collapsed ? 'px-2' : 'px-3')}>
         {NAV_ITEMS.map((item) => (
+          <NavItem key={item.to} {...item} collapsed={collapsed} />
+        ))}
+
+        {/* Appointments — reception + admins (read-only day view) */}
+        {canSeeAppointments && APPOINTMENTS_NAV.map((item) => (
           <NavItem key={item.to} {...item} collapsed={collapsed} />
         ))}
 

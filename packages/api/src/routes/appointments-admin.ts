@@ -69,7 +69,9 @@ appointmentsAdminRoutes.get('/', async (c) => {
   const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20));
   const offset = (page - 1) * limit;
 
-  const isAdminLevel = session.role === 'superadmin' || session.role === 'admin';
+  // Reception gets read-only visibility of all appointments; mutations stay
+  // guarded by canActOnAppointment / admin-only checks on the PATCH routes.
+  const isAdminLevel = ['superadmin', 'admin', 'receptionist'].includes(session.role);
 
   const baseSelect = `SELECT a.*, o.name as officer_name, o.title as officer_title,
        d.name as directorate_name,
