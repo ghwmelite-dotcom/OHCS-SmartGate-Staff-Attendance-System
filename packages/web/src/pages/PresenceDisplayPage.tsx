@@ -78,7 +78,7 @@ export function PresenceDisplayPage() {
   const remaining = presence ? Math.max(0, presence.expiresIn - (nowMs - presence.fetchedAt) / 1000) : 0;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center overflow-hidden relative px-6 py-10" style={{
+    <div className="h-screen flex flex-col items-center overflow-hidden relative px-6 pt-8 pb-12" style={{
       background: 'linear-gradient(165deg, #1A4D2E 0%, #0F2E1B 50%, #071A0F 100%)',
     }}>
       {/* Kente pattern */}
@@ -105,7 +105,7 @@ export function PresenceDisplayPage() {
       </div>
 
       {/* Clock */}
-      <div className="relative mt-8 text-center">
+      <div className="relative mt-6 text-center">
         <p className="text-6xl md:text-7xl font-bold text-white tracking-tight tabular-nums" style={{ fontFamily: "'Playfair Display', serif" }}>
           {timeStr}
         </p>
@@ -123,8 +123,10 @@ export function PresenceDisplayPage() {
         )}
       </div>
 
-      {/* QR / failure state */}
-      <div className="relative mt-8 flex items-center justify-center">
+      {/* QR / failure state — flex-1 + min-h-0 lets the QR absorb whatever
+          vertical space remains, so short screens shrink the QR instead of
+          clipping it over the flag bar */}
+      <div className="relative mt-6 w-full flex-1 min-h-0 flex items-center justify-center">
         {unavailable ? (
           <div className="flex flex-col items-center justify-center text-center rounded-3xl px-12 py-14" style={{
             background: 'rgba(154, 27, 27, 0.22)',
@@ -138,15 +140,16 @@ export function PresenceDisplayPage() {
         ) : presence ? (
           <PresenceQr token={presence.token} remaining={remaining} jitter={jitter} />
         ) : (
-          <div className="flex items-center justify-center rounded-full bg-white/5" style={{ width: 'min(560px, 80vmin)', aspectRatio: '1' }}>
+          <div className="flex items-center justify-center rounded-full bg-white/5" style={{ height: 'min(420px, 100%)', aspectRatio: '1', maxWidth: '100%' }}>
             <p className="text-white/40 text-sm uppercase tracking-[0.25em]">Connecting…</p>
           </div>
         )}
       </div>
 
       {/* Ghana flag bar at bottom */}
-      <div className="absolute bottom-0 left-0 right-0 h-1" style={{
+      <div className="absolute bottom-0 left-0 right-0 h-1.5" style={{
         background: 'linear-gradient(90deg, #CE1126 33%, #FCD116 33% 66%, #006B3F 66%)',
+        boxShadow: '0 -2px 14px rgba(252, 209, 22, 0.35)',
       }} />
     </div>
   );
@@ -175,7 +178,8 @@ function PresenceQr({ token, remaining, jitter }: {
 
   return (
     <div className="relative" style={{
-      width: 'min(560px, 80vmin)',
+      height: 'min(420px, 100%)',
+      maxWidth: '100%',
       aspectRatio: '1',
       transform: `translate(${jitter.x}%, ${jitter.y}%)`,
       transition: 'transform 0.6s ease-out',
