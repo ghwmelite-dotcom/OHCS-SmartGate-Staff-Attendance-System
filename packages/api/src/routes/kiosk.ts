@@ -16,6 +16,7 @@ import { getAppSettings } from '../services/settings';
 import { getOfficeStatus, officeClosedMessage } from '../services/office-hours';
 import { resolveOverride } from '../services/override';
 import { recordAudit, systemActor } from '../services/audit';
+import { devLog } from '../lib/log';
 
 export const kioskRoutes = new Hono<{ Bindings: Env }>();
 
@@ -42,6 +43,30 @@ function parseStashedVerdict(raw: string | null): IdCheckVerdict | null {
   }
   return null;
 }
+
+// Normalize a Ghana phone input the same way kiosk registration accepts it
+// (`0XXXXXXXXX` or `+233XXXXXXXXX` — see KioskCreateVisitorSchema), tolerating
+// spaces/dashes/parens. Returns BOTH stored canonical forms so a lookup matches
+// whichever form the visitor originally typed. Null when not a Ghana number.
+export function normalizeKioskPhone(raw: string): { local: string; intl: string } | null {
+  const cleaned = raw.replace(/[\s\-()]/g, '');
+  const m = /^(\+233|0)(\d{9})$/.exec(cleaned);
+  if (!m) return null;
+  return { local: `0${m[2]}`, intl: `+233${m[2]}` };
+}
+
+// Returning-visitor lookup. visitors.phone has no normalized column (schema.sql),
+// so the REPLACE chain strips the same characters normalizeKioskPhone does and
+// the match runs against both canonical forms. The EXISTS gate means only a
+// visitor with ≥1 completed visit is ever returned. Exported for the route test
+// (single source of truth — same pattern as go-live-reset.test.ts).
+export const VISITOR_BY_PHONE_SQL =
+  `SELECT v.id, v.first_name, v.last_name, v.organisation, v.photo_url
+   FROM visitors v
+   WHERE REPLACE(REPLACE(REPLACE(REPLACE(v.phone, ' ', ''), '-', ''), '(', ''), ')', '') IN (?, ?)
+     AND EXISTS (SELECT 1 FROM visits s WHERE s.visitor_id = v.id AND s.status = 'checked_out')
+   ORDER BY v.last_visit_at DESC
+   LIMIT 1`;
 
 // Per-IP rate limit for every kiosk action. Conservative: 40 writes / 60s.
 async function kioskRateLimit(c: Context<{ Bindings: Env }>): Promise<boolean> {
@@ -75,16 +100,27 @@ kioskRoutes.get('/status', async (c) => {
 
 // Public officer list for the kiosk host-name autocomplete.
 // Returns name + title + directorate only — no phone, email, or override PIN.
+// availability_status is additive (host-availability contract: NULL ⇒ available);
+// the plain fallback keeps the kiosk working if that column hasn't landed yet —
+// drop it once migration-officers-availability.sql is confirmed applied.
 kioskRoutes.get('/officers', async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
-  const rows = await c.env.DB.prepare(
-    `SELECT o.id, o.name, o.title, o.directorate_id, d.abbreviation AS directorate_abbr
-     FROM officers o
+  const from = `FROM officers o
      JOIN directorates d ON d.id = o.directorate_id
      WHERE o.is_available = 1 AND d.is_active = 1
-     ORDER BY o.name`
-  ).all();
-  return success(c, rows.results ?? []);
+     ORDER BY o.name`;
+  try {
+    const rows = await c.env.DB.prepare(
+      `SELECT o.id, o.name, o.title, o.directorate_id, d.abbreviation AS directorate_abbr, o.availability_status ${from}`
+    ).all();
+    return success(c, rows.results ?? []);
+  } catch (e) {
+    if (!/no such column/i.test(e instanceof Error ? e.message : String(e))) throw e;
+    const rows = await c.env.DB.prepare(
+      `SELECT o.id, o.name, o.title, o.directorate_id, d.abbreviation AS directorate_abbr ${from}`
+    ).all();
+    return success(c, rows.results ?? []);
+  }
 });
 
 // Public directorate list for the kiosk form. type/org_type included for dropdown
@@ -96,6 +132,21 @@ kioskRoutes.get('/directorates', async (c) => {
     `SELECT id, name, abbreviation, type, org_type FROM directorates WHERE is_active = 1 ORDER BY name`
   ).all();
   return success(c, rows.results ?? []);
+});
+
+// Returning-visitor fast lane: find one visitor by phone, but ONLY when they
+// have ≥1 completed (checked_out) visit — a bare name/phone pair that never
+// finished a visit reveals nothing. Identical 404 for unknown numbers, invalid
+// input, and no-completed-visit (no enumeration oracle). Returns only the
+// fields the kiosk needs. No audit entry (public read); devLog for abuse watch.
+kioskRoutes.get('/visitor-by-phone', async (c) => {
+  if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
+  const forms = normalizeKioskPhone(c.req.query('phone') ?? '');
+  if (!forms) return notFound(c, 'Visitor');
+  devLog(c.env, '[kiosk] visitor-by-phone lookup', forms.local);
+  const row = await c.env.DB.prepare(VISITOR_BY_PHONE_SQL).bind(forms.local, forms.intl).first();
+  if (!row) return notFound(c, 'Visitor');
+  return success(c, row);
 });
 
 // Raw-JPEG face photo upload.

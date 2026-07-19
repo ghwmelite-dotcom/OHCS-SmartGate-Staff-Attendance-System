@@ -62,6 +62,18 @@ export interface KioskVisitor {
   last_name: string;
 }
 
+/** Host availability (host-availability contract). Missing/undefined ⇒ available. */
+export type AvailabilityStatus = 'available' | 'in_meeting' | 'out_of_office';
+
+/** Minimal returning-visitor match from GET /kiosk/visitor-by-phone. */
+export interface KioskVisitorMatch {
+  id: string;
+  first_name: string;
+  last_name: string;
+  organisation: string | null;
+  photo_url: string | null;
+}
+
 export interface KioskVisit {
   id: string;
   badge_code: string | null;
@@ -81,6 +93,8 @@ export interface KioskOfficer {
   title: string | null;
   directorate_id: string;
   directorate_abbr: string;
+  /** Additive host-availability field — absent until that column lands; treat as available. */
+  availability_status?: AvailabilityStatus | null;
 }
 
 export interface KioskDirectorate {
@@ -135,4 +149,6 @@ export const kioskApi = {
   getOfficers: () => kioskGet<KioskOfficer[]>('/officers'),
   getDirectorates: () => kioskGet<KioskDirectorate[]>('/directorates'),
   getStatus: () => kioskGet<KioskOfficeStatus>('/status'),
+  getVisitorByPhone: (phone: string) =>
+    kioskGet<KioskVisitorMatch>(`/visitor-by-phone?phone=${encodeURIComponent(phone)}`),
 };

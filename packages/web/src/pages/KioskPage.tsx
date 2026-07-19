@@ -3,9 +3,10 @@ import QRCode from 'qrcode';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { kioskApi, KioskApiError, type KioskVisit, type KioskDirectorate, type KioskOfficer, type KioskOfficeStatus } from '@/lib/kioskApi';
+import { kioskApi, KioskApiError, type KioskVisit, type KioskDirectorate, type KioskOfficer, type KioskOfficeStatus, type KioskVisitorMatch } from '@/lib/kioskApi';
 import { API_BASE, BADGE_BASE } from '@/lib/constants';
 import { parseAppointmentRef } from '@/lib/parse-appointment-ref';
+import { parseGhanaPhone } from '@/lib/parse-ghana-phone';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QrScanner } from '@/components/QrScanner';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
@@ -13,7 +14,7 @@ import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
 import { OfficerCombobox } from '@/components/checkin/OfficerCombobox';
 import { suggestDirectorate, groupDirectorates } from '@/lib/directorate-routing';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
-import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert, MapPin, CalendarDays, Clock3, Calendar, ArrowLeft, ScanLine } from 'lucide-react';
+import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert, MapPin, CalendarDays, Clock3, Calendar, ArrowLeft, ScanLine, UserCheck } from 'lucide-react';
 
 const visitorSchema = z.object({
   first_name: z.string().min(1, 'First name is required').max(100),
@@ -28,7 +29,7 @@ const visitorSchema = z.object({
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
 
-type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-pin' | 'checkout-confirm' | 'checkout-done' | 'appointment' | 'appointment-scan' | 'appointment-confirm' | 'appointment-done';
+type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-pin' | 'checkout-confirm' | 'checkout-done' | 'appointment' | 'appointment-scan' | 'appointment-confirm' | 'appointment-done' | 'returning-phone' | 'returning-confirm';
 
 interface AppointmentLookup {
   id: string;
@@ -82,6 +83,15 @@ export function KioskPage() {
   const [apptLoading, setApptLoading] = useState(false);
   const [apptError, setApptError] = useState('');
 
+  // Returning-visitor fast lane. `returningVisitor` is set once a phone lookup
+  // matches; it locks the form's identity fields and its id is submitted on
+  // check-in instead of creating a new visitor row.
+  const [returningPhone, setReturningPhone] = useState('');
+  const [returningVisitor, setReturningVisitor] = useState<KioskVisitorMatch | null>(null);
+  const [returningLoading, setReturningLoading] = useState(false);
+  // Warn-not-block note when the picked host isn't available (missing field ⇒ available).
+  const [hostWarning, setHostWarning] = useState<string | null>(null);
+
   const form = useForm<VisitorForm>({
     resolver: zodResolver(visitorSchema),
     defaultValues: { first_name: '', last_name: '', phone: '', organisation: '', directorate_id: '', host_name: '', purpose_raw: '' },
@@ -89,6 +99,9 @@ export function KioskPage() {
 
   const rawPhone = (form.watch('phone') ?? '').replace(/[\s\-()]/g, '');
   const isPhoneValid = /^(\+233|0)\d{9}$/.test(rawPhone);
+  // Identity fields lock once a returning visitor is confirmed (readOnly, not
+  // disabled, so react-hook-form keeps the values on submit).
+  const identityLocked = returningVisitor !== null;
 
   const [directorates, setDirectorates] = useState<KioskDirectorate[]>([]);
   const [officers, setOfficers] = useState<KioskOfficer[]>([]);
@@ -196,6 +209,10 @@ export function KioskPage() {
     setApptData(null);
     setApptLoading(false);
     setApptError('');
+    setReturningPhone('');
+    setReturningVisitor(null);
+    setReturningLoading(false);
+    setHostWarning(null);
     setMode('welcome');
   }
 
@@ -234,6 +251,46 @@ export function KioskPage() {
   function handleApptScanRejected() {
     setApptError('Not an appointment QR — try typing the code');
     setMode('appointment');
+  }
+
+  // Returning-visitor lookup. A miss (404 — unknown number or no completed
+  // visit, deliberately indistinguishable) drops into the full form with the
+  // entered phone prefilled; network/rate-limit failures degrade the same way
+  // so the lobby flow never blocks.
+  async function startReturningLookup() {
+    const local = parseGhanaPhone(returningPhone);
+    if (!local || returningLoading) return;
+    setReturningLoading(true);
+    setSubmitError(null);
+    try {
+      const match = await kioskApi.getVisitorByPhone(local);
+      setReturningVisitor(match);
+      setMode('returning-confirm');
+    } catch {
+      setReturningVisitor(null);
+      form.reset({ first_name: '', last_name: '', phone: local, organisation: '', directorate_id: '', host_name: '', purpose_raw: '' });
+      setSubmitError("No record found — let's register you.");
+      setMode('form');
+    } finally {
+      setReturningLoading(false);
+    }
+  }
+
+  // "Yes, that's me" — lock identity to the matched visitor and continue the
+  // normal purpose → host → photo → submit path with the existing visitor id.
+  function confirmReturningVisitor() {
+    if (!returningVisitor) return;
+    setVisitorId(returningVisitor.id);
+    form.reset({
+      first_name: returningVisitor.first_name,
+      last_name: returningVisitor.last_name,
+      phone: parseGhanaPhone(returningPhone) ?? '',
+      organisation: returningVisitor.organisation ?? '',
+      directorate_id: '',
+      host_name: '',
+      purpose_raw: '',
+    });
+    setMode('form');
   }
 
   async function confirmCheckout() {
@@ -310,6 +367,9 @@ export function KioskPage() {
             <button onClick={() => { form.reset(); setMode('form'); }} className="w-full h-14 bg-primary text-white text-base font-semibold rounded-xl inline-flex items-center justify-center gap-2 active:scale-[0.99]">
               <LogIn className="h-5 w-5" /> Check In
             </button>
+            <button onClick={() => { setReturningPhone(''); setSubmitError(null); setMode('returning-phone'); }} className="w-full h-14 bg-surface text-foreground text-base font-semibold rounded-xl border border-border inline-flex items-center justify-center gap-2 active:scale-[0.99]">
+              <UserCheck className="h-5 w-5" /> Been Here Before?
+            </button>
             <button onClick={() => { setSubmitError(null); setMode('checkout-scan'); }} className="w-full h-14 bg-surface text-foreground text-base font-semibold rounded-xl border border-border inline-flex items-center justify-center gap-2 active:scale-[0.99]">
               <LogOut className="h-5 w-5" /> Check Out
             </button>
@@ -326,12 +386,18 @@ export function KioskPage() {
               <p className="text-sm text-muted mt-0.5">Tell us who you are and who you're visiting</p>
             </div>
             <div className="bg-surface rounded-xl border border-border shadow-sm p-5 space-y-4">
+              {identityLocked && (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-success/30 bg-success/5 px-3 py-2">
+                  <p className="text-[12px] text-foreground">Your saved details are locked in — just tell us why you're here.</p>
+                  <button type="button" onClick={resetAll} className="text-[12px] text-muted underline-offset-2 hover:underline shrink-0">Not you?</button>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <FieldWrapper icon={<User className="h-4 w-4" />} label="First Name" error={form.formState.errors.first_name?.message}>
-                  <input {...form.register('first_name')} className={fieldCls} autoFocus />
+                  <input {...form.register('first_name')} readOnly={identityLocked} className={`${fieldCls}${identityLocked ? ' bg-background-warm text-muted' : ''}`} autoFocus={!identityLocked} />
                 </FieldWrapper>
                 <FieldWrapper icon={<User className="h-4 w-4" />} label="Last Name" error={form.formState.errors.last_name?.message}>
-                  <input {...form.register('last_name')} className={fieldCls} />
+                  <input {...form.register('last_name')} readOnly={identityLocked} className={`${fieldCls}${identityLocked ? ' bg-background-warm text-muted' : ''}`} />
                 </FieldWrapper>
               </div>
               <FieldWrapper icon={<Phone className="h-4 w-4" />} label="Phone" error={form.formState.errors.phone?.message}>
@@ -343,13 +409,16 @@ export function KioskPage() {
                         if (e.target.value !== v) e.target.value = v;
                       },
                     })}
+                    readOnly={identityLocked}
                     type="tel"
                     inputMode="tel"
                     autoComplete="tel"
                     maxLength={16}
                     placeholder="024 123 4567"
                     className={`${fieldCls} pr-9 transition-colors ${
-                      isPhoneValid
+                      identityLocked
+                        ? 'bg-background-warm text-muted'
+                        : isPhoneValid
                         ? 'border-success focus:ring-success/30'
                         : form.formState.errors.phone
                         ? 'border-danger focus:ring-danger/20'
@@ -362,7 +431,7 @@ export function KioskPage() {
                 </div>
               </FieldWrapper>
               <FieldWrapper icon={<Briefcase className="h-4 w-4" />} label="Organisation (optional)">
-                <input {...form.register('organisation')} className={fieldCls} />
+                <input {...form.register('organisation')} readOnly={identityLocked} className={`${fieldCls}${identityLocked ? ' bg-background-warm text-muted' : ''}`} />
               </FieldWrapper>
               <FieldWrapper label="Purpose of Visit" error={form.formState.errors.purpose_raw?.message}>
                 <textarea
@@ -410,9 +479,31 @@ export function KioskPage() {
                     if (o.directorate_id && !form.getValues('directorate_id')) {
                       form.setValue('directorate_id', o.directorate_id);
                     }
+                    // Warn, never block: availability_status may be absent until
+                    // the host-availability column lands ⇒ treat as available.
+                    const picked = officers.find((x) => x.id === o.id);
+                    const status = picked?.availability_status ?? 'available';
+                    if (picked && status !== 'available') {
+                      setHostWarning(
+                        status === 'in_meeting'
+                          ? `${picked.name} is in a meeting — you can still check in; they'll be notified.`
+                          : `${picked.name} is out of the office — you can still check in; they'll be notified.`,
+                      );
+                    } else {
+                      setHostWarning(null);
+                    }
                   }}
-                  onManual={(name) => form.setValue('host_name', name, { shouldValidate: !!name })}
+                  onManual={(name) => {
+                    form.setValue('host_name', name, { shouldValidate: !!name });
+                    setHostWarning(null);
+                  }}
                 />
+                {hostWarning && (
+                  <div className="flex items-start gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 mt-2">
+                    <ShieldAlert className="h-4 w-4 text-accent-warm shrink-0 mt-0.5" />
+                    <p className="text-[12px] text-foreground">{hostWarning}</p>
+                  </div>
+                )}
               </FieldWrapper>
             </div>
             {submitError && <p className="text-danger text-xs">{submitError}</p>}
@@ -423,6 +514,87 @@ export function KioskPage() {
               </button>
             </div>
           </form>
+        )}
+
+        {mode === 'returning-phone' && (
+          <div className="mt-6 space-y-5 text-center">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Welcome Back</h2>
+              <p className="text-sm text-muted mt-1">Enter the phone number you registered with</p>
+            </div>
+            <input
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              maxLength={16}
+              value={returningPhone}
+              onChange={e => { setReturningPhone(e.target.value.replace(/[^\d+\s\-()]/g, '').slice(0, 16)); setSubmitError(null); }}
+              onKeyDown={e => e.key === 'Enter' && void startReturningLookup()}
+              placeholder="024 123 4567"
+              className="w-full max-w-xs mx-auto block text-center text-2xl font-mono font-bold tracking-widest h-16 rounded-xl border-2 border-border focus:border-primary focus:outline-none bg-background"
+              autoFocus
+            />
+            {submitError && <p className="text-danger text-sm">{submitError}</p>}
+            <div className="flex gap-3 justify-center">
+              <button
+                type="button"
+                onClick={resetAll}
+                className="h-11 px-4 text-sm text-muted border border-border rounded-xl hover:border-primary/30 transition-all"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={() => void startReturningLookup()}
+                disabled={!parseGhanaPhone(returningPhone) || returningLoading}
+                className="h-11 px-6 bg-primary text-white text-sm font-semibold rounded-xl inline-flex items-center gap-2 disabled:opacity-50 transition-all"
+              >
+                {returningLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
+                {returningLoading ? 'Checking…' : 'Find My Details'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {mode === 'returning-confirm' && returningVisitor && (
+          <div className="mt-6 space-y-5 text-center">
+            <div className="w-24 h-24 rounded-2xl overflow-hidden mx-auto border-2 border-border bg-surface flex items-center justify-center">
+              {returningVisitor.photo_url ? (
+                <img
+                  src={returningVisitor.photo_url}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              ) : (
+                <User className="h-10 w-10 text-muted" />
+              )}
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Welcome back, {returningVisitor.first_name}!</h2>
+              <p className="text-sm text-muted mt-1">
+                {returningVisitor.first_name} {returningVisitor.last_name}
+                {returningVisitor.organisation ? ` — ${returningVisitor.organisation}` : ''}
+              </p>
+              <p className="text-sm text-muted mt-0.5">Is this you?</p>
+            </div>
+            <div className="flex gap-3 justify-center">
+              <button
+                type="button"
+                onClick={() => { setReturningVisitor(null); setReturningPhone(''); setMode('returning-phone'); }}
+                className="h-12 px-5 text-sm text-muted border border-border rounded-xl hover:border-primary/30 transition-all"
+              >
+                Not You?
+              </button>
+              <button
+                type="button"
+                onClick={confirmReturningVisitor}
+                className="h-12 px-6 bg-primary text-white text-sm font-semibold rounded-xl inline-flex items-center gap-2 active:scale-[0.99]"
+              >
+                <CheckCircle2 className="h-4 w-4" /> Yes, That's Me
+              </button>
+            </div>
+          </div>
         )}
 
         {mode === 'face' && (
