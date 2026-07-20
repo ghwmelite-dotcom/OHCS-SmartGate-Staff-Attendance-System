@@ -64,11 +64,12 @@ export const MAX_GPS_ACCURACY_METERS = 30;
 export const WALL_BUFFER_METERS = 8;
 
 // Same accuracy-aware buffer as the server: a fix's tolerance grows with the
-// device's reported uncertainty so indoor GPS jitter (5-15m on mobile inside
-// concrete buildings) doesn't reject staff who are genuinely inside.
+// device's reported uncertainty. Reported accuracy is ~1σ under open sky;
+// indoors with multipath the true error routinely exceeds it (a ±14m fix can
+// land 20m+ off), so the full reported accuracy is added to the wall buffer.
 export function effectiveBufferMeters(accuracy: number | undefined): number {
   const acc = accuracy && accuracy > 0 ? accuracy : 0;
-  return WALL_BUFFER_METERS + acc * 0.5;
+  return WALL_BUFFER_METERS + acc;
 }
 
 export function withinGeofence(lat: number, lng: number, accuracy?: number): boolean {

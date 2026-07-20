@@ -25,11 +25,12 @@ export const clockRoutes = new Hono<{ Bindings: Env; Variables: { session: Sessi
 // (they fell outside the tiny patch + 8m buffer). Corners are the surveyed
 // building outline; the old patch's centroid sits inside this polygon (verified).
 // Order is the perimeter walk; winding direction is irrelevant for the ray-cast.
-// The accuracy-aware buffer (WALL_BUFFER_METERS + accuracy * 0.5) absorbs GPS
+// The accuracy-aware buffer (WALL_BUFFER_METERS + accuracy) absorbs GPS
 // jitter for staff right at the walls/doorway. NOTE: this is a tightly-packed
 // ministries block (Ministry of Justice ~46m, Controller & Accountant General's
-// ~49m away) — field-verify a clock-in from inside before relying on it, and the
-// buffer can be tightened now that the footprint (not a patch) is accurate.
+// ~49m away) — the worst-case buffer (8 + 30m accuracy cap = 38m) stays short
+// of them, and borderline accepts are risk-weighted via the geofence_margin
+// risk factor rather than trusted blindly.
 type LatLng = readonly [number, number];
 const OHCS_POLYGONS: readonly (readonly LatLng[])[] = [
   [
@@ -424,16 +425,18 @@ clockRoutes.post('/', async (c) => {
   }
 
   // Check geofence — inside any OHCS polygon, within the static wall buffer,
-  // or within an accuracy-aware buffer that absorbs indoor GPS jitter
-  // (5-15m typical on mobile inside concrete buildings). The static
-  // WALL_BUFFER_METERS handles clean fixes; the accuracy-aware portion
-  // accepts noisier fixes proportional to the device's reported uncertainty.
-  // Capped by MAX_GPS_ACCURACY_METERS so a spoofed accuracy can't open the
-  // door arbitrarily wide.
+  // or within an accuracy-aware buffer that absorbs indoor GPS jitter. The
+  // reported accuracy is a ~1σ radius under open sky; indoors with multipath
+  // the true error routinely exceeds it (field case: ±14m reported, 20m drift
+  // → a genuinely-inside user rejected at 0.5×). The full reported accuracy is
+  // therefore added to the wall buffer. Capped by MAX_GPS_ACCURACY_METERS so a
+  // spoofed accuracy can't open the door arbitrarily wide — worst case is
+  // 8 + 30 = 38m, still short of the neighbouring ministries (~46-49m), and
+  // borderline accepts are risk-weighted via the geofence_margin risk factor.
   const inside = insideAnyPolygon(latitude, longitude);
   const distance = inside ? 0 : distanceToNearestPolygonMeters(latitude, longitude);
   const acc = accuracy && accuracy > 0 ? accuracy : 0;
-  const accuracyBuffer = acc > 0 ? acc * 0.5 : 0;
+  const accuracyBuffer = acc;
   const effectiveBuffer = WALL_BUFFER_METERS + accuracyBuffer;
   const withinGeofence = inside || distance <= effectiveBuffer;
   devLog(c.env, `[CLOCK_GEO] inside=${inside} dist=${Math.round(distance)}m acc=${Math.round(acc)}m buffer=${Math.round(effectiveBuffer)}m -> ${withinGeofence ? 'IN' : 'OUT'}`);
