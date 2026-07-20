@@ -1,5 +1,5 @@
 import type { Env } from '../types';
-import { sendTelegramMessage, buildArrivalKeyboard } from './telegram';
+import { sendTelegramMessage, buildArrivalKeyboard, sendTelegramMessageWithId, sendTelegramPhoto, recordArrivalMessages, type ArrivalMessageRef, type InlineKeyboardMarkup } from './telegram';
 import { sendWebPush, type PushTarget } from '../lib/webpush';
 import { escapeHtml } from '../lib/html';
 import { devError } from '../lib/log';
@@ -22,6 +22,15 @@ interface VisitNotifyData {
   directorate_id: string | null;
   directorate_abbr: string | null;
   check_in_source?: 'staff' | 'kiosk';
+  /** R2 key of the visitor's kiosk photo — arrival alerts send it when present. */
+  photo_url?: string | null;
+  /** Delegation party: total headcount INCLUDING the lead (NULL ⇒ solo). */
+  party_size?: number | null;
+  /** JSON array of accompanying member names (lead excluded). */
+  party_names?: string | null;
+  /** Resolved in notifyOnCheckIn — fanout format + status line. */
+  host_name?: string | null;
+  host_availability?: 'available' | 'in_meeting' | 'out_of_office' | null;
 }
 
 export function selectFanoutReceivers(receivers: { officer_id: string }[], hostOfficerId: string): string[] {
@@ -35,20 +44,50 @@ export function selectFanoutReceivers(receivers: { officer_id: string }[], hostO
   return out;
 }
 
-function formatVisitorMessage(data: VisitNotifyData, recipientType: 'host' | 'director'): string {
+// Delegation party line — "With 2 others: Ama B, Kofi D". party_size includes
+// the lead; party_names is a JSON array of the accompanying members.
+export function partyLine(data: VisitNotifyData): string | null {
+  const size = data.party_size ?? 0;
+  if (!size || size <= 1) return null;
+  const others = size - 1;
+  let names: string[] = [];
+  try { names = JSON.parse(data.party_names ?? '[]') as string[]; } catch { /* malformed → count only */ }
+  const suffix = names.length ? `: ${names.map((n) => escapeHtml(String(n))).join(', ')}` : '';
+  return `With ${others} other${others > 1 ? 's' : ''}${suffix}`;
+}
+
+const AVAILABILITY_LABELS: Record<string, string> = {
+  in_meeting: 'In a meeting',
+  out_of_office: 'Out of office',
+};
+
+// Exported for tests. recipientType: the host gets the action wording; fanout
+// (directorate receivers) gets the "covering for the host" wording + status
+// line; director/leadership stays FYI.
+export function formatVisitorMessage(data: VisitNotifyData, recipientType: 'host' | 'fanout' | 'director'): string {
   const time = new Date(data.check_in_at).toLocaleTimeString('en-US', {
     hour: 'numeric', minute: '2-digit', hour12: true,
   });
+  const party = partyLine(data);
+  const nameLine = `<b>${escapeHtml(data.first_name)} ${escapeHtml(data.last_name)}</b>${data.organisation ? ` (${escapeHtml(data.organisation)})` : ''}`;
 
-  if (recipientType === 'host') {
+  if (recipientType === 'host' || recipientType === 'fanout') {
+    const header = recipientType === 'host'
+      ? `\u{1F464} <b>You have a visitor</b>`
+      : `\u{1F464} <b>Visitor for ${data.host_name ? escapeHtml(data.host_name) : 'your directorate'}</b>`;
+    const status = recipientType === 'fanout' && data.host_availability && data.host_availability !== 'available'
+      ? `Host status: ${AVAILABILITY_LABELS[data.host_availability] ?? data.host_availability} — you're receiving this as cover`
+      : null;
     return [
-      `\u{1F464} <b>You have a visitor</b>`,
+      header,
       '',
-      `<b>${escapeHtml(data.first_name)} ${escapeHtml(data.last_name)}</b>${data.organisation ? ` (${escapeHtml(data.organisation)})` : ''}`,
+      nameLine,
+      party,
       data.purpose_raw ? `Purpose: ${escapeHtml(data.purpose_raw)}` : '',
       data.badge_code ? `Badge: <code>${escapeHtml(data.badge_code)}</code>` : '',
       '',
       `At Reception \u2022 ${time}`,
+      status,
       '',
       `\u2014 OHCS VMS`,
     ].filter(Boolean).join('\n');
@@ -57,7 +96,8 @@ function formatVisitorMessage(data: VisitNotifyData, recipientType: 'host' | 'di
   return [
     `\u{1F4CB} <b>Directorate Visitor</b>`,
     '',
-    `<b>${escapeHtml(data.first_name)} ${escapeHtml(data.last_name)}</b>${data.organisation ? ` (${escapeHtml(data.organisation)})` : ''}`,
+    nameLine,
+    party,
     data.purpose_raw ? `Purpose: ${escapeHtml(data.purpose_raw)}` : '',
     data.directorate_abbr ? `Directorate: ${escapeHtml(data.directorate_abbr)}` : '',
     '',
@@ -69,48 +109,102 @@ function formatVisitorMessage(data: VisitNotifyData, recipientType: 'host' | 'di
 
 export async function notifyOnCheckIn(data: VisitNotifyData, env: Env): Promise<void> {
   const isPersonal = data.purpose_category ? PERSONAL_CATEGORIES.includes(data.purpose_category) : false;
+  const refs: ArrivalMessageRef[] = [];
+
+  // Resolve the host's name + availability once — the fanout format and its
+  // "receiving this as cover" status line both need it.
+  if (data.host_officer_id) {
+    const host = await env.DB.prepare('SELECT name, availability_status FROM officers WHERE id = ?')
+      .bind(data.host_officer_id)
+      .first<{ name: string; availability_status: string | null }>();
+    data.host_name = host?.name ?? null;
+    data.host_availability = (host?.availability_status as VisitNotifyData['host_availability']) ?? null;
+  }
 
   // --- 1. ALWAYS notify the host staff member ---
-  await notifyHostStaff(data, env);
+  refs.push(...await notifyHostStaff(data, env));
 
   // --- 1b. Kiosk only: also alert the rest of the directorate's reception team ---
   if (data.check_in_source === 'kiosk' && data.directorate_id) {
     const rows = await env.DB.prepare('SELECT officer_id FROM directorate_receivers WHERE directorate_id = ?')
       .bind(data.directorate_id).all<{ officer_id: string }>();
     for (const officerId of selectFanoutReceivers(rows.results ?? [], data.host_officer_id)) {
-      await notifyOfficerOfVisit(officerId, data, env);
+      refs.push(...await notifyOfficerOfVisit(officerId, data, env, false, 'fanout'));
     }
   }
 
   // --- 2. If directorate business (NOT personal), notify Director/Deputy ---
   if (!isPersonal && data.directorate_id) {
-    await notifyDirectorateLeadership(data, env);
+    refs.push(...await notifyDirectorateLeadership(data, env));
   }
+
+  // Track the thread so checkout can rewrite every arrival message (visit-ended).
+  await recordArrivalMessages(env, data.visit_id, refs);
+}
+
+// Photo-or-text arrival send. Fetches the visitor's kiosk photo from R2 when
+// present; any failure (no photo, R2 miss, Telegram reject) falls back to a
+// plain text message. Returns the message_id + whether it was a photo so the
+// checkout close-out can edit the right field (caption vs text).
+async function sendArrivalAlert(env: Env, opts: {
+  chatId: string;
+  text: string;
+  replyMarkup?: InlineKeyboardMarkup;
+  photoKey?: string | null;
+}): Promise<{ messageId: number; photo: boolean } | null> {
+  if (!env.TELEGRAM_BOT_TOKEN) return null;
+  if (opts.photoKey) {
+    try {
+      const obj = await env.STORAGE.get(opts.photoKey);
+      if (obj) {
+        const r = await sendTelegramPhoto({
+          chatId: opts.chatId,
+          photo: await obj.arrayBuffer(),
+          caption: opts.text,
+          token: env.TELEGRAM_BOT_TOKEN,
+          replyMarkup: opts.replyMarkup,
+        });
+        await recordNotifyOutcome(env, 'telegram', r.ok);
+        if (r.ok) return r.messageId ? { messageId: r.messageId, photo: true } : null;
+      }
+    } catch { /* fall through to plain text */ }
+  }
+  const r = await sendTelegramMessageWithId({
+    chatId: opts.chatId, text: opts.text, token: env.TELEGRAM_BOT_TOKEN, replyMarkup: opts.replyMarkup,
+  });
+  await recordNotifyOutcome(env, 'telegram', r.ok);
+  return r.ok && r.messageId ? { messageId: r.messageId, photo: false } : null;
 }
 
 // Notify a specific officer of a visit (shared per-officer notify path).
 // withKeyboard adds the arrival-action inline keyboard — host messages only
-// (spec §1); receivers/leadership stay FYI.
-async function notifyOfficerOfVisit(officerId: string, data: VisitNotifyData, env: Env, withKeyboard = false): Promise<void> {
+// (spec §1); receivers/leadership stay FYI. Returns the sent Telegram message
+// refs for the visit-ended thread close-out.
+async function notifyOfficerOfVisit(
+  officerId: string,
+  data: VisitNotifyData,
+  env: Env,
+  withKeyboard = false,
+  format: 'host' | 'fanout' = 'host',
+): Promise<ArrivalMessageRef[]> {
+  const refs: ArrivalMessageRef[] = [];
   const officer = await env.DB.prepare(
     'SELECT id, name, email, telegram_chat_id FROM officers WHERE id = ?'
   ).bind(officerId).first<{
     id: string; name: string; email: string | null; telegram_chat_id: string | null;
   }>();
 
-  if (!officer) return;
+  if (!officer) return refs;
 
   const replyMarkup = withKeyboard ? buildArrivalKeyboard(data.visit_id) : undefined;
+  const text = formatVisitorMessage(data, format);
 
   // Telegram to officer directly
   if (officer.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
-    const ok = await sendTelegramMessage({
-      chatId: officer.telegram_chat_id,
-      text: formatVisitorMessage(data, 'host'),
-      token: env.TELEGRAM_BOT_TOKEN,
-      replyMarkup,
+    const sent = await sendArrivalAlert(env, {
+      chatId: officer.telegram_chat_id, text, replyMarkup, photoKey: data.photo_url,
     });
-    await recordNotifyOutcome(env, 'telegram', ok);
+    if (sent) refs.push({ c: officer.telegram_chat_id, m: sent.messageId, p: sent.photo ? 1 : 0 });
   }
 
   // Also check if this officer has a user account with Telegram linked via KV
@@ -121,27 +215,26 @@ async function notifyOfficerOfVisit(officerId: string, data: VisitNotifyData, en
   if (user) {
     const kvChatId = await env.KV.get(`telegram-user:${user.id}`);
     if (kvChatId && kvChatId !== officer.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
-      const ok = await sendTelegramMessage({
-        chatId: kvChatId,
-        text: formatVisitorMessage(data, 'host'),
-        token: env.TELEGRAM_BOT_TOKEN,
-        replyMarkup,
+      const sent = await sendArrivalAlert(env, {
+        chatId: kvChatId, text, replyMarkup, photoKey: data.photo_url,
       });
-      await recordNotifyOutcome(env, 'telegram', ok);
+      if (sent) refs.push({ c: kvChatId, m: sent.messageId, p: sent.photo ? 1 : 0 });
     }
 
     // In-app notification
     await createInAppNotification(user.id, data, env);
   }
+  return refs;
 }
 
 // Notify the specific staff member being visited
-async function notifyHostStaff(data: VisitNotifyData, env: Env): Promise<void> {
-  await notifyOfficerOfVisit(data.host_officer_id, data, env, true);
+async function notifyHostStaff(data: VisitNotifyData, env: Env): Promise<ArrivalMessageRef[]> {
+  return notifyOfficerOfVisit(data.host_officer_id, data, env, true);
 }
 
 // Notify Director and Deputy Director of the directorate
-async function notifyDirectorateLeadership(data: VisitNotifyData, env: Env): Promise<void> {
+async function notifyDirectorateLeadership(data: VisitNotifyData, env: Env): Promise<ArrivalMessageRef[]> {
+  const refs: ArrivalMessageRef[] = [];
   // Find directors/deputies in this directorate
   const leaders = await env.DB.prepare(
     `SELECT o.id, o.name, o.email, o.telegram_chat_id, o.title
@@ -163,12 +256,12 @@ async function notifyDirectorateLeadership(data: VisitNotifyData, env: Env): Pro
 
     // Telegram notification
     if (leader.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
-      const ok = await sendTelegramMessage({
+      const sent = await sendArrivalAlert(env, {
         chatId: leader.telegram_chat_id,
         text: formatVisitorMessage(data, 'director'),
-        token: env.TELEGRAM_BOT_TOKEN,
+        photoKey: data.photo_url,
       });
-      await recordNotifyOutcome(env, 'telegram', ok);
+      if (sent) refs.push({ c: leader.telegram_chat_id, m: sent.messageId, p: sent.photo ? 1 : 0 });
     }
 
     // Check KV for user-linked Telegram
@@ -179,18 +272,19 @@ async function notifyDirectorateLeadership(data: VisitNotifyData, env: Env): Pro
     if (user) {
       const kvChatId = await env.KV.get(`telegram-user:${user.id}`);
       if (kvChatId && kvChatId !== leader.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
-        const ok = await sendTelegramMessage({
+        const sent = await sendArrivalAlert(env, {
           chatId: kvChatId,
           text: formatVisitorMessage(data, 'director'),
-          token: env.TELEGRAM_BOT_TOKEN,
+          photoKey: data.photo_url,
         });
-        await recordNotifyOutcome(env, 'telegram', ok);
+        if (sent) refs.push({ c: kvChatId, m: sent.messageId, p: sent.photo ? 1 : 0 });
       }
 
       // In-app notification
       await createInAppNotification(user.id, data, env, `Directorate visitor for ${hostOfficer?.name ?? 'staff'}`);
     }
   }
+  return refs;
 }
 
 // Helper: find user account linked to an officer

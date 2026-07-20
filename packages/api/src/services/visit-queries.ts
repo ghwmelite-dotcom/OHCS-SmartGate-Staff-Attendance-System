@@ -1,6 +1,6 @@
 // Canonical joined SELECT for a single visit row with visitor + host + directorate.
 // Callers bind a single param: the visit id. Shared by the check-in and check-out services.
-export const SELECT_VISIT_WITH_JOINS = `SELECT v.*, vis.first_name, vis.last_name, vis.organisation,
+export const SELECT_VISIT_WITH_JOINS = `SELECT v.*, vis.first_name, vis.last_name, vis.organisation, vis.photo_url,
         COALESCE(o.name, v.host_name_manual) as host_name, d.abbreviation as directorate_abbr,
         d.name as directorate_name, d.floor, d.wing
  FROM visits v

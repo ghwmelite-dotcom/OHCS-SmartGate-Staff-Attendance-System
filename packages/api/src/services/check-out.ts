@@ -1,5 +1,6 @@
 import type { Env } from '../types';
 import { SELECT_VISIT_WITH_JOINS } from './visit-queries';
+import { closeArrivalThread } from './telegram';
 
 export type CheckOutOutcome =
   | { ok: true; visit: Record<string, unknown> }
@@ -25,6 +26,18 @@ export async function checkOutById(env: Env, visitId: string): Promise<CheckOutO
   if (res.meta?.changes === 0) return { ok: false, code: 'ALREADY_CHECKED_OUT' };
 
   const updated = await env.DB.prepare(SELECT_VISIT_WITH_JOINS).bind(visitId).first();
+
+  // Close the Telegram arrival thread — rewrites the host/fanout/leadership
+  // arrival messages to "Visit ended" and drops their keyboards. Best-effort;
+  // a Telegram hiccup must never fail a checkout.
+  if (updated) {
+    try {
+      await closeArrivalThread(env, updated as Parameters<typeof closeArrivalThread>[1]);
+    } catch (err) {
+      console.warn(JSON.stringify({ kind: 'notify', channel: 'telegram', ok: false, detail: 'closeArrivalThread threw', visit_id: visitId, error: String(err) }));
+    }
+  }
+
   return { ok: true, visit: (updated ?? {}) as Record<string, unknown> };
 }
 

@@ -144,6 +144,9 @@ export async function performCheckIn(
         directorate_id: params.directorate_id || null,
         directorate_abbr: (v.directorate_abbr as string | null) ?? null,
         check_in_source: params.check_in_source,
+        photo_url: (v.photo_url as string | null) ?? null,
+        party_size: (v.party_size as number | null) ?? null,
+        party_names: (v.party_names as string | null) ?? null,
       }, env)
     );
   }

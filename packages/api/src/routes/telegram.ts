@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import type { Env, SessionData } from '../types';
 import {
   generateLinkCode, consumeLinkCode, sendTelegramMessage, parseCommand,
-  answerCallbackQuery, editMessageText, parseArrivalCallback,
+  answerCallbackQuery, editMessageText, editMessageCaption, parseArrivalCallback,
   ARRIVAL_ACTIONS, type ArrivalAction,
   AVAILABILITY_STATUSES, type AvailabilityStatus,
 } from '../services/telegram';
@@ -15,7 +15,7 @@ interface ArrivalCallbackQuery {
   id: string;
   from?: { id: number };
   data?: string;
-  message?: { message_id: number; chat?: { id: number }; text?: string };
+  message?: { message_id: number; chat?: { id: number }; text?: string; caption?: string; photo?: unknown[] };
 }
 
 // Public — receives updates from Telegram
@@ -127,14 +127,26 @@ async function handleArrivalCallback(c: Ctx, cb: ArrivalCallbackQuery): Promise<
     const { label, confirm } = ARRIVAL_ACTIONS[action];
     await answer(confirm);
 
-    // Append the decision to the original message; omitting reply_markup drops the keyboard.
+    // Append the decision to the original message; omitting reply_markup drops
+    // the keyboard. Photo arrivals carry the text as a CAPTION — Telegram
+    // rejects editMessageText on media messages, so switch methods + source.
     const time = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    await editMessageText({
-      token: c.env.TELEGRAM_BOT_TOKEN,
-      chatId: String(msg.chat?.id ?? ''),
-      messageId: msg.message_id,
-      text: `${msg.text ?? ''}\n\n✅ ${label} — ${time}`,
-    });
+    const decided = `${(msg.text ?? msg.caption ?? '')}\n\n✅ ${label} — ${time}`;
+    if (Array.isArray(msg.photo)) {
+      await editMessageCaption({
+        token: c.env.TELEGRAM_BOT_TOKEN,
+        chatId: String(msg.chat?.id ?? ''),
+        messageId: msg.message_id,
+        caption: decided,
+      });
+    } else {
+      await editMessageText({
+        token: c.env.TELEGRAM_BOT_TOKEN,
+        chatId: String(msg.chat?.id ?? ''),
+        messageId: msg.message_id,
+        text: decided,
+      });
+    }
 
     await recordAudit(c.env, systemActor('telegram-webhook', c.req.header('cf-connecting-ip') ?? null), {
       action: 'visit.host_response', entityType: 'visit', entityId: visitId,
