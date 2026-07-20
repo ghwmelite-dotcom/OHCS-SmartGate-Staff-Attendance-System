@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/stores/auth';
 import { api } from '@/lib/api';
+import { roleLabel } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { UserCircle, Phone, Mail, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
 
@@ -126,7 +127,7 @@ export function ProfilePage() {
                   {user.staff_id}
                 </span>
               )}
-              <span className="text-[12px] font-semibold text-muted uppercase tracking-wide">{user.role}</span>
+              <span className="text-[12px] font-semibold text-muted uppercase tracking-wide">{roleLabel(user.role, user.display_role)}</span>
             </div>
           </div>
         </div>

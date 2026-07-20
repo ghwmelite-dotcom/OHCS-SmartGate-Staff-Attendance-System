@@ -37,6 +37,9 @@
   --color-info-light: #E0ECF8;
   --color-danger: #9A1B1B;
   --color-danger-light: #FDEAEA;
+  /* Display-tier role accent (Client Service badge) — violet family, distinct
+     from the green/gold/red/blue taken by the six access roles. */
+  --color-service: #7C3AED;
 
   --font-display: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --font-body: 'DM Sans', system-ui, -apple-system, sans-serif;

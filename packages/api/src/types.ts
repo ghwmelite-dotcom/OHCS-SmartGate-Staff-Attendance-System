@@ -57,6 +57,8 @@ export interface User {
   email: string;
   staff_id: string | null;
   role: Role;
+  // UI-facing role label (e.g. 'client_service' over role='receptionist'); NULL → show role.
+  display_role: string | null;
   grade: string | null;
   is_active: 0 | 1;
   directorate_id: string | null;

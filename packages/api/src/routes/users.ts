@@ -7,7 +7,7 @@ import { hashPin, bumpSessionEpoch } from '../services/auth';
 import { sendWelcomeEmail } from '../services/email';
 import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
 
-const AUDITED_USER_FIELDS = ['name', 'email', 'staff_id', 'role', 'grade', 'directorate_id', 'is_active', 'phone'];
+const AUDITED_USER_FIELDS = ['name', 'email', 'staff_id', 'role', 'display_role', 'grade', 'directorate_id', 'is_active', 'phone'];
 
 export const userRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -22,7 +22,7 @@ userRoutes.get('/', async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
 
   const results = await c.env.DB.prepare(
-    `SELECT u.id, u.name, u.email, u.staff_id, u.phone, u.role, u.grade, u.is_active, u.last_login_at, u.created_at,
+    `SELECT u.id, u.name, u.email, u.staff_id, u.phone, u.role, u.display_role, u.grade, u.is_active, u.last_login_at, u.created_at,
             u.user_type, u.nss_number, u.nss_start_date, u.nss_end_date,
             d.abbreviation as directorate_abbr
      FROM users u LEFT JOIN directorates d ON u.directorate_id = d.id
@@ -49,7 +49,7 @@ userRoutes.get('/:id', async (c) => {
 
   const id = c.req.param('id');
   const user = await c.env.DB.prepare(
-    `SELECT id, name, email, staff_id, role, is_active, last_login_at, created_at, updated_at,
+    `SELECT id, name, email, staff_id, role, display_role, is_active, last_login_at, created_at, updated_at,
             user_type, nss_number, nss_start_date, nss_end_date
      FROM users WHERE id = ?`
   ).bind(id).first();
@@ -65,6 +65,8 @@ const createUserSchema = z.object({
   staff_id: z.string().min(1).max(20).trim(),
   pin: z.string().length(4).regex(/^\d{4}$/, 'PIN must be 4 digits'),
   role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']),
+  // Display-tier role label — rides on `role` (client_service ⇒ role='admin').
+  display_role: z.enum(['client_service']).nullish(),
   grade: z.string().max(100).optional().or(z.literal('')),
   phone: z.string().max(20).optional().or(z.literal('')),
   directorate_code: z.string().max(20).optional().or(z.literal('')),
@@ -94,11 +96,11 @@ userRoutes.post('/', zValidator('json', createUserSchema), async (c) => {
   }
 
   await c.env.DB.prepare(
-    `INSERT INTO users (id, name, email, staff_id, pin_hash, role, grade, directorate_id, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(id, body.name, body.email, body.staff_id.toUpperCase(), pinHash, body.role, body.grade || null, directorateId, body.phone || null).run();
+    `INSERT INTO users (id, name, email, staff_id, pin_hash, role, display_role, grade, directorate_id, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(id, body.name, body.email, body.staff_id.toUpperCase(), pinHash, body.role, body.display_role ?? null, body.grade || null, directorateId, body.phone || null).run();
 
   const user = await c.env.DB.prepare(
-    `SELECT u.id, u.name, u.email, u.staff_id, u.role, u.grade, u.is_active, u.created_at,
+    `SELECT u.id, u.name, u.email, u.staff_id, u.role, u.display_role, u.grade, u.is_active, u.created_at,
             d.abbreviation as directorate_abbr
      FROM users u LEFT JOIN directorates d ON u.directorate_id = d.id WHERE u.id = ?`
   ).bind(id).first();
@@ -129,6 +131,8 @@ const updateUserSchema = z.object({
   staff_id: z.string().min(1).max(20).trim().optional(),
   pin: z.string().length(4).regex(/^\d{4}$/).optional(),
   role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']).optional(),
+  // NULL clears the display label (falls back to the plain role label).
+  display_role: z.enum(['client_service']).nullable().optional(),
   grade: z.string().max(100).optional().or(z.literal('')),
   phone: z.string().max(20).optional().or(z.literal('')),
   directorate_code: z.string().max(20).optional().or(z.literal('')),
@@ -142,7 +146,7 @@ userRoutes.put('/:id', zValidator('json', updateUserSchema), async (c) => {
   const body = c.req.valid('json');
 
   const existing = await c.env.DB.prepare(
-    'SELECT id, user_type, name, email, staff_id, role, grade, directorate_id, is_active FROM users WHERE id = ?'
+    'SELECT id, user_type, name, email, staff_id, role, display_role, grade, directorate_id, is_active FROM users WHERE id = ?'
   ).bind(id).first<Record<string, unknown> & { id: string; user_type: string }>();
   if (!existing) return notFound(c, 'User');
 
@@ -163,6 +167,7 @@ userRoutes.put('/:id', zValidator('json', updateUserSchema), async (c) => {
   if (body.email !== undefined) { fields.push('email = ?'); values.push(body.email); }
   if (body.staff_id !== undefined) { fields.push('staff_id = ?'); values.push(body.staff_id.toUpperCase()); }
   if (body.role !== undefined) { fields.push('role = ?'); values.push(body.role); }
+  if (body.display_role !== undefined) { fields.push('display_role = ?'); values.push(body.display_role); }
   if (body.grade !== undefined) { fields.push('grade = ?'); values.push(body.grade || null); }
   if (body.phone !== undefined) { fields.push('phone = ?'); values.push(body.phone || null); }
   if (body.directorate_code !== undefined) {
@@ -189,13 +194,13 @@ userRoutes.put('/:id', zValidator('json', updateUserSchema), async (c) => {
   }
 
   const user = await c.env.DB.prepare(
-    `SELECT id, name, email, staff_id, role, is_active, last_login_at, created_at, updated_at,
+    `SELECT id, name, email, staff_id, role, display_role, is_active, last_login_at, created_at, updated_at,
             user_type, nss_number, nss_start_date, nss_end_date
      FROM users WHERE id = ?`
   ).bind(id).first();
 
   const after = await c.env.DB.prepare(
-    'SELECT name, email, staff_id, role, grade, directorate_id, is_active FROM users WHERE id = ?'
+    'SELECT name, email, staff_id, role, display_role, grade, directorate_id, is_active FROM users WHERE id = ?'
   ).bind(id).first<Record<string, unknown>>();
   const changes = diffRecords(existing, after, AUDITED_USER_FIELDS);
   if (body.pin !== undefined) changes.pin = { from: '[redacted]', to: '[redacted]' };

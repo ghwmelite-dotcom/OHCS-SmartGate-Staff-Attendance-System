@@ -32,6 +32,7 @@ interface UserRecord {
   staff_id: string | null;
   phone: string | null;
   role: string;
+  display_role?: string | null;
   grade: string | null;
   directorate_abbr: string | null;
   is_active: number;
@@ -43,6 +44,8 @@ interface UserRecord {
 const ROLES = [
   { value: 'superadmin', label: 'Super Admin', color: 'bg-secondary/10 text-secondary' },
   { value: 'admin', label: 'Admin', color: 'bg-accent/15 text-accent-warm' },
+  // Display-tier pseudo-role: stored as role='admin' + display_role='client_service'.
+  { value: 'client_service', label: 'Client Service', color: 'bg-service/10 text-service' },
   { value: 'receptionist', label: 'Receptionist', color: 'bg-primary/10 text-primary' },
   { value: 'it', label: 'IT Support', color: 'bg-info/10 text-info' },
   { value: 'director', label: 'Director', color: 'bg-accent/10 text-accent-warm' },
@@ -68,7 +71,7 @@ const createUserSchema = z.object({
   email: z.string().email('Invalid email').max(255),
   staff_id: z.string().min(1, 'Staff ID is required').max(20),
   pin: z.string().length(4, 'PIN must be 4 digits').regex(/^\d{4}$/, 'PIN must be 4 digits'),
-  role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']),
+  role: z.enum(['superadmin', 'admin', 'client_service', 'receptionist', 'it', 'director', 'staff']),
   grade: z.string().max(100).optional(),
   phone: z.string().max(20).optional(),
   directorate_code: z.string().max(20).optional(),
@@ -79,13 +82,23 @@ const editUserSchema = z.object({
   name: z.string().min(1).max(100),
   email: z.string().email().max(255),
   staff_id: z.string().min(1).max(20),
-  role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']),
+  role: z.enum(['superadmin', 'admin', 'client_service', 'receptionist', 'it', 'director', 'staff']),
   grade: z.string().max(100).optional(),
   phone: z.string().max(20).optional(),
   directorate_code: z.string().max(20).optional(),
   pin: z.string().length(4).regex(/^\d{4}$/).or(z.literal('')).optional(),
 });
 type EditUserForm = z.infer<typeof editUserSchema>;
+
+// The display-tier pseudo-role maps to its access role at the API boundary:
+// client_service ⇒ role='admin' + display_role='client_service'; any other
+// selection clears the display label (NULL).
+function toUserPayload<T extends { role: string }>(data: T) {
+  const { role, ...rest } = data;
+  return role === 'client_service'
+    ? { ...rest, role: 'admin', display_role: 'client_service' }
+    : { ...rest, role, display_role: null };
+}
 
 type AdminTab = 'users' | 'org' | 'attendance' | 'nss' | 'import' | 'audit' | 'appointments';
 
@@ -400,7 +413,7 @@ function UsersTab() {
               </thead>
               <tbody className="divide-y divide-border">
                 {filteredUsers.map((user) => {
-                  const roleCfg = ROLES.find(r => r.value === user.role);
+                  const roleCfg = ROLES.find(r => r.value === (user.display_role ?? user.role));
                   return (
                     <tr key={user.id} className="hover:bg-background-warm/50 transition-colors">
                       <td className="px-6 py-4">
@@ -537,7 +550,7 @@ function CreateUserModal({ onClose, onSuccess }: { onClose: () => void; onSucces
   });
 
   const mutation = useMutation({
-    mutationFn: (data: CreateUserForm) => api.post('/users', data),
+    mutationFn: (data: CreateUserForm) => api.post('/users', toUserPayload(data)),
     onSuccess,
   });
 
@@ -626,7 +639,7 @@ function EditUserModal({ user, onClose, onSuccess }: { user: UserRecord; onClose
       name: user.name,
       email: user.email,
       staff_id: user.staff_id ?? '',
-      role: user.role as EditUserForm['role'],
+      role: (user.display_role ?? user.role) as EditUserForm['role'],
       grade: user.grade ?? '',
       phone: user.phone ?? '',
       directorate_code: user.directorate_abbr ?? '',
@@ -636,7 +649,7 @@ function EditUserModal({ user, onClose, onSuccess }: { user: UserRecord; onClose
 
   const mutation = useMutation({
     mutationFn: (data: EditUserForm) => {
-      const payload: Record<string, unknown> = { ...data };
+      const payload: Record<string, unknown> = { ...toUserPayload(data) };
       if (!data.pin) delete payload.pin;
       return api.put(`/users/${user.id}`, payload);
     },

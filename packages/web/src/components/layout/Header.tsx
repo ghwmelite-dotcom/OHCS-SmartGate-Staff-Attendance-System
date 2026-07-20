@@ -4,6 +4,7 @@ import { formatDate } from '@/lib/utils';
 import { NotificationBell } from '../NotificationBell';
 import { SettingsMenu } from '@/components/SettingsMenu';
 import { MapPin, Sun, Moon, Monitor, UserPlus, HelpCircle } from 'lucide-react';
+import { roleLabel } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 
 export function Header({ onOpenWizard }: { onOpenWizard: () => void }) {
@@ -98,7 +99,7 @@ export function Header({ onOpenWizard }: { onOpenWizard: () => void }) {
         <div className="hidden md:flex items-center gap-3">
           <div className="text-right">
             <p className="text-sm font-semibold text-foreground">{user?.name}</p>
-            <p className="text-[11px] text-accent font-medium uppercase tracking-wide">{user?.role}</p>
+            <p className="text-[11px] text-accent font-medium uppercase tracking-wide">{roleLabel(user?.role, user?.display_role)}</p>
           </div>
         </div>
         <div className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center text-sm font-bold shadow-sm">

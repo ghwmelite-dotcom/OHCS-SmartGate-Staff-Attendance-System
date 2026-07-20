@@ -311,10 +311,10 @@ authRoutes.get('/me', async (c) => {
   // Read name/email/role fresh from DB so edits made in the admin portal
   // propagate without requiring the user to log out and back in.
   const row = await c.env.DB.prepare(
-    'SELECT name, email, staff_id, phone, role, pin_acknowledged, is_active FROM users WHERE id = ?'
+    'SELECT name, email, staff_id, phone, role, display_role, pin_acknowledged, is_active FROM users WHERE id = ?'
   )
     .bind(session.userId)
-    .first<{ name: string; email: string; staff_id: string | null; phone: string | null; role: string; pin_acknowledged: number; is_active: number }>();
+    .first<{ name: string; email: string; staff_id: string | null; phone: string | null; role: string; display_role: string | null; pin_acknowledged: number; is_active: number }>();
 
   if (!row || row.is_active !== 1) {
     return error(c, 'UNAUTHORIZED', 'Account disabled or deleted', 401);
@@ -328,6 +328,7 @@ authRoutes.get('/me', async (c) => {
       staff_id: row.staff_id,
       phone: row.phone,
       role: row.role,
+      display_role: row.display_role,
       pin_acknowledged: row.pin_acknowledged === 1,
     },
   });

@@ -9,6 +9,7 @@ interface User {
   staff_id: string | null;
   phone: string | null;
   role: string;
+  display_role?: string | null;
   pin_acknowledged?: boolean;
 }
 

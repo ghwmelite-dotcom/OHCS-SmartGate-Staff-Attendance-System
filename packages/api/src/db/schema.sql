@@ -25,6 +25,12 @@ CREATE TABLE IF NOT EXISTS users (
     -- Do NOT rebuild the table on prod to add it; fresh-init keeps the CHECK.
     pin_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(pin_acknowledged IN (0, 1)),
     role             TEXT NOT NULL DEFAULT 'staff',
+    -- UI-facing role label (added by migration-users-display-role.sql). Access keys
+    -- off `role`; display_role only re-labels it ('client_service' rides on
+    -- role='receptionist'). Exists because prod users.role has a CHECK permitting
+    -- only the six original roles and D1 FK enforcement blocks the table rebuild
+    -- dropping it would require. NULL → show the plain role label.
+    display_role     TEXT,
     grade            TEXT,
     is_active        INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
     -- Session revocation epoch (added by migration-session-epoch.sql). Bumped on
