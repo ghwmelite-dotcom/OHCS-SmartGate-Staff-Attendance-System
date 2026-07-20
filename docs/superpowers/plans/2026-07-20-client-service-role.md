@@ -20,7 +20,7 @@ Date: 2026-07-20 · Spec: `docs/superpowers/specs/2026-07-20-client-service-role
 7. **Web AdminPage** — `UserRecord.display_role?`; `ROLES` gains client_service
    (`bg-service/10 text-service`); badge lookup `display_role ?? role`; form
    zod role enums gain `'client_service'`; create mutation maps
-   client_service → `{role:'admin', display_role:'client_service'}`,
+   client_service → `{role:'receptionist', display_role:'client_service'}`,
    anything else → `display_role: null`; edit defaultValues map
    `user.display_role ?? user.role` into the select.
 8. **Web Header/ProfilePage** — render `roleLabel(user.role, user.display_role)`;

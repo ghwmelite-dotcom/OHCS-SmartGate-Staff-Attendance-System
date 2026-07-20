@@ -5,8 +5,8 @@ Date: 2026-07-20 · Status: implemented (this doc records the shipped design)
 ## Problem
 
 OHCS wants a **Client Service** role in the VMS so Client Service Unit staff can be
-provisioned with admin-level operational access, visibly badged as "Client
-Service" rather than "Admin".
+provisioned with reception-level front-desk access, visibly badged as "Client
+Service" rather than "Receptionist".
 
 ## Hard constraint: prod `users.role` CHECK
 
@@ -21,22 +21,21 @@ referenced tables.
 ## Decision: display-tier role (no new DB role value)
 
 Add `users.display_role TEXT` (nullable, additive). **Client Service is
-`role='admin'` + `display_role='client_service'`** — admin parity by
-construction (every route guard, nav gate, wizard step and recipient list keyed
-on `admin` applies automatically: analytics, NSS/intern management, appointments
-admin, attendance views, the AdminPage NSS + Appointments tabs, plus all
-reception-level functions), with a distinct UI identity. Only superadmin-only
-powers (user management, settings, migrations, directorates, telegram admin,
-maintenance, audit) stay out of reach.
+`role='receptionist'` + `display_role='client_service'`** — reception parity by
+construction (every route guard, nav gate, wizard step, evacuation right and
+notification recipient list keyed on `receptionist` applies automatically:
+dashboard, visitor check-in/out, visit log, appointments, evacuation roll),
+with a distinct UI identity. Admin-and-above surfaces (analytics, NSS/intern
+management, attendance views, the AdminPage tabs) stay out of reach.
 
 The mapping is invisible in the admin UI: the System Role dropdown shows
 "Client Service" as a first-class option; selecting it stores
-`role='admin', display_role='client_service'`. Any other selection clears
+`role='receptionist', display_role='client_service'`. Any other selection clears
 `display_role` (NULL). Badges, the header and the profile page render the
 display role when set.
 
 If a future requirement needs Client Service access to *diverge* from
-admin, that requires the prod CHECK rebuild conversation — out of scope
+receptionist, that requires the prod CHECK rebuild conversation — out of scope
 here by convention.
 
 ## Surface changes

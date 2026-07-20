@@ -44,7 +44,7 @@ interface UserRecord {
 const ROLES = [
   { value: 'superadmin', label: 'Super Admin', color: 'bg-secondary/10 text-secondary' },
   { value: 'admin', label: 'Admin', color: 'bg-accent/15 text-accent-warm' },
-  // Display-tier pseudo-role: stored as role='admin' + display_role='client_service'.
+  // Display-tier pseudo-role: stored as role='receptionist' + display_role='client_service'.
   { value: 'client_service', label: 'Client Service', color: 'bg-service/10 text-service' },
   { value: 'receptionist', label: 'Receptionist', color: 'bg-primary/10 text-primary' },
   { value: 'it', label: 'IT Support', color: 'bg-info/10 text-info' },
@@ -91,12 +91,12 @@ const editUserSchema = z.object({
 type EditUserForm = z.infer<typeof editUserSchema>;
 
 // The display-tier pseudo-role maps to its access role at the API boundary:
-// client_service ⇒ role='admin' + display_role='client_service'; any other
-// selection clears the display label (NULL).
+// client_service ⇒ role='receptionist' + display_role='client_service'; any
+// other selection clears the display label (NULL).
 function toUserPayload<T extends { role: string }>(data: T) {
   const { role, ...rest } = data;
   return role === 'client_service'
-    ? { ...rest, role: 'admin', display_role: 'client_service' }
+    ? { ...rest, role: 'receptionist', display_role: 'client_service' }
     : { ...rest, role, display_role: null };
 }
 
