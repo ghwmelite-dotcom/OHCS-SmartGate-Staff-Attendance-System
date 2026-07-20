@@ -632,11 +632,19 @@ export function KioskPage() {
         {mode === 'face' && (
           <div className="mt-6 space-y-4">
             <div>
-              <h2 className="text-lg font-semibold text-foreground">Take Your Photo</h2>
-              <p className="text-sm text-muted mt-0.5">Look at the camera and capture a clear photo</p>
+              <h2 className="text-lg font-semibold text-foreground">
+                {returningVisitor?.photo_url ? 'Your Photo Is on File' : 'Take Your Photo'}
+              </h2>
+              <p className="text-sm text-muted mt-0.5">
+                {returningVisitor?.photo_url
+                  ? 'Continue with the photo we have, or update it below.'
+                  : 'Look at the camera and capture a clear photo'}
+              </p>
             </div>
             <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
-              <PhotoCapture title="Take Your Photo" facingMode="user" required onCapture={handleFaceCapture} onSkip={() => finishCheckIn()} />
+              {/* Returning visitors see their stored photo (Update/Continue) —
+                  a forced retake would overwrite the reference photo on file. */}
+              <PhotoCapture title="Take Your Photo" facingMode="user" required existingPhotoUrl={returningVisitor?.photo_url ?? null} onCapture={handleFaceCapture} onSkip={() => finishCheckIn()} />
             </div>
           </div>
         )}
