@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { formatVisitorMessage, partyLine } from './notifier';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { formatVisitorMessage, partyLine, sendArrivalAlert, arrivalPhotoKey } from './notifier';
+import type { Env } from '../types';
+
+afterEach(() => vi.unstubAllGlobals());
 
 const BASE = {
   visit_id: 'v1',
@@ -70,5 +73,52 @@ describe('formatVisitorMessage', () => {
     expect(msg).toContain('Directorate Visitor');
     expect(msg).toContain('Directorate: CSU');
     expect(msg).not.toContain('Host status');
+  });
+});
+
+
+function arrivalEnv(storageGet: (key: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> } | null>) {
+  const store = new Map<string, string>();
+  return {
+    TELEGRAM_BOT_TOKEN: 't',
+    KV: {
+      get: async (k: string) => store.get(k) ?? null,
+      put: async (k: string, v: string) => { store.set(k, v); },
+      delete: async (k: string) => { store.delete(k); },
+    },
+    STORAGE: { get: storageGet },
+  } as unknown as Env;
+}
+
+const okJson = (messageId: number) => ({ ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: messageId } }) });
+
+describe('arrivalPhotoKey', () => {
+  it('derives the object key from the visitor id, never from photo_url', () => {
+    expect(arrivalPhotoKey({ ...BASE, visitor_id: 'v123', photo_url: '/api/kiosk/visitors/v123/photo' }))
+      .toBe('photos/visitors/v123.jpg');
+    expect(arrivalPhotoKey({ ...BASE, visitor_id: 'v123', photo_url: null })).toBeNull();
+    expect(arrivalPhotoKey({ ...BASE, visitor_id: null, photo_url: '/api/kiosk/visitors/v123/photo' })).toBeNull();
+  });
+});
+
+describe('sendArrivalAlert', () => {
+  it('fetches the R2 object by key and sends a photo message', async () => {
+    const keys: string[] = [];
+    const fetchMock = vi.fn(async () => okJson(5));
+    vi.stubGlobal('fetch', fetchMock);
+    const env = arrivalEnv(async (key) => { keys.push(key); return { arrayBuffer: async () => new ArrayBuffer(8) }; });
+    const r = await sendArrivalAlert(env, { chatId: 'c1', text: 'hello', photoKey: 'photos/visitors/v123.jpg' });
+    expect(r).toEqual({ messageId: 5, photo: true });
+    expect(keys).toEqual(['photos/visitors/v123.jpg']);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/sendPhoto');
+  });
+
+  it('falls back to plain text when the object is missing', async () => {
+    const fetchMock = vi.fn(async () => okJson(6));
+    vi.stubGlobal('fetch', fetchMock);
+    const env = arrivalEnv(async () => null);
+    const r = await sendArrivalAlert(env, { chatId: 'c1', text: 'hello', photoKey: 'photos/visitors/none.jpg' });
+    expect(r).toEqual({ messageId: 6, photo: false });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/sendMessage');
   });
 });

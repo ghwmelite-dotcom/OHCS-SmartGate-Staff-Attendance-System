@@ -8,8 +8,10 @@ options menu. No DB migration — state rides in KV.
 ## 1. Visitor photo in the arrival message (`sendPhoto`)
 
 Hosts hear a name today; they should *see the face* — recognizability at the
-lift and a spoof check. `visitors.photo_url` (R2 key, `env.STORAGE`) is fetched
-by the arrival path and multipart-uploaded via Telegram `sendPhoto`
+lift and a spoof check. `visitors.photo_url` holds the photo's **public URL**
+(used as an `<img>` src), so the R2 object key is derived from the visitor id
+(`visitorPhotoKey(visitor_id)` — the same construction the upload and serve
+paths share) and multipart-uploaded via Telegram `sendPhoto`
 (`photo` binary field, `caption` = the existing HTML text ≤1024 chars,
 `reply_markup` carries the action keyboard). Photo on host, fanout and
 leadership messages; any failure (no photo, R2 miss, Telegram reject) falls

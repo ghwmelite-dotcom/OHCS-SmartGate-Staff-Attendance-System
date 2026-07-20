@@ -4,6 +4,7 @@ import { sendWebPush, type PushTarget } from '../lib/webpush';
 import { escapeHtml } from '../lib/html';
 import { devError } from '../lib/log';
 import { recordNotifyOutcome, isDeadPushStatus } from '../lib/notify-metrics';
+import { visitorPhotoKey } from '../lib/photo-key';
 
 const PERSONAL_CATEGORIES = ['personal_visit'];
 
@@ -22,7 +23,9 @@ interface VisitNotifyData {
   directorate_id: string | null;
   directorate_abbr: string | null;
   check_in_source?: 'staff' | 'kiosk';
-  /** R2 key of the visitor's kiosk photo — arrival alerts send it when present. */
+  /** Visitor row id — the photo object key is derived from it (visitorPhotoKey). */
+  visitor_id?: string | null;
+  /** Public photo URL — presence flag only; NOT an R2 key. */
   photo_url?: string | null;
   /** Delegation party: total headcount INCLUDING the lead (NULL ⇒ solo). */
   party_size?: number | null;
@@ -142,11 +145,18 @@ export async function notifyOnCheckIn(data: VisitNotifyData, env: Env): Promise<
   await recordArrivalMessages(env, data.visit_id, refs);
 }
 
+// visitors.photo_url is the PUBLIC URL (used as an <img> src), not the R2
+// object key — the key is always derived from the visitor id, the same
+// construction the upload and serve paths share (lib/photo-key).
+export function arrivalPhotoKey(data: VisitNotifyData): string | null {
+  return data.photo_url && data.visitor_id ? visitorPhotoKey(data.visitor_id) : null;
+}
+
 // Photo-or-text arrival send. Fetches the visitor's kiosk photo from R2 when
 // present; any failure (no photo, R2 miss, Telegram reject) falls back to a
 // plain text message. Returns the message_id + whether it was a photo so the
 // checkout close-out can edit the right field (caption vs text).
-async function sendArrivalAlert(env: Env, opts: {
+export async function sendArrivalAlert(env: Env, opts: {
   chatId: string;
   text: string;
   replyMarkup?: InlineKeyboardMarkup;
@@ -202,7 +212,7 @@ async function notifyOfficerOfVisit(
   // Telegram to officer directly
   if (officer.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
     const sent = await sendArrivalAlert(env, {
-      chatId: officer.telegram_chat_id, text, replyMarkup, photoKey: data.photo_url,
+      chatId: officer.telegram_chat_id, text, replyMarkup, photoKey: arrivalPhotoKey(data),
     });
     if (sent) refs.push({ c: officer.telegram_chat_id, m: sent.messageId, p: sent.photo ? 1 : 0 });
   }
@@ -216,7 +226,7 @@ async function notifyOfficerOfVisit(
     const kvChatId = await env.KV.get(`telegram-user:${user.id}`);
     if (kvChatId && kvChatId !== officer.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
       const sent = await sendArrivalAlert(env, {
-        chatId: kvChatId, text, replyMarkup, photoKey: data.photo_url,
+        chatId: kvChatId, text, replyMarkup, photoKey: arrivalPhotoKey(data),
       });
       if (sent) refs.push({ c: kvChatId, m: sent.messageId, p: sent.photo ? 1 : 0 });
     }
@@ -259,7 +269,7 @@ async function notifyDirectorateLeadership(data: VisitNotifyData, env: Env): Pro
       const sent = await sendArrivalAlert(env, {
         chatId: leader.telegram_chat_id,
         text: formatVisitorMessage(data, 'director'),
-        photoKey: data.photo_url,
+        photoKey: arrivalPhotoKey(data),
       });
       if (sent) refs.push({ c: leader.telegram_chat_id, m: sent.messageId, p: sent.photo ? 1 : 0 });
     }
@@ -275,7 +285,7 @@ async function notifyDirectorateLeadership(data: VisitNotifyData, env: Env): Pro
         const sent = await sendArrivalAlert(env, {
           chatId: kvChatId,
           text: formatVisitorMessage(data, 'director'),
-          photoKey: data.photo_url,
+          photoKey: arrivalPhotoKey(data),
         });
         if (sent) refs.push({ c: kvChatId, m: sent.messageId, p: sent.photo ? 1 : 0 });
       }
