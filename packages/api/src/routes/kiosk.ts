@@ -4,12 +4,14 @@ import { zValidator } from '@hono/zod-validator';
 import type { Env } from '../types';
 import { success, created, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
-import { KioskCreateVisitorSchema, KioskCheckInSchema, KioskCheckOutSchema, KioskCheckOutByPinSchema } from '../lib/validation';
+import { KioskCreateVisitorSchema, KioskCheckInSchema, KioskCheckOutSchema, KioskCheckOutByPinSchema, KioskSurveySchema } from '../lib/validation';
 import { visitorPhotoKey, visitorIdPhotoKey, visitorIdPhotoBackKey } from '../lib/photo-key';
 import { uploadVisitorPhoto } from '../lib/photo-upload';
 import { isJpeg } from '../lib/image-magic';
 import { performCheckIn } from '../services/check-in';
 import { checkOutByBadgeCode, checkOutByPin } from '../services/check-out';
+import { mintSurveyToken, consumeSurveyToken } from '../services/survey-token';
+import { notifyLowSurveyRating } from '../services/notifier';
 import { checkIdDocument } from '../services/id-check';
 import { isBlockingVerdict, mostConservativeVerdict, type IdCheckVerdict } from '../lib/id-check';
 import { getAppSettings } from '../services/settings';
@@ -295,7 +297,10 @@ kioskRoutes.post('/check-out', zValidator('json', KioskCheckOutSchema), async (c
     if (result.code === 'NOT_FOUND') return notFound(c, 'Visit');
     return error(c, 'ALREADY_CHECKED_OUT', 'This visit has already ended', 400);
   }
-  return success(c, result.visit);
+  // Mint a single-use survey token so the kiosk can offer the post-checkout
+  // satisfaction survey (spec: 2026-07-20-visitor-satisfaction-survey-design).
+  const surveyToken = await mintSurveyToken(c.env, String(result.visit.id));
+  return success(c, { ...result.visit, survey_token: surveyToken });
 });
 
 // Check out by 6-digit PIN (for visitors without a smartphone to scan their badge).
@@ -307,5 +312,52 @@ kioskRoutes.post('/check-out-by-pin', zValidator('json', KioskCheckOutByPinSchem
     if (result.code === 'NOT_FOUND') return error(c, 'PIN_NOT_FOUND', 'No active check-in found for that PIN. Check the number and try again.', 404);
     return error(c, 'ALREADY_CHECKED_OUT', 'This visit has already ended', 400);
   }
-  return success(c, result.visit);
+  const surveyToken = await mintSurveyToken(c.env, String(result.visit.id));
+  return success(c, { ...result.visit, survey_token: surveyToken });
+});
+
+// Submit a post-checkout satisfaction rating. Token-gated: the single-use
+// token minted at checkout is the only authorization, so the endpoint can stay
+// public without being writable by the open internet. Failures are quiet by
+// design — a leaving visitor should never see an error here.
+kioskRoutes.post('/survey', zValidator('json', KioskSurveySchema), async (c) => {
+  if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
+  const body = c.req.valid('json');
+
+  const visitId = await consumeSurveyToken(c.env, body.token);
+  if (!visitId) return error(c, 'SURVEY_TOKEN_INVALID', 'This survey has expired.', 400);
+
+  const visit = await c.env.DB.prepare(
+    `SELECT id, badge_code, directorate_id, host_officer_id, check_in_at, host_response_at
+     FROM visits WHERE id = ?`
+  ).bind(visitId).first<{
+    id: string; badge_code: string | null; directorate_id: string | null;
+    host_officer_id: string | null; check_in_at: string; host_response_at: string | null;
+  }>();
+  if (!visit) return error(c, 'SURVEY_TOKEN_INVALID', 'This survey has expired.', 400);
+
+  // Wait = check-in → first host response (Telegram action). Null when the
+  // host never responded through the bot.
+  const waitMinutes = visit.host_response_at
+    ? Math.max(0, Math.round((Date.parse(visit.host_response_at) - Date.parse(visit.check_in_at)) / 60000))
+    : null;
+
+  const ins = await c.env.DB.prepare(
+    `INSERT OR IGNORE INTO visitor_surveys
+       (visit_id, badge_code, rating, comment, wait_minutes, directorate_id, host_officer_id, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'kiosk')`
+  ).bind(
+    visitId, visit.badge_code, body.rating, body.comment?.trim() || null,
+    waitMinutes, visit.directorate_id, visit.host_officer_id,
+  ).run();
+
+  if (!ins.meta?.changes) return error(c, 'SURVEY_EXISTS', 'Feedback was already submitted for this visit.', 409);
+
+  if (body.rating <= 2) {
+    c.executionCtx.waitUntil(
+      notifyLowSurveyRating(c.env, { visitId, rating: body.rating, comment: body.comment ?? null })
+    );
+  }
+
+  return created(c, { ok: true });
 });

@@ -56,6 +56,7 @@ import officersAvailability from './migration-officers-availability.sql';
 import visitsParty from './migration-visits-party.sql';
 import visitorsFlag from './migration-visitors-flag.sql';
 import usersDisplayRole from './migration-users-display-role.sql';
+import visitorSurveys from './migration-visitor-surveys.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -116,6 +117,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-visits-party.sql', sql: visitsParty },
   { filename: 'migration-visitors-flag.sql', sql: visitorsFlag },
   { filename: 'migration-users-display-role.sql', sql: usersDisplayRole },
+  { filename: 'migration-visitor-surveys.sql', sql: visitorSurveys },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {

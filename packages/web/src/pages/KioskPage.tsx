@@ -14,7 +14,7 @@ import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
 import { OfficerCombobox } from '@/components/checkin/OfficerCombobox';
 import { suggestDirectorate, groupDirectorates } from '@/lib/directorate-routing';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
-import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert, MapPin, CalendarDays, Clock3, Calendar, ArrowLeft, ScanLine, UserCheck } from 'lucide-react';
+import { CheckCircle2, LogIn, LogOut, Loader2, X, User, Phone, Briefcase, Building2, ShieldAlert, MapPin, CalendarDays, Clock3, Calendar, ArrowLeft, ScanLine, UserCheck, Star } from 'lucide-react';
 
 const visitorSchema = z.object({
   first_name: z.string().min(1, 'First name is required').max(100),
@@ -29,7 +29,7 @@ const visitorSchema = z.object({
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
 
-type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-pin' | 'checkout-confirm' | 'checkout-done' | 'appointment' | 'appointment-scan' | 'appointment-confirm' | 'appointment-done' | 'returning-phone' | 'returning-confirm';
+type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-pin' | 'checkout-confirm' | 'checkout-done' | 'survey-comment' | 'survey-thanks' | 'appointment' | 'appointment-scan' | 'appointment-confirm' | 'appointment-done' | 'returning-phone' | 'returning-confirm';
 
 interface AppointmentLookup {
   id: string;
@@ -77,6 +77,14 @@ export function KioskPage() {
   const [pinSubmitting, setPinSubmitting] = useState(false);
   const checkingInRef = useRef(false);
   const checkingOutRef = useRef(false);
+
+  // Post-checkout satisfaction survey (spec: 2026-07-20-visitor-satisfaction-survey-design).
+  // The single-use token arrives on the checkout response; rating state lives
+  // here so the rate → comment → thanks steps can span kiosk modes.
+  const [surveyToken, setSurveyToken] = useState<string | null>(null);
+  const [surveyRating, setSurveyRating] = useState<number | null>(null);
+  const [surveyComment, setSurveyComment] = useState('');
+  const [surveySubmitting, setSurveySubmitting] = useState(false);
 
   const [apptRef, setApptRef] = useState('');
   const [apptData, setApptData] = useState<AppointmentLookup | null>(null);
@@ -213,6 +221,10 @@ export function KioskPage() {
     setReturningVisitor(null);
     setReturningLoading(false);
     setHostWarning(null);
+    setSurveyToken(null);
+    setSurveyRating(null);
+    setSurveyComment('');
+    setSurveySubmitting(false);
     setMode('welcome');
   }
 
@@ -299,8 +311,10 @@ export function KioskPage() {
     try {
       const visit = await kioskApi.checkOut(checkoutBadge);
       setCheckoutVisit(visit);
+      setSurveyToken(visit.survey_token ?? null);
       setMode('checkout-done');
     } catch (e) {
+      setSurveyToken(null);
       setSubmitError(e instanceof Error ? e.message : 'Checkout failed. Please see reception.');
       setMode('checkout-done');
     } finally {
@@ -315,12 +329,30 @@ export function KioskPage() {
     try {
       const visit = await kioskApi.checkOutByPin(pinInput);
       setCheckoutVisit(visit);
+      setSurveyToken(visit.survey_token ?? null);
       setMode('checkout-done');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'PIN not recognised. Please check the number or see reception.';
       setPinError(msg);
     } finally {
       setPinSubmitting(false);
+    }
+  }
+
+  // Rating is already chosen when this runs; the comment step is optional.
+  // Failures are quiet by design — a leaving visitor never sees a survey error.
+  async function submitSurvey(withComment: boolean) {
+    if (!surveyToken || !surveyRating || surveySubmitting) return;
+    setSurveySubmitting(true);
+    try {
+      await kioskApi.submitSurvey({
+        token: surveyToken,
+        rating: surveyRating,
+        ...(withComment && surveyComment.trim() ? { comment: surveyComment.trim() } : {}),
+      });
+    } catch { /* quiet */ } finally {
+      setSurveySubmitting(false);
+      setMode('survey-thanks');
     }
   }
 
@@ -770,9 +802,34 @@ export function KioskPage() {
             </div>
             <h2 className="text-lg font-semibold text-foreground">{checkoutVisit ? 'Checked Out' : 'Could Not Check Out'}</h2>
             {submitError && !checkoutVisit && <p className="text-danger text-sm">{submitError}</p>}
-            <button onClick={resetAll} className="h-11 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Done</button>
+            {/* Successful checkout with a survey token → invite the rating
+                inline; anything else → plain Done. */}
+            {checkoutVisit && surveyToken ? (
+              <SurveyRatePanel
+                onRate={(n) => { setSurveyRating(n); setMode('survey-comment'); }}
+                onSkip={resetAll}
+              />
+            ) : (
+              <button onClick={resetAll} className="h-11 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Done</button>
+            )}
           </div>
         )}
+
+        {/* SURVEY — optional comment after the rating tap */}
+        {mode === 'survey-comment' && surveyRating !== null && (
+          <SurveyCommentPanel
+            rating={surveyRating}
+            comment={surveyComment}
+            submitting={surveySubmitting}
+            onChange={setSurveyComment}
+            onSkip={() => submitSurvey(false)}
+            onSubmit={() => submitSurvey(true)}
+            onTimeout={resetAll}
+          />
+        )}
+
+        {/* SURVEY — thank-you, then auto-return to the welcome screen */}
+        {mode === 'survey-thanks' && <SurveyThanksPanel onDone={resetAll} />}
 
         {mode === 'appointment' && (
           <div className="mt-6 space-y-5">
@@ -1079,6 +1136,114 @@ function VisitInfoCard({ visit }: { visit: import('@/lib/kioskApi').KioskVisit }
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+
+/* ---- Post-checkout satisfaction survey (spec: 2026-07-20-visitor-satisfaction-survey-design) ---- */
+
+const RATING_LABELS = ['Poor', 'Fair', 'Good', 'Very good', 'Excellent'] as const;
+
+// Rating step — five large stars + Skip, inline under the Checked Out
+// confirmation. Auto-skips after 20s so the kiosk never strands on a visitor
+// who walked away mid-screen.
+function SurveyRatePanel({ onRate, onSkip }: { onRate: (n: number) => void; onSkip: () => void }) {
+  const [hovered, setHovered] = useState(0);
+  useEffect(() => {
+    const t = setTimeout(onSkip, 20_000);
+    return () => clearTimeout(t);
+  }, [onSkip]);
+  return (
+    <div className="pt-4 mt-1 border-t border-border/60 space-y-2 animate-fade-in">
+      <p className="text-[15px] font-semibold text-foreground">How was your visit today?</p>
+      <div className="flex items-center justify-center gap-1.5" onMouseLeave={() => setHovered(0)}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            onClick={() => onRate(n)}
+            onMouseEnter={() => setHovered(n)}
+            className="p-1 rounded-xl transition-transform hover:scale-110 active:scale-90"
+            aria-label={`Rate ${n} out of 5 — ${RATING_LABELS[n - 1]}`}
+          >
+            <Star className={`h-10 w-10 transition-colors ${n <= hovered ? 'fill-[#D4A017] text-[#D4A017]' : 'text-border-strong'}`} />
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-muted h-4">{hovered ? RATING_LABELS[hovered - 1] : ''}</p>
+      <button onClick={onSkip} className="text-[13px] text-muted hover:text-foreground transition-colors">
+        No thanks, skip
+      </button>
+    </div>
+  );
+}
+
+// Comment step — optional free text; Skip submits the rating alone. The idle
+// timer re-arms on every keystroke so someone mid-sentence is never cut off,
+// but a walk-away still returns the kiosk to the welcome screen.
+function SurveyCommentPanel({ rating, comment, submitting, onChange, onSkip, onSubmit, onTimeout }: {
+  rating: number;
+  comment: string;
+  submitting: boolean;
+  onChange: (v: string) => void;
+  onSkip: () => void;
+  onSubmit: () => void;
+  onTimeout: () => void;
+}) {
+  useEffect(() => {
+    const t = setTimeout(onTimeout, 45_000);
+    return () => clearTimeout(t);
+  }, [comment, onTimeout]);
+  return (
+    <div className="mt-6 text-center space-y-4 animate-fade-in">
+      <div className="flex items-center justify-center gap-1">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <Star key={n} className={`h-6 w-6 ${n <= rating ? 'fill-[#D4A017] text-[#D4A017]' : 'text-border-strong'}`} />
+        ))}
+      </div>
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">Anything you'd like us to know?</h2>
+        <p className="text-xs text-muted mt-1">Optional — your feedback goes to our Client Service team.</p>
+      </div>
+      <textarea
+        value={comment}
+        onChange={(e) => onChange(e.target.value.slice(0, 500))}
+        rows={3}
+        autoFocus
+        placeholder="Share a comment (optional)…"
+        className="w-full px-4 py-3 text-[15px] border-2 border-border rounded-2xl focus:border-primary focus:outline-none bg-surface text-foreground resize-none"
+      />
+      <div className="flex items-center justify-center gap-3">
+        <button onClick={onSkip} disabled={submitting} className="h-11 px-4 text-sm text-muted hover:text-foreground transition-colors">
+          Skip
+        </button>
+        <button
+          onClick={onSubmit}
+          disabled={submitting}
+          className="h-11 px-6 bg-primary text-white text-sm font-semibold rounded-xl inline-flex items-center gap-2 disabled:opacity-50"
+        >
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+          Submit feedback
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Thank-you — brief gold moment, then auto-return to the welcome screen.
+function SurveyThanksPanel({ onDone }: { onDone: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 4_000);
+    return () => clearTimeout(t);
+  }, [onDone]);
+  return (
+    <div className="mt-6 text-center space-y-4 animate-fade-in">
+      <div className="w-12 h-12 bg-accent/15 rounded-full flex items-center justify-center mx-auto">
+        <Star className="h-6 w-6 text-accent-warm fill-accent-warm" />
+      </div>
+      <h2 className="text-lg font-semibold text-foreground">Thank you for your feedback!</h2>
+      <p className="text-sm text-muted">Have a safe journey.</p>
+      <button onClick={onDone} className="text-[13px] text-muted hover:text-foreground transition-colors">Done</button>
     </div>
   );
 }

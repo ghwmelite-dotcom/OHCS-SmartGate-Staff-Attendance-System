@@ -178,6 +178,27 @@ CREATE INDEX IF NOT EXISTS idx_visits_host ON visits(host_officer_id, check_in_a
 CREATE UNIQUE INDEX IF NOT EXISTS idx_visits_idem_unique ON visits(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
+-- Visitor satisfaction survey (added by migration-visitor-surveys.sql)
+-- One row per visit via a single-use survey token minted at kiosk checkout.
+-- wait_minutes/directorate_id/host_officer_id are denormalized at submit time.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS visitor_surveys (
+    id              TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    visit_id        TEXT NOT NULL REFERENCES visits(id),
+    badge_code      TEXT,
+    rating          INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+    comment         TEXT,
+    wait_minutes    INTEGER,
+    directorate_id  TEXT,
+    host_officer_id TEXT,
+    source          TEXT NOT NULL DEFAULT 'kiosk',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_visitor_surveys_visit ON visitor_surveys(visit_id);
+CREATE INDEX IF NOT EXISTS idx_visitor_surveys_created ON visitor_surveys(created_at);
+CREATE INDEX IF NOT EXISTS idx_visitor_surveys_dir ON visitor_surveys(directorate_id, created_at);
+
+-- ---------------------------------------------------------------------------
 -- Staff attendance: clock records, leave requests, absence notices
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS clock_records (

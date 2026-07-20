@@ -15,6 +15,7 @@ import {
   X,
   UserCircle,
   Calendar,
+  Star,
 } from 'lucide-react';
 
 const MAIN_ITEMS = [
@@ -32,6 +33,8 @@ const MORE_ITEMS = [
 
 const APPOINTMENTS_ITEM = { to: '/appointments', icon: Calendar, label: 'Appointments' };
 
+const FEEDBACK_ITEM = { to: '/feedback', icon: Star, label: 'Feedback' };
+
 const ADMIN_ITEMS = [
   { to: '/admin', icon: Settings, label: 'Admin' },
 ];
@@ -43,7 +46,7 @@ export function BottomNav() {
   const logout = useAuthStore((s) => s.logout);
   const isSuperadmin = user?.role === 'superadmin';
   const canSeeAppointments = ['receptionist', 'admin', 'superadmin'].includes(user?.role ?? '');
-  const moreItems = canSeeAppointments ? [APPOINTMENTS_ITEM, ...MORE_ITEMS] : MORE_ITEMS;
+  const moreItems = canSeeAppointments ? [APPOINTMENTS_ITEM, FEEDBACK_ITEM, ...MORE_ITEMS] : MORE_ITEMS;
 
   // Check if current route is in the "more" section
   const moreRoutes = [...moreItems, ...ADMIN_ITEMS].map(i => i.to);

@@ -7,7 +7,7 @@ import { recordNotifyOutcome, isDeadPushStatus } from '../lib/notify-metrics';
 
 const PERSONAL_CATEGORIES = ['personal_visit'];
 
-const PUSH_WHITELIST = new Set(['visitor_arrival', 'clock_reminder', 'late_clock_alert', 'monthly_report_ready', 'absence_notice', 'checkout_sweep', 'sla_breach', 'watchlist_alert']);
+const PUSH_WHITELIST = new Set(['visitor_arrival', 'clock_reminder', 'late_clock_alert', 'monthly_report_ready', 'absence_notice', 'checkout_sweep', 'sla_breach', 'watchlist_alert', 'survey_low_rating']);
 
 interface VisitNotifyData {
   visit_id: string;
@@ -375,4 +375,40 @@ async function createInAppNotification(
     url,
     visitId: data.visit_id,
   });
+}
+
+// Low survey rating (≤2 stars) — the actionable loop for the Client Service
+// tier: in-app + push to reception/admin users, pointing at the Feedback page.
+// Spec: 2026-07-20-visitor-satisfaction-survey-design.
+export async function notifyLowSurveyRating(env: Env, opts: {
+  visitId: string;
+  rating: number;
+  comment: string | null;
+}): Promise<void> {
+  const row = await env.DB.prepare(
+    `SELECT vis.id AS visit_id, v.first_name, v.last_name, d.abbreviation AS directorate_abbr
+     FROM visits vis
+     JOIN visitors v ON v.id = vis.visitor_id
+     LEFT JOIN directorates d ON d.id = vis.directorate_id
+     WHERE vis.id = ?`
+  ).bind(opts.visitId).first<{ visit_id: string; first_name: string; last_name: string; directorate_abbr: string | null }>();
+
+  const name = row ? `${row.first_name} ${row.last_name}` : 'A visitor';
+  const stars = `${'★'.repeat(opts.rating)}${'☆'.repeat(5 - opts.rating)}`;
+  const excerpt = opts.comment?.trim() ? ` — "${opts.comment.trim().slice(0, 140)}"` : '';
+  const where = row?.directorate_abbr ? ` (${row.directorate_abbr})` : '';
+
+  const users = await env.DB.prepare(
+    "SELECT id FROM users WHERE role IN ('receptionist', 'admin', 'superadmin') AND is_active = 1"
+  ).all<{ id: string }>();
+  for (const u of users.results ?? []) {
+    await sendTypedNotification(env, {
+      userId: u.id,
+      type: 'survey_low_rating',
+      title: `Low visit rating: ${opts.rating}/5`,
+      body: `${name}${where} rated their visit ${stars}${excerpt}. Follow up via the Feedback page.`,
+      url: '/feedback',
+      visitId: opts.visitId,
+    });
+  }
 }

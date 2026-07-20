@@ -68,6 +68,15 @@ export const KioskCheckOutByPinSchema = z.object({
   pin: z.string().length(6).regex(/^\d{6}$/, 'PIN must be 6 digits'),
 });
 
+// Visitor satisfaction survey (spec: 2026-07-20-visitor-satisfaction-survey-design).
+// The token is the single-use one minted at kiosk checkout — it is the only
+// thing standing between the public internet and a survey row.
+export const KioskSurveySchema = z.object({
+  token: z.string().uuid(),
+  rating: z.number().int().min(1).max(5),
+  comment: z.string().max(500).optional(),
+});
+
 // Host availability (spec: 2026-07-19-host-availability-design) — NULL in the
 // officers row reads as 'available'.
 export const availabilityStatusSchema = z.enum(['available', 'in_meeting', 'out_of_office']);

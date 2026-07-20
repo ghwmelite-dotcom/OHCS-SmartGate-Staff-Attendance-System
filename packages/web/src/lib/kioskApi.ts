@@ -85,6 +85,8 @@ export interface KioskVisit {
   check_in_at?: string | null;
   floor?: string | null;
   wing?: string | null;
+  /** Single-use satisfaction-survey token, minted at checkout (10-min TTL). */
+  survey_token?: string | null;
 }
 
 export interface KioskOfficer {
@@ -146,6 +148,8 @@ export const kioskApi = {
   checkIn: (body: KioskCheckInBody) => kioskRequest<KioskVisit>('/check-in', body),
   checkOut: (badgeCode: string) => kioskRequest<KioskVisit>('/check-out', { badge_code: badgeCode }),
   checkOutByPin: (pin: string) => kioskRequest<KioskVisit>('/check-out-by-pin', { pin }),
+  submitSurvey: (body: { token: string; rating: number; comment?: string }) =>
+    kioskRequest<{ ok: boolean }>('/survey', body),
   getOfficers: () => kioskGet<KioskOfficer[]>('/officers'),
   getDirectorates: () => kioskGet<KioskDirectorate[]>('/directorates'),
   getStatus: () => kioskGet<KioskOfficeStatus>('/status'),

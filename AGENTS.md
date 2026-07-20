@@ -124,6 +124,8 @@ relevant conventions; the user says "work the loop" to activate it.
 | Waiting-time SLA | **Shipped live**; cron `*/15 8-17 * * 1-5` escalates unanswered visits ≥30 min to directorate receivers (`sla_breach`, KV-deduped); dashboard wait colors + waiting-first sort | Cron registers on deploy |
 | Evacuation roll | **Shipped live**; `GET /reports/evacuation` + `/notify`; dashboard modal with print stylesheet | — |
 | Returning-visitor fast lane | **Shipped live**; kiosk `GET /kiosk/visitor-by-phone` (no-oracle 404, rate-limited) + "Been here before?" flow with locked identity | Manual kiosk test with a known returning visitor |
+| Client Service role (display tier) | **Shipped live**; `users.display_role` rides on `role='receptionist'` (reception parity — prod `users.role` CHECK blocks a 7th DB role value); violet badge in admin users table + header + profile; `roleLabel()` in `web/lib/roles.ts` | Migration applied on prod 2026-07-20 |
+| Visitor satisfaction survey | **Shipped live**; kiosk post-checkout 5-star survey (single-use KV `survey_token`, 10-min TTL) → optional comment → thanks; `visitor_surveys` table; Feedback page (stats/distribution/filters/CSV) gated reception-tier; ≤2★ fires `survey_low_rating` in-app + push | Run migration after deploy; watch response rate + first low-rating alert |
 | Face-match (enrolled reference) | **Design-only** — specs from 2026-04 exist, no implementation | Its own project; risk-fusion input stays optional until then |
 | Comms (announcements/feedback/chat) | Plans exist in `docs/superpowers/plans/2026-04-28-*`, not built | Chat plan has policy prerequisites flagged |
 
@@ -138,6 +140,17 @@ relevant conventions; the user says "work the loop" to activate it.
 - Staff clock flow: tap → presence scan (GPS warms in parallel) → geofence →
   liveness prompt → MediaPipe challenge burst → WebAuthn/PIN re-auth → submit.
 - Audit: append-only hash-chained `audit_log`; `recordAudit` on sensitive mutations.
+
+## Session log — 2026-07-20
+
+Specs/plans: `2026-07-20-client-service-role-design.md` + plan,
+`2026-07-20-visitor-satisfaction-survey-design.md` + plan.
+Commits: `f76a622` (geofence full-accuracy buffer — indoor GPS drift rejected
+insiders), `db005fb` (kiosk welcome relabel: New Visitor Check In / Visitor
+Check Out), `8e81ac8` (Client Service display-tier role), `0f7f3dc` (switched
+to reception parity per product decision), survey implementation (this
+session). Migration `migration-users-display-role.sql` applied on prod via the
+superadmin runner.
 
 ## Session log — 2026-07-19
 

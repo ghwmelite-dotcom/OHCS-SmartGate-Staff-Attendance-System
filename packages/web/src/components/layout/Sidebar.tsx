@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, ClipboardCheck, Users, ScrollText, BarChart3, FileText, Settings, LogOut, ChevronsLeft, ChevronsRight, UserCircle, Calendar } from 'lucide-react';
+import { LayoutDashboard, ClipboardCheck, Users, ScrollText, BarChart3, FileText, Settings, LogOut, ChevronsLeft, ChevronsRight, UserCircle, Calendar, Star } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import { useSidebarStore } from '@/stores/sidebar';
 
@@ -16,6 +16,10 @@ const NAV_ITEMS = [
 
 const APPOINTMENTS_NAV = [
   { to: '/appointments', icon: Calendar, label: 'Appointments' },
+];
+
+const FEEDBACK_NAV = [
+  { to: '/feedback', icon: Star, label: 'Feedback' },
 ];
 
 const ADMIN_NAV_SUPER = [
@@ -101,6 +105,11 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
 
         {/* Appointments — reception + admins (read-only day view) */}
         {canSeeAppointments && APPOINTMENTS_NAV.map((item) => (
+          <NavItem key={item.to} {...item} collapsed={collapsed} />
+        ))}
+
+        {/* Feedback — Client Service tier (reception parity) */}
+        {canSeeAppointments && FEEDBACK_NAV.map((item) => (
           <NavItem key={item.to} {...item} collapsed={collapsed} />
         ))}
 
