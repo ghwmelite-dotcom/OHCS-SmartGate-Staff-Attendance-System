@@ -128,7 +128,8 @@ relevant conventions; the user says "work the loop" to activate it.
 | Watchlist (VIP/banned) | **Shipped live**; `visitors.flag`; superadmin manage on VisitorDetail; VIP→leadership+admin chat, banned→silent reception alert (poker-face UI) | Run migration after deploy |
 | Waiting-time SLA | **Shipped live**; cron `*/15 8-17 * * 1-5` escalates unanswered visits ≥30 min to directorate receivers (`sla_breach`, KV-deduped); dashboard wait colors + waiting-first sort | Cron registers on deploy |
 | Evacuation roll | **Shipped live**; `GET /reports/evacuation` + `/notify`; dashboard modal with print stylesheet | — |
-| Returning-visitor fast lane | **Shipped live**; kiosk `GET /kiosk/visitor-by-phone` (no-oracle 404, rate-limited) + "Been here before?" flow with locked identity | Manual kiosk test with a known returning visitor |
+| Returning-visitor fast lane | **Shipped live**; kiosk `GET /kiosk/visitor-by-phone` (no-oracle 404, rate-limited) + "Been here before?" flow with locked identity; face step reuses the stored photo (Update/Continue) instead of a forced retake that would overwrite the reference | Manual kiosk test with a known returning visitor |
+| System docs page (`/docs`) | **Shipped live** (superadmin only); 10 sections / 48 feature cards rendered from `packages/web/src/docs/content.ts`; status badges live/shadow/design; search + scroll-spy pill nav; update rule in conventions + page footer | Keep `content.ts` in sync on every ship (conventions rule) |
 | Client Service role (display tier) | **Shipped live**; `users.display_role` rides on `role='receptionist'` (reception parity — prod `users.role` CHECK blocks a 7th DB role value); violet badge in admin users table + header + profile; `roleLabel()` in `web/lib/roles.ts` | Migration applied on prod 2026-07-20 |
 | Visitor satisfaction survey | **Shipped live**; kiosk post-checkout 5-star survey (single-use KV `survey_token`, 10-min TTL) → optional comment → thanks; `visitor_surveys` table; Feedback page (stats/distribution/filters/CSV) gated reception-tier; ≤2★ fires `survey_low_rating` in-app + push | Run migration after deploy; watch response rate + first low-rating alert |
 | Face-match (enrolled reference) | **Design-only** — specs from 2026-04 exist, no implementation | Its own project; risk-fusion input stays optional until then |
@@ -145,6 +146,15 @@ relevant conventions; the user says "work the loop" to activate it.
 - Staff clock flow: tap → presence scan (GPS warms in parallel) → geofence →
   liveness prompt → MediaPipe challenge burst → WebAuthn/PIN re-auth → submit.
 - Audit: append-only hash-chained `audit_log`; `recordAudit` on sensitive mutations.
+
+## Session log — 2026-07-21
+
+Specs: `2026-07-21-presence-code-shared-device-design.md` (+ `2026-07-20-superadmin-docs-section-design.md` shipped today).
+Commits: `651a5d6` (fix: photo arrivals fetched by visitor-derived R2 key —
+`visitors.photo_url` is a public URL, not an object key), `c57cdf5` (kiosk
+returning-visitor face step reuses stored photo), `1e3e999` (superadmin /docs
+page + AGENTS.md docs-update convention), `98ff775` (presence 6-digit code +
+on-device deep link for shared-device clock-in). No prod migrations needed.
 
 ## Session log — 2026-07-20
 
