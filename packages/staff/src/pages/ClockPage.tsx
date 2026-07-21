@@ -86,6 +86,10 @@ export function ClockPage() {
   // Presence-QR scan evidence — set in the scan phase, submitted with the clock
   // event; cleared on every new clock attempt and on reset.
   const presenceTokenRef = useRef<string | null>(null);
+  // Typed 6-digit presence code — the shared-device alternative to a QR scan
+  // (officer has no phone and is clocking in on the reception display itself).
+  const presenceCodeRef = useRef<string | null>(null);
+  const [codeEntry, setCodeEntry] = useState(false);
   const capturedAtRef = useRef<string | null>(null);
   // Scan-first coordination: the scan step opens immediately while GPS acquires
   // in the background; resolveScan() and finish() rendezvous through these refs.
@@ -106,10 +110,10 @@ export function ClockPage() {
     mutationFn: async (data: {
       type: 'clock_in' | 'clock_out'; latitude: number; longitude: number; accuracy: number; photo: Blob | null;
       promptId?: string; webauthnAssertion?: unknown; pin?: string;
-      presenceToken?: string; presenceOverridePin?: string; capturedAt?: string;
+      presenceToken?: string; presenceCode?: string; presenceOverridePin?: string; capturedAt?: string;
       livenessBurst?: { frame0: Blob; frame1: Blob; frame2: Blob; claimedCompleted: boolean };
     }) => {
-      const { photo, promptId, webauthnAssertion, pin, presenceToken, presenceOverridePin, capturedAt, livenessBurst, ...rest } = data;
+      const { photo, promptId, webauthnAssertion, pin, presenceToken, presenceCode, presenceOverridePin, capturedAt, livenessBurst, ...rest } = data;
       // Risk-fusion device_novelty factor — stable per install, no PII.
       const deviceId = await getDeviceId();
 
@@ -125,6 +129,7 @@ export function ClockPage() {
           webauthnAssertion,
           pin,
           presenceToken,
+          presenceCode,
           presenceOverridePin,
           capturedAt,
           deviceId,
@@ -143,6 +148,7 @@ export function ClockPage() {
         webauthn_assertion: webauthnAssertion,
         pin,
         presence_token: presenceToken,
+        presence_code: presenceCode,
         presence_override_pin: presenceOverridePin,
         captured_at: capturedAt,
         device_id: deviceId,
@@ -310,10 +316,12 @@ export function ClockPage() {
     setClaimedCompleted(false);
     setRequestedManualReview(false);
     setPresenceRejected(false);
+    setCodeEntry(false);
     frameBurstRef.current = null;
     claimedCompletedRef.current = false;
     requestedManualReviewRef.current = false;
     presenceTokenRef.current = null;
+    presenceCodeRef.current = null;
     capturedAtRef.current = null;
     scanResolvedRef.current = false;
     gpsFixRef.current = null;
@@ -476,6 +484,7 @@ export function ClockPage() {
       webauthnAssertion: opts?.webauthnAssertion,
       pin: opts?.pin,
       presenceToken: presenceTokenRef.current ?? undefined,
+      presenceCode: presenceCodeRef.current ?? undefined,
       presenceOverridePin: opts?.presenceOverridePin,
       capturedAt: capturedAtRef.current ?? undefined,
       ...(burst && !manualReview ? {
@@ -510,6 +519,7 @@ export function ClockPage() {
         promptId: prompt.promptId,
         pin,
         presenceToken: presenceTokenRef.current ?? undefined,
+      presenceCode: presenceCodeRef.current ?? undefined,
         capturedAt: capturedAtRef.current ?? undefined,
         ...(burst && !manualReview ? {
           livenessBurst: {
@@ -553,10 +563,12 @@ export function ClockPage() {
     setClaimedCompleted(false);
     setRequestedManualReview(false);
     setPresenceRejected(false);
+    setCodeEntry(false);
     frameBurstRef.current = null;
     claimedCompletedRef.current = false;
     requestedManualReviewRef.current = false;
     presenceTokenRef.current = null;
+    presenceCodeRef.current = null;
     capturedAtRef.current = null;
     scanResolvedRef.current = false;
     gpsFixRef.current = null;
@@ -719,7 +731,9 @@ export function ClockPage() {
 
           {/* SCAN — presence QR on the reception display (skippable; enforce
               mode rejects a skipped submit with PRESENCE_REQUIRED and lands
-              back here with the reception override-PIN control) */}
+              back here with the reception override-PIN control). The typed
+              6-digit code is the shared-device path for officers without a
+              phone clocking in on the display itself. */}
           {phase === 'scan' && (
             <div className="w-full space-y-4">
               {presenceRejected && errorMsg && (
@@ -727,19 +741,40 @@ export function ClockPage() {
                   ⚠️ {errorMsg}
                 </p>
               )}
-              <PresenceScanner
-                onScan={(t) => {
-                  presenceTokenRef.current = t;
-                  capturedAtRef.current = new Date().toISOString();
-                  setPresenceRejected(false);
-                  setErrorMsg('');
-                  resolveScan();
-                }}
-                onSkip={() => {
-                  capturedAtRef.current = new Date().toISOString();
-                  resolveScan();
-                }}
-              />
+              {codeEntry ? (
+                <PresenceCodeForm
+                  onSubmit={(code) => {
+                    presenceCodeRef.current = code;
+                    capturedAtRef.current = new Date().toISOString();
+                    setPresenceRejected(false);
+                    setErrorMsg('');
+                    resolveScan();
+                  }}
+                  onBack={() => setCodeEntry(false)}
+                />
+              ) : (
+                <>
+                  <PresenceScanner
+                    onScan={(t) => {
+                      presenceTokenRef.current = t;
+                      capturedAtRef.current = new Date().toISOString();
+                      setPresenceRejected(false);
+                      setErrorMsg('');
+                      resolveScan();
+                    }}
+                    onSkip={() => {
+                      capturedAtRef.current = new Date().toISOString();
+                      resolveScan();
+                    }}
+                  />
+                  <button
+                    onClick={() => setCodeEntry(true)}
+                    className="mx-auto block text-[13px] text-muted hover:text-foreground transition-colors underline-offset-2 hover:underline"
+                  >
+                    No phone? Enter the 6-digit code instead
+                  </button>
+                </>
+              )}
               {presenceRejected && (
                 <PresenceOverrideForm
                   onSubmit={(pin) => {
@@ -932,5 +967,43 @@ function PresenceOverrideForm({ onSubmit }: { onSubmit: (pin: string) => void })
         Submit override PIN
       </button>
     </form>
+  );
+}
+
+
+// Typed 6-digit presence code — the shared-device path (officer clocking in on
+// the reception display itself, or no phone at hand). Auto-submits on the 6th
+// digit; the code rotates with the QR token every 45s.
+function PresenceCodeForm({ onSubmit, onBack }: { onSubmit: (code: string) => void; onBack: () => void }) {
+  const [code, setCode] = useState('');
+  const submittedRef = useRef(false);
+
+  useEffect(() => {
+    if (!submittedRef.current && code.length === 6) {
+      submittedRef.current = true;
+      onSubmit(code);
+    }
+  }, [code, onSubmit]);
+
+  return (
+    <div className="w-full max-w-xs mx-auto text-center space-y-3">
+      <p className="text-[14px] font-medium text-foreground">Enter the 6-digit code on the reception display</p>
+      <input
+        type="text"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        maxLength={6}
+        autoFocus
+        value={code}
+        onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+        className="w-full px-4 py-3 text-3xl text-center tracking-[0.4em] border-2 border-border rounded-2xl focus:border-primary focus:outline-none bg-surface text-foreground font-mono"
+        placeholder="••••••"
+        aria-label="6-digit presence code"
+      />
+      <p className="text-[11px] text-muted">The code refreshes with the QR every 45 seconds — use the one currently shown.</p>
+      <button onClick={onBack} className="text-[13px] text-muted hover:text-foreground transition-colors">
+        ← Back to QR scan
+      </button>
+    </div>
   );
 }

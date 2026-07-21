@@ -1,106 +1,70 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import { presenceCodeFromToken, validatePresenceCode, getCurrentPresenceToken, PRESENCE_ROTATE_MS } from './presence';
 import type { Env } from '../types';
-import {
-  getCurrentPresenceToken, validatePresenceToken,
-  PRESENCE_ROTATE_MS, PRESENCE_KV_TTL_SECONDS,
-} from './presence';
 
-// Same Map-backed mockKv helper as liveness/review-counter.test.ts.
-function mockKv(initial: Record<string, string> = {}) {
-  const store = new Map<string, string>(Object.entries(initial));
+function kvEnv() {
+  const store = new Map<string, string>();
   return {
-    get: vi.fn(async (k: string) => store.get(k) ?? null),
-    put: vi.fn(async (k: string, v: string) => { store.set(k, v); }),
-    delete: vi.fn(async (k: string) => { store.delete(k); }),
-  } as unknown as KVNamespace;
+    KV: {
+      get: async (k: string) => store.get(k) ?? null,
+      put: async (k: string, v: string) => { store.set(k, v); },
+      delete: async (k: string) => { store.delete(k); },
+    },
+  } as unknown as Env;
 }
 
-function mockEnv(kv: KVNamespace): Env {
-  return { KV: kv } as unknown as Env;
-}
-
-// Fixed "now" — the service takes an injectable timestamp, so no fake timers.
-const T0 = 1_800_000_000_000;
-
-describe('getCurrentPresenceToken', () => {
-  it('creates a fresh window on empty KV and returns the full 45s', async () => {
-    const kv = mockKv();
-    const env = mockEnv(kv);
-    const { token, expiresIn } = await getCurrentPresenceToken(env, T0);
-    expect(token).toMatch(/^[0-9a-f-]{36}$/);
-    expect(expiresIn).toBe(45);
-    expect(kv.put).toHaveBeenCalledTimes(1);
-    expect(kv.put).toHaveBeenCalledWith(
-      'presence:current',
-      expect.any(String),
-      { expirationTtl: PRESENCE_KV_TTL_SECONDS },
-    );
+describe('presenceCodeFromToken', () => {
+  it('is deterministic and always 6 digits (zero-padded)', async () => {
+    const token = crypto.randomUUID();
+    const a = await presenceCodeFromToken(token);
+    const b = await presenceCodeFromToken(token);
+    expect(a).toBe(b);
+    expect(a).toMatch(/^\d{6}$/);
   });
 
-  it('returns the same token 30s later with expiresIn = 15 and no write', async () => {
-    const kv = mockKv();
-    const env = mockEnv(kv);
-    const first = await getCurrentPresenceToken(env, T0);
-    vi.mocked(kv.put).mockClear();
-    const second = await getCurrentPresenceToken(env, T0 + 30_000);
-    expect(second.token).toBe(first.token);
-    expect(second.expiresIn).toBe(15);
-    expect(kv.put).not.toHaveBeenCalled();
+  it('different tokens almost surely give different codes', async () => {
+    const codes = new Set(await Promise.all(
+      Array.from({ length: 20 }, () => presenceCodeFromToken(crypto.randomUUID())),
+    ));
+    expect(codes.size).toBeGreaterThan(15);
   });
 
-  it('rotates at +46s and moves the old window to presence:previous', async () => {
-    const kv = mockKv();
-    const env = mockEnv(kv);
-    const first = await getCurrentPresenceToken(env, T0);
-    const second = await getCurrentPresenceToken(env, T0 + PRESENCE_ROTATE_MS + 1_000);
-    expect(second.token).not.toBe(first.token);
-    expect(second.expiresIn).toBe(45);
-    expect(kv.put).toHaveBeenCalledWith(
-      'presence:previous',
-      JSON.stringify({ token: first.token, window_start: T0 }),
-      { expirationTtl: PRESENCE_KV_TTL_SECONDS },
-    );
-    // The displaced token still validates via the grace window.
-    expect(await validatePresenceToken(env, first.token)).toBe('previous');
-  });
-
-  it('treats corrupt JSON under presence:current as missing and rotates fresh', async () => {
-    const kv = mockKv({ 'presence:current': '{not json' });
-    const env = mockEnv(kv);
-    const { token, expiresIn } = await getCurrentPresenceToken(env, T0);
-    expect(token).toMatch(/^[0-9a-f-]{36}$/);
-    expect(expiresIn).toBe(45);
-    expect(kv.put).toHaveBeenCalledWith(
-      'presence:current',
-      expect.any(String),
-      { expirationTtl: PRESENCE_KV_TTL_SECONDS },
-    );
+  it('is domain-separated from a raw token hash', async () => {
+    // A code must not equal the decimal rendering of the token's own SHA-256
+    // prefix — the presence-code: prefix makes the namespaces distinct.
+    const token = crypto.randomUUID();
+    const raw = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+    const rawCode = String(new DataView(raw).getUint32(0) % 1_000_000).padStart(6, '0');
+    expect(await presenceCodeFromToken(token)).not.toBe(rawCode);
   });
 });
 
-describe('validatePresenceToken', () => {
-  it("returns 'current' for the live-window token", async () => {
-    const kv = mockKv({
-      'presence:current': JSON.stringify({ token: 'tok-cur', window_start: T0 }),
-    });
-    expect(await validatePresenceToken(mockEnv(kv), 'tok-cur')).toBe('current');
+describe('validatePresenceCode', () => {
+  it('accepts the current code, then the previous after rotation, then rejects', async () => {
+    const env = kvEnv();
+    const t0 = 1_800_000_000_000;
+    const { token } = await getCurrentPresenceToken(env, t0);
+    const code = await presenceCodeFromToken(token);
+
+    // Current window
+    expect(await validatePresenceCode(env, code)).toBe('current');
+
+    // Rotate — the old token moves to previous, its code still validates there
+    const t1 = t0 + PRESENCE_ROTATE_MS + 1;
+    const { token: next } = await getCurrentPresenceToken(env, t1);
+    expect(next).not.toBe(token);
+    expect(await validatePresenceCode(env, code)).toBe('previous');
+    expect(await validatePresenceCode(env, await presenceCodeFromToken(next))).toBe('current');
+
+    // Fully displaced — the code is dead
+    const t2 = t1 + PRESENCE_ROTATE_MS + 1;
+    await getCurrentPresenceToken(env, t2);
+    expect(await validatePresenceCode(env, code)).toBe('invalid');
   });
 
-  it("returns 'previous' for the grace-window token", async () => {
-    const kv = mockKv({
-      'presence:current': JSON.stringify({ token: 'tok-cur', window_start: T0 }),
-      'presence:previous': JSON.stringify({ token: 'tok-prev', window_start: T0 - PRESENCE_ROTATE_MS }),
-    });
-    expect(await validatePresenceToken(mockEnv(kv), 'tok-prev')).toBe('previous');
-  });
-
-  it("returns 'invalid' for an unknown token and for empty input", async () => {
-    const kv = mockKv({
-      'presence:current': JSON.stringify({ token: 'tok-cur', window_start: T0 }),
-      'presence:previous': JSON.stringify({ token: 'tok-prev', window_start: T0 - PRESENCE_ROTATE_MS }),
-    });
-    const env = mockEnv(kv);
-    expect(await validatePresenceToken(env, crypto.randomUUID())).toBe('invalid');
-    expect(await validatePresenceToken(env, '')).toBe('invalid');
+  it('rejects malformed codes without touching KV', async () => {
+    expect(await validatePresenceCode(kvEnv(), '12345')).toBe('invalid');
+    expect(await validatePresenceCode(kvEnv(), '1234567')).toBe('invalid');
+    expect(await validatePresenceCode(kvEnv(), 'abcdef')).toBe('invalid');
   });
 });

@@ -7,6 +7,8 @@ const CLOCK_URL_BASE = 'https://staff-attendance.ohcsghana.org/clock';
 
 interface PresenceState {
   token: string;
+  /** 6-digit human-typeable rendering of the token — the shared-device path. */
+  code: string;
   expiresIn: number;
   officeOpen: boolean;
   /** Date.now() when this payload landed — the countdown drains from here between polls. */
@@ -48,7 +50,7 @@ export function PresenceDisplayPage() {
         const res = await fetch('/api/presence/current');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json() as {
-          data?: { token?: string; expires_in?: number; office_open?: boolean } | null;
+          data?: { token?: string; expires_in?: number; code?: string; office_open?: boolean } | null;
         };
         const d = json.data;
         if (!d?.token || typeof d.expires_in !== 'number') throw new Error('Malformed presence payload');
@@ -60,6 +62,7 @@ export function PresenceDisplayPage() {
         }
         setPresence({
           token: d.token,
+          code: d.code ?? '',
           expiresIn: d.expires_in,
           officeOpen: !!d.office_open,
           fetchedAt: Date.now(),
@@ -162,7 +165,10 @@ export function PresenceDisplayPage() {
             <p className="text-white/40 mt-4 text-[10px] uppercase tracking-[0.25em]">Retrying automatically…</p>
           </div>
         ) : presence ? (
-          <PresenceQr token={presence.token} remaining={remaining} jitter={jitter} />
+          <div className="flex flex-col items-center gap-5">
+            <PresenceQr token={presence.token} remaining={remaining} jitter={jitter} />
+            <PresenceCodeStrip token={presence.token} code={presence.code} />
+          </div>
         ) : (
           <div className="flex items-center justify-center rounded-[26px] bg-white/5 h-[min(56vh,460px)] portrait:h-[min(38vh,340px)] aspect-square" style={{
             border: '1px solid rgba(255,255,255,0.08)',
@@ -239,6 +245,63 @@ function PresenceQr({ token, remaining, jitter }: {
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+// 6-digit presence code + shared-device clock-in handoff (spec:
+// 2026-07-21-presence-code-shared-device-design). The code IS the QR token
+// rendered for humans — same rotation, same validity. The button opens the
+// staff app's clock page with the token deep-linked (the clock flow's
+// deep-link prefill consumes it — no typing at all).
+function PresenceCodeStrip({ token, code }: { token: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard unavailable — the digits are right there */ }
+  }
+
+  if (!code) return null;
+
+  return (
+    <div className="flex flex-col items-center gap-3 animate-fade-in">
+      <div className="rounded-2xl px-6 py-3 text-center" style={{
+        background: 'rgba(255,255,255,0.06)',
+        border: '1px solid rgba(212,160,23,0.25)',
+      }}>
+        <p className="text-[10px] uppercase tracking-[0.25em] font-semibold" style={{ color: 'rgba(212,160,23,0.85)' }}>
+          No phone? Use this code
+        </p>
+        <button
+          onClick={copy}
+          className="mt-1 font-mono font-bold text-white tracking-[0.3em] tabular-nums leading-none text-[clamp(1.6rem,3vw,2.2rem)]"
+          title="Tap to copy the code"
+          aria-label={`Presence code ${code} — tap to copy`}
+        >
+          {code.slice(0, 3)}{' '}{code.slice(3)}
+        </button>
+        <p className="text-white/40 text-[10px] mt-1 h-3">{copied ? 'Copied ✓' : 'Tap the code to copy'}</p>
+      </div>
+
+      <a
+        href={`${CLOCK_URL_BASE}?presence=${token}`}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-[15px] font-bold transition-transform active:scale-[0.98]"
+        style={{
+          background: 'linear-gradient(135deg, #D4A017, #B8860B)',
+          color: '#0F2E1B',
+          boxShadow: '0 10px 30px rgba(212,160,23,0.25)',
+        }}
+      >
+        Clock in on this device →
+      </a>
+      <p className="text-white/35 text-[10px]">Shared device — please sign out after clocking.</p>
     </div>
   );
 }

@@ -48,3 +48,29 @@ export async function validatePresenceToken(env: Env, token: string): Promise<Pr
   if (previous?.token === token) return 'previous';
   return 'invalid';
 }
+
+// ---- 6-digit presence code ----
+// A human-typeable rendering of the SAME rotating token, for staff clocking in
+// on the reception display device itself (no phone / no camera to scan with).
+// Derived deterministically so no extra storage or cron is needed: the code
+// rotates with the token (45s) and validates against the same current +
+// previous windows. Domain-separated so a code can never collide with a token
+// hash used elsewhere.
+
+/** Derive the 6-digit code for a token: first uint32 of SHA-256, mod 1e6. */
+export async function presenceCodeFromToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`presence-code:${token}`));
+  const n = new DataView(digest).getUint32(0);
+  return String(n % 1_000_000).padStart(6, '0');
+}
+
+/** Validate a typed code against the live + grace windows (same semantics as
+ *  validatePresenceToken). */
+export async function validatePresenceCode(env: Env, code: string): Promise<PresenceTokenWindow> {
+  if (!/^\d{6}$/.test(code)) return 'invalid';
+  const current = await readWindow(env, CURRENT_KEY);
+  if (current && (await presenceCodeFromToken(current.token)) === code) return 'current';
+  const previous = await readWindow(env, PREVIOUS_KEY);
+  if (previous && (await presenceCodeFromToken(previous.token)) === code) return 'previous';
+  return 'invalid';
+}

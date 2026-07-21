@@ -67,6 +67,38 @@ If a staff member reports the code "not scanning":
 
 1. Check the tablet shows a live QR (not the unavailable state).
 2. Check the staff member is on the latest Staff Attendance app version.
+
+## Shared-device clock-in (officers without a phone)
+
+Since 2026-07-21 the display also carries a **6-digit code** under the QR and
+a **"Clock in on this device"** button, so an officer without a working phone
+can clock in on the display tablet itself (spec:
+`docs/superpowers/specs/2026-07-21-presence-code-shared-device-design.md`).
+
+One-time extra setup:
+
+1. **Install the Staff Attendance PWA on the same tablet:**
+   `https://staff-attendance.ohcsghana.org` → Chrome menu → *Add to Home
+   screen*. Keep it as a separate icon from the display — the display keeps
+   running in its own tab/app so everyone else can still scan.
+2. **If the tablet is in a lockdown launcher**, whitelist both the display
+   page and the staff PWA.
+
+How an officer uses it:
+
+1. Tap **Clock in on this device** on the display (opens the staff app with
+   the presence token pre-filled — no typing), or open the staff app manually
+   and use **"No phone? Enter the 6-digit code instead"** on the scan screen
+   with the code shown under the QR (tap the code to copy it).
+2. Log in with staff ID + PIN, tap Clock In / Clock Out as usual.
+3. **Sign out afterwards (Settings → Sign Out).** This is a shared device —
+   the per-clock PIN re-auth protects the clock action itself, but the open
+   session shows the previous officer's details to the next person. A small
+   printed reminder at the tablet is recommended.
+
+The code rotates with the QR every ~45 seconds and only ever works at the
+building (the geofence still applies), so a photographed code is as useless
+as a photographed QR.
 3. If the tablet is down, reception handles the clock-in manually via the
    existing **override PIN** path.
 

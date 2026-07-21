@@ -166,8 +166,8 @@ export const DOC_SECTIONS: DocSection[] = [
         status: 'shadow',
         summary: 'A rotating QR on the reception display proves physical presence at clock time. Enforced on clock-in; flag-only on clock-out so nobody is ever trapped by a blocked checkout.',
         details: [
-          'Display at /presence-display (reception tablet); tokens rotate in KV',
-          'Deep-link prefill (?presence=…) counts as the scan; fresh in-app scan wins',
+          'Display at /presence-display (reception tablet); tokens rotate in KV every 45s',
+          'Three renderings of one secret: camera QR, "Clock in on this device" deep link, and a typed 6-digit code (presence_method=code, rate-limited) for officers without a phone',
           'presence_qr_mode: 0 off · 1 shadow (record-only) · 2 enforce — reception override PIN is the escape valve',
           'Expired/replayed tokens classify as qr_pending for HR review, never as forgery',
         ],

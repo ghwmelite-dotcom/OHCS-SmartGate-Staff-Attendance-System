@@ -37,7 +37,7 @@ interface AttendanceRecord {
   clock_out_reauth_method: 'webauthn' | 'pin' | null;
   liveness_decision: 'pass' | 'fail' | 'manual_review' | 'skipped' | null;
   liveness_signature: string | null;
-  presence_method: 'qr' | 'qr_pending' | 'none' | 'override' | null;
+  presence_method: 'qr' | 'qr_pending' | 'none' | 'override' | 'code' | null;
   presence_token_window: 'current' | 'previous' | 'expired' | null;
   clock_in_id: string | null;
   risk_score: number | null;
@@ -639,7 +639,8 @@ function LivenessPill({ decision }: { decision: string | null }) {
 
 // Presence-QR evidence badge (migration-clock-presence.sql): green QR / amber
 // Pending (token rotated out — offline replay or slow submit) / blue Override
-// (reception PIN) / grey None. Rows with no clock-in show a plain dash.
+// (reception PIN) / violet Code (typed display code on the shared device) /
+// grey None. Rows with no clock-in show a plain dash.
 function PresencePill({ record }: { record: AttendanceRecord }) {
   const method = record.presence_method;
   if (!method && !record.clock_in_time) return <span className="text-muted-foreground">—</span>;
@@ -647,15 +648,21 @@ function PresencePill({ record }: { record: AttendanceRecord }) {
     method === 'qr' ? 'bg-emerald-100 text-emerald-800'
     : method === 'qr_pending' ? 'bg-amber-100 text-amber-800'
     : method === 'override' ? 'bg-sky-100 text-sky-800'
+    : method === 'code' ? 'bg-violet-100 text-violet-800'
     : 'bg-zinc-100 text-zinc-600';
   const label =
     method === 'qr' ? 'QR'
     : method === 'qr_pending' ? 'Pending'
     : method === 'override' ? 'Override'
+    : method === 'code' ? 'Code'
     : 'None';
   return (
     <span
-      title={method === 'qr' ? `Token window: ${record.presence_token_window ?? 'unknown'}` : undefined}
+      title={
+        method === 'qr' || method === 'code'
+          ? `Token window: ${record.presence_token_window ?? 'unknown'}${method === 'code' ? ' · typed code (shared device)' : ''}`
+          : undefined
+      }
       className={`px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}
     >
       {label}

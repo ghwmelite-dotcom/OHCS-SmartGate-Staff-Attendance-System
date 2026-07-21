@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../types';
 import { success, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
-import { getCurrentPresenceToken } from '../services/presence';
+import { getCurrentPresenceToken, presenceCodeFromToken } from '../services/presence';
 import { getOfficeStatus } from '../services/office-hours';
 
 export const presenceRoutes = new Hono<{ Bindings: Env }>();
@@ -19,5 +19,8 @@ presenceRoutes.get('/current', async (c) => {
     getCurrentPresenceToken(c.env),
     getOfficeStatus(c.env),
   ]);
-  return success(c, { token, expires_in: expiresIn, office_open: office.open });
+  // Derive from the SAME token instance — a second getCurrentPresenceToken
+  // call could rotate the window between reads and show a mismatched pair.
+  const code = await presenceCodeFromToken(token);
+  return success(c, { token, expires_in: expiresIn, code, office_open: office.open });
 });

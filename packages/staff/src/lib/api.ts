@@ -77,6 +77,7 @@ export interface ClockSubmission {
   webauthnAssertion?: unknown;
   pin?: string;
   presenceToken?: string;
+  presenceCode?: string;
   presenceOverridePin?: string;
   capturedAt?: string;
   deviceId?: string;
@@ -109,6 +110,7 @@ export async function submitClock(input: ClockSubmission): Promise<ClockResult> 
     webauthn_assertion: input.webauthnAssertion,
     pin: input.pin,
     presence_token: input.presenceToken,
+    presence_code: input.presenceCode,
     presence_override_pin: input.presenceOverridePin,
     captured_at: input.capturedAt,
     device_id: input.deviceId,

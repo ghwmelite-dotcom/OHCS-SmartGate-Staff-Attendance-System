@@ -10,7 +10,7 @@ import { devLog } from '../lib/log';
 import { recordAudit, auditActorFromContext } from '../services/audit';
 import { rateLimit } from '../lib/rate-limit';
 import { resolveOverride } from '../services/override';
-import { validatePresenceToken } from '../services/presence';
+import { validatePresenceToken, validatePresenceCode } from '../services/presence';
 import { isJpeg } from '../lib/image-magic';
 import { ALL_CHALLENGES, verifyLivenessBurst, getReviewCount, incrementReviewCount } from '../services/liveness';
 import type { LivenessChallenge, LivenessSignature } from '../services/liveness/types';
@@ -161,6 +161,9 @@ const clockSchema = z.object({
   pin: z.string().min(4).max(10).optional(),
   // Presence QR (optional; validated when app_settings.presence_qr_mode > 0).
   presence_token: z.string().uuid().optional(),
+  // Typed 6-digit presence code — the human-typeable rendering of the same
+  // rotating token, for staff clocking in on the reception display device.
+  presence_code: z.string().regex(/^\d{6}$/).optional(),
   presence_override_pin: z.string().min(4).max(12).optional(),
   // Persistent client device id (IndexedDB-stored UUID; hashed server-side, no PII).
   device_id: z.string().uuid().optional(),
@@ -305,7 +308,7 @@ clockRoutes.post('/', async (c) => {
 
   // ---- PRESENCE QR GATE (0 = off, 1 = shadow/record-only, 2 = enforce) ----
   const presenceMode = settings.presence_qr_mode ?? 0; // ?? for pre-migration rows
-  let presenceMethod: 'qr' | 'qr_pending' | 'none' | 'override' | null = null;
+  let presenceMethod: 'qr' | 'qr_pending' | 'none' | 'override' | 'code' | null = null;
   let presenceWindow: 'current' | 'previous' | 'expired' | null = null;
 
   if (presenceMode > 0) {
@@ -322,6 +325,27 @@ clockRoutes.post('/', async (c) => {
       } else {
         presenceWindow = verdict;
         presenceMethod = 'qr';
+      }
+    }
+    if (!body.presence_token && body.presence_code) {
+      // Typed 6-digit code (shared reception device — no phone to scan with).
+      // A 6-digit space is online-brute-forceable in principle, so attempts
+      // are per-user rate-limited; the rotating window does the rest.
+      const rl = await rateLimit(c.env, `presence-code:${session.userId}`, 5, 300);
+      if (!rl.allowed) {
+        c.header('Retry-After', String(rl.retryAfter));
+        return error(c, 'RATE_LIMITED', 'Too many code attempts. Scan the QR instead, or try again shortly.', 429);
+      }
+      const verdict = await validatePresenceCode(c.env, body.presence_code);
+      if (verdict === 'invalid') {
+        // Same philosophy as a missed token: a typo/stale code is evidence-
+        // only (expired/pending), never a forgery rejection.
+        devLog(c.env, `[PRESENCE] code miss user=${session.userId}`);
+        presenceWindow = 'expired';
+        presenceMethod = 'qr_pending';
+      } else {
+        presenceWindow = verdict;
+        presenceMethod = 'code';
       }
     }
     presenceMethod ??= 'none';
