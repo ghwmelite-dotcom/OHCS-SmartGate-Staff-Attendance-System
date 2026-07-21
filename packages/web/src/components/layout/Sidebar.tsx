@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, ClipboardCheck, Users, ScrollText, BarChart3, FileText, Settings, LogOut, ChevronsLeft, ChevronsRight, UserCircle, Calendar, Star } from 'lucide-react';
+import { LayoutDashboard, ClipboardCheck, Users, ScrollText, BarChart3, FileText, Settings, LogOut, ChevronsLeft, ChevronsRight, UserCircle, Calendar, Star, BookMarked } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import { useSidebarStore } from '@/stores/sidebar';
 
@@ -24,6 +24,10 @@ const FEEDBACK_NAV = [
 
 const ADMIN_NAV_SUPER = [
   { to: '/admin', icon: Settings, label: 'Admin' },
+];
+
+const DOCS_NAV = [
+  { to: '/docs', icon: BookMarked, label: 'Documentation' },
 ];
 
 const ADMIN_NAV_ADMIN = [
@@ -118,6 +122,10 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
           <>
             <div className="h-[1px] w-full bg-white/8 my-2" />
             {(isSuperadmin ? ADMIN_NAV_SUPER : ADMIN_NAV_ADMIN).map((item) => (
+              <NavItem key={item.to} {...item} collapsed={collapsed} />
+            ))}
+            {/* Documentation — superadmin only */}
+            {isSuperadmin && DOCS_NAV.map((item) => (
               <NavItem key={item.to} {...item} collapsed={collapsed} />
             ))}
           </>

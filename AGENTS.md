@@ -83,6 +83,11 @@ relevant conventions; the user says "work the loop" to activate it.
 - **Offline queues** (IndexedDB + SW replay): `clock-queue` (staff), `visit-queue`
   (web); mutations carry `crypto.randomUUID()` idempotency keys; server dedupes via
   partial unique indexes.
+- **Docs stay current.** The superadmin documentation page (`/docs`, content in
+  `packages/web/src/docs/content.ts`) is a maintained artifact: every shipped
+  feature adds or updates its entry there in the same commit, with the correct
+  status badge (`live` / `shadow` / `design`). That page is the user-facing
+  mirror of the feature-state table below — keep all three in sync.
 
 ## Operational gotchas (learned the hard way)
 

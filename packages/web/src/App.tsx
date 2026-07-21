@@ -14,6 +14,7 @@ import { BookingPage } from './pages/BookingPage';
 import { AdminPage } from './pages/AdminPage';
 import { AppointmentsPage } from './pages/AppointmentsPage';
 import { FeedbackPage } from './pages/FeedbackPage';
+import { DocsPage } from './pages/DocsPage';
 import { VisitLogPage } from './pages/VisitLogPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { ReportsPage } from './pages/ReportsPage';
@@ -173,6 +174,7 @@ export function App() {
             <Route path="visit-log" element={<VisitLogPage />} />
             <Route path="appointments" element={<AppointmentsPage />} />
             <Route path="feedback" element={<FeedbackPage />} />
+            <Route path="docs" element={<DocsPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="admin" element={<AdminPage />} />

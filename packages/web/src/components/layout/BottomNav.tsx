@@ -16,6 +16,7 @@ import {
   UserCircle,
   Calendar,
   Star,
+  BookMarked,
 } from 'lucide-react';
 
 const MAIN_ITEMS = [
@@ -37,6 +38,7 @@ const FEEDBACK_ITEM = { to: '/feedback', icon: Star, label: 'Feedback' };
 
 const ADMIN_ITEMS = [
   { to: '/admin', icon: Settings, label: 'Admin' },
+  { to: '/docs', icon: BookMarked, label: 'Documentation' },
 ];
 
 export function BottomNav() {
