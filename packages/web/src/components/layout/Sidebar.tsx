@@ -101,8 +101,8 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
         )}
       </div>
 
-      {/* Navigation */}
-      <nav className={cn('flex-1 py-2 space-y-1 relative', collapsed ? 'px-2' : 'px-3')}>
+      {/* Navigation — scrolls when items exceed available height; footer stays pinned */}
+      <nav className={cn('sidebar-nav-scroll flex-1 min-h-0 overflow-y-auto overflow-x-hidden py-2 space-y-1 relative', collapsed ? 'px-2' : 'px-3')}>
         {NAV_ITEMS.map((item) => (
           <NavItem key={item.to} {...item} collapsed={collapsed} />
         ))}
@@ -134,7 +134,7 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
 
       {/* Motto */}
       {!collapsed && (
-        <div className="relative px-5 py-3">
+        <div className="relative px-5 py-3 shrink-0">
           <p className="text-[9px] tracking-[0.2em] uppercase text-center font-semibold" style={{ color: '#D4A017' }}>
             Loyalty &middot; Excellence &middot; Service
           </p>
@@ -142,7 +142,7 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
       )}
 
       {/* Collapse toggle + sign out */}
-      <div className={cn('relative pb-4', collapsed ? 'px-2' : 'px-3')}>
+      <div className={cn('relative pb-4 shrink-0', collapsed ? 'px-2' : 'px-3')}>
         <div className="h-[1px] w-full bg-white/8 mb-3" />
 
         {/* Collapse toggle — desktop only */}
