@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { KeyRound, LogOut } from 'lucide-react';
+import { KeyRound, LogOut, UserRound } from 'lucide-react';
 import { SettingsMenu } from './SettingsMenu';
+import { ProfileModal } from './ProfileModal';
 import { PinChangeModal } from '@/hooks/usePinChange';
 import { useAuthStore } from '@/stores/auth';
 
 export function BottomNav() {
   const logout = useAuthStore((s) => s.logout);
   const [showPin, setShowPin] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
 
   return (
     <>
@@ -20,6 +22,14 @@ export function BottomNav() {
       >
         <div className="flex items-stretch justify-around h-[56px] px-2">
           <SettingsMenu placement="top" variant="nav-item" />
+          <button
+            type="button"
+            onClick={() => setShowProfile(true)}
+            className="flex flex-col items-center justify-center gap-0.5 px-6 h-full text-white/70 hover:text-white transition-colors"
+          >
+            <UserRound className="h-5 w-5" />
+            <span className="text-[10px] font-medium tracking-wide">Profile</span>
+          </button>
           <button
             type="button"
             onClick={() => setShowPin(true)}
@@ -39,6 +49,7 @@ export function BottomNav() {
         </div>
       </nav>
       {showPin && <PinChangeModal onClose={() => setShowPin(false)} />}
+      {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
     </>
   );
 }

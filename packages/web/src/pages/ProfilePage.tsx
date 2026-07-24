@@ -25,6 +25,7 @@ export function ProfilePage() {
   const user = useAuthStore((s) => s.user);
   const updateProfile = useAuthStore((s) => s.updateProfile);
 
+  const [name, setName] = useState(user?.name ?? '');
   const [phone, setPhone] = useState(user?.phone ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
   const [pin, setPin] = useState('');
@@ -76,15 +77,19 @@ export function ProfilePage() {
 
   if (!user) return null;
 
+  const nameChanged = name.trim() !== user.name;
   const emailChanged = email !== user.email;
+  // Identity fields (name, email) need PIN confirmation; phone stays ungated.
+  const pinRequired = nameChanged || emailChanged;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     setResult(null);
     try {
-      const patch: { phone?: string; email?: string; current_pin?: string } = {};
+      const patch: { name?: string; phone?: string; email?: string; current_pin?: string } = {};
       if (phone !== (user?.phone ?? '')) patch.phone = phone;
+      if (nameChanged) { patch.name = name.trim(); patch.current_pin = pin; }
       if (emailChanged) { patch.email = email; patch.current_pin = pin; }
       if (Object.keys(patch).length === 0) {
         setResult({ ok: false, msg: 'No changes to save.' });
@@ -109,7 +114,7 @@ export function ProfilePage() {
         <h1 className="text-[28px] font-bold text-foreground tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
           My Profile
         </h1>
-        <p className="text-[15px] text-muted mt-0.5">Update your contact details</p>
+        <p className="text-[15px] text-muted mt-0.5">View and correct your basic bio data</p>
       </div>
 
       {/* Identity card */}
@@ -187,8 +192,27 @@ export function ProfilePage() {
         <div className="h-[2px]" style={{ background: 'linear-gradient(90deg, #D4A017, #F5D76E, #D4A017)' }} />
         <div className="p-6 space-y-5">
           <h2 className="text-base font-bold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
-            Contact Details
+            Basic Details
           </h2>
+
+          {/* Name */}
+          <div>
+            <label className="block text-[12px] font-semibold text-foreground/70 uppercase tracking-wide mb-1.5">
+              <span className="flex items-center gap-1.5"><UserCircle className="h-3.5 w-3.5" /> Full Name</span>
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={inputCls}
+              placeholder="Ama Serwaa"
+              minLength={2}
+              maxLength={120}
+            />
+            {nameChanged && (
+              <p className="text-[12px] text-muted mt-1">This is the name shown on your attendance and visit records.</p>
+            )}
+          </div>
 
           {/* Phone */}
           <div>
@@ -222,11 +246,11 @@ export function ProfilePage() {
             )}
           </div>
 
-          {/* PIN confirmation — only shown when email changes */}
-          {emailChanged && (
+          {/* PIN confirmation — shown when an identity field (name/email) changes */}
+          {pinRequired && (
             <div>
               <label className="block text-[12px] font-semibold text-foreground/70 uppercase tracking-wide mb-1.5">
-                <span className="flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" /> Current PIN (to confirm email change)</span>
+                <span className="flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" /> Current PIN (to confirm {nameChanged && emailChanged ? 'name & email change' : nameChanged ? 'name change' : 'email change'})</span>
               </label>
               <input
                 type="password"
@@ -236,7 +260,7 @@ export function ProfilePage() {
                 className={cn(inputCls, 'text-center tracking-[0.4em] font-mono text-xl')}
                 placeholder="••••"
                 inputMode="numeric"
-                required={emailChanged}
+                required={pinRequired}
               />
             </div>
           )}
@@ -255,7 +279,7 @@ export function ProfilePage() {
 
           <button
             type="submit"
-            disabled={saving || (emailChanged && (pin.length < 4 || pin.length > 6))}
+            disabled={saving || (pinRequired && (pin.length < 4 || pin.length > 6))}
             className="w-full h-11 bg-primary text-white text-[14px] font-semibold rounded-xl hover:bg-primary-light transition-all disabled:opacity-50 shadow-lg shadow-primary/15 active:scale-[0.98]"
           >
             {saving ? 'Saving…' : 'Save Changes'}

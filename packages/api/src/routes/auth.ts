@@ -6,6 +6,7 @@ import { LoginSchema, VerifyOtpSchema } from '../lib/validation';
 import { createOtp, verifyOtp, verifyPin, hashPin, needsRehash, createSession, deleteSession, getSession, readSessionId, getUserAuthState, bumpSessionEpoch, getPinLock, recordPinFailure, clearPinLock, sessionCookieOptions, sessionCookieDeleteOptions } from '../services/auth';
 import { success, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
+import { recordAudit } from '../services/audit';
 import { z } from 'zod';
 
 export const authRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
@@ -122,10 +123,11 @@ authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
   }
 
   const user = await c.env.DB.prepare(
-    `SELECT id, name, email, role, pin_hash, is_active, pin_acknowledged FROM users WHERE ${lookupColumn} = ?`
+    `SELECT id, name, email, role, pin_hash, is_active, pin_acknowledged, staff_id, nss_number, intern_code, phone FROM users WHERE ${lookupColumn} = ?`
   ).bind(rawId).first<{
     id: string; name: string; email: string; role: string;
     pin_hash: string | null; is_active: number; pin_acknowledged: number;
+    staff_id: string | null; nss_number: string | null; intern_code: string | null; phone: string | null;
   }>();
 
   if (!user || !user.is_active) {
@@ -169,6 +171,10 @@ authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      staff_id: user.staff_id,
+      nss_number: user.nss_number,
+      intern_code: user.intern_code,
+      phone: user.phone,
       pin_acknowledged: user.pin_acknowledged === 1,
       session_token: sessionId,
     },
@@ -177,13 +183,16 @@ authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
 
 const profileUpdateSchema = z
   .object({
+    name: z.string().trim().min(2).max(120).optional(),
     phone: z.string().max(20).trim().optional().or(z.literal('')),
     email: z.string().email().max(255).toLowerCase().trim().optional(),
     current_pin: z.string().regex(/^\d{4,6}$/).optional(),
   })
   .refine(
-    (v) => !v.email || !!v.current_pin,
-    { message: 'current_pin is required when changing email', path: ['current_pin'] }
+    // Identity fields (name lands on attendance records, email is the login
+    // identifier) require PIN confirmation; phone-only edits stay ungated.
+    (v) => !(v.email || v.name) || !!v.current_pin,
+    { message: 'current_pin is required when changing name or email', path: ['current_pin'] }
   );
 
 authRoutes.patch('/profile', zValidator('json', profileUpdateSchema), async (c) => {
@@ -195,7 +204,7 @@ authRoutes.patch('/profile', zValidator('json', profileUpdateSchema), async (c) 
   const body = c.req.valid('json');
   const userId = session.userId;
 
-  if (body.email !== undefined) {
+  if (body.email !== undefined || body.name !== undefined) {
     const lock = await getPinLock(c.env, userId);
     if (lock.locked) {
       c.header('Retry-After', String(lock.retryAfter));
@@ -215,6 +224,10 @@ authRoutes.patch('/profile', zValidator('json', profileUpdateSchema), async (c) 
   const fields: string[] = [];
   const values: unknown[] = [];
 
+  if (body.name !== undefined) {
+    fields.push('name = ?');
+    values.push(body.name);
+  }
   if (body.phone !== undefined) {
     fields.push('phone = ?');
     values.push(body.phone || null);
@@ -233,13 +246,31 @@ authRoutes.patch('/profile', zValidator('json', profileUpdateSchema), async (c) 
   values.push(userId);
   await c.env.DB.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
 
+  // Name/email are identity fields — corrections land on attendance records and
+  // the login identifier, so they go into the hash-chained audit log.
+  if (body.name !== undefined || body.email !== undefined) {
+    const changed = [body.name !== undefined && 'name', body.email !== undefined && 'email']
+      .filter(Boolean).join(' + ');
+    await recordAudit(c.env, {
+      actor: { userId, role: session.role, label: session.name },
+      ip: c.req.header('cf-connecting-ip') ?? null,
+    }, {
+      action: 'profile.update', entityType: 'user', entityId: userId,
+      summary: `Self-service bio update — ${changed}`,
+      changes: {
+        ...(body.name !== undefined ? { name: { from: session.name, to: body.name } } : {}),
+        ...(body.email !== undefined ? { email: { from: session.email, to: body.email } } : {}),
+      },
+    });
+  }
+
   if (body.email !== undefined) {
     await bumpSessionEpoch(c.env, userId);
     await deleteSession(sessionId, c.env);
     const row = await c.env.DB.prepare('SELECT session_epoch FROM users WHERE id = ?')
       .bind(userId).first<{ session_epoch: number }>();
     const epoch = row?.session_epoch ?? 0;
-    const { sessionId: newSid, ttl } = await createSession(userId, body.email, session.role, session.name, c.env, false, epoch);
+    const { sessionId: newSid, ttl } = await createSession(userId, body.email, session.role, body.name ?? session.name, c.env, false, epoch);
     setCookie(c, 'session_id', newSid, sessionCookieOptions(c.env, ttl));
   }
 
@@ -311,10 +342,10 @@ authRoutes.get('/me', async (c) => {
   // Read name/email/role fresh from DB so edits made in the admin portal
   // propagate without requiring the user to log out and back in.
   const row = await c.env.DB.prepare(
-    'SELECT name, email, staff_id, phone, role, display_role, pin_acknowledged, is_active FROM users WHERE id = ?'
+    'SELECT name, email, staff_id, nss_number, intern_code, phone, role, display_role, pin_acknowledged, is_active FROM users WHERE id = ?'
   )
     .bind(session.userId)
-    .first<{ name: string; email: string; staff_id: string | null; phone: string | null; role: string; display_role: string | null; pin_acknowledged: number; is_active: number }>();
+    .first<{ name: string; email: string; staff_id: string | null; nss_number: string | null; intern_code: string | null; phone: string | null; role: string; display_role: string | null; pin_acknowledged: number; is_active: number }>();
 
   if (!row || row.is_active !== 1) {
     return error(c, 'UNAUTHORIZED', 'Account disabled or deleted', 401);
@@ -326,6 +357,8 @@ authRoutes.get('/me', async (c) => {
       name: row.name,
       email: row.email,
       staff_id: row.staff_id,
+      nss_number: row.nss_number,
+      intern_code: row.intern_code,
       phone: row.phone,
       role: row.role,
       display_role: row.display_role,

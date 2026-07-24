@@ -40,6 +40,10 @@ export const api = {
     method: 'POST',
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   }),
+  patch: <T>(path: string, body?: unknown) => request<T>(path, {
+    method: 'PATCH',
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  }),
 };
 
 // ---- Clock-in re-auth + liveness helpers ----

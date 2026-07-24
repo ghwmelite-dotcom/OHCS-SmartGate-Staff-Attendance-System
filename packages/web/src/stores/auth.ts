@@ -21,7 +21,7 @@ interface AuthState {
   verify: (email: string, code: string, remember: boolean) => Promise<void>;
   logout: () => Promise<void>;
   checkSession: () => Promise<void>;
-  updateProfile: (patch: { phone?: string; email?: string; current_pin?: string }) => Promise<void>;
+  updateProfile: (patch: { name?: string; phone?: string; email?: string; current_pin?: string }) => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({

@@ -432,6 +432,15 @@ export const DOC_SECTIONS: DocSection[] = [
         summary: 'Role changes, PIN resets and deactivation bump the session epoch, invalidating every live session for that user immediately.',
         details: [],
       },
+      {
+        name: 'Self-service bio data',
+        status: 'live',
+        summary: 'Every user views and corrects their own name, phone and email — VMS My Profile page and the staff PWA\'s new Profile sheet (bottom nav). Name/email changes are PIN-confirmed and hash-chain audited; phone saves directly.',
+        details: [
+          'PATCH /auth/profile — name added 2026-07-24; email change still signs out other devices (epoch bump), name does not',
+          'Staff PWA gained a Profile modal (BottomNav → Profile) — its first profile surface',
+        ],
+      },
     ],
   },
   {

@@ -12,6 +12,10 @@ interface User {
   name: string;
   email: string;
   role: string;
+  staff_id?: string | null;
+  nss_number?: string | null;
+  intern_code?: string | null;
+  phone?: string | null;
   pin_acknowledged: boolean;
 }
 
@@ -23,6 +27,7 @@ interface AuthState {
   logout: () => Promise<void>;
   checkSession: () => Promise<void>;
   markPinAcknowledged: () => void;
+  updateProfile: (patch: { name?: string; phone?: string; email?: string; current_pin?: string }) => Promise<void>;
 }
 
 function identifierBody(identifier: Identifier): Record<string, string> {
@@ -75,4 +80,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   markPinAcknowledged: () =>
     set((state) => (state.user ? { user: { ...state.user, pin_acknowledged: true } } : state)),
+  updateProfile: async (patch) => {
+    const res = await api.patch<{ user: User }>('/auth/profile', patch);
+    const u = res.data?.user;
+    if (u) set((s) => ({ user: s.user ? { ...s.user, ...u } : u }));
+  },
 }));

@@ -129,7 +129,7 @@ relevant conventions; the user says "work the loop" to activate it.
 | Waiting-time SLA | **Shipped live**; cron `*/15 8-17 * * 1-5` escalates unanswered visits ≥30 min to directorate receivers (`sla_breach`, KV-deduped); dashboard wait colors + waiting-first sort | Cron registers on deploy |
 | Evacuation roll | **Shipped live**; `GET /reports/evacuation` + `/notify`; dashboard modal with print stylesheet | — |
 | Returning-visitor fast lane | **Shipped live**; kiosk `GET /kiosk/visitor-by-phone` (no-oracle 404, rate-limited) + "Been here before?" flow with locked identity; face step reuses the stored photo (Update/Continue) instead of a forced retake that would overwrite the reference | Manual kiosk test with a known returning visitor |
-| System docs page (`/docs`) | **Shipped live** (superadmin only); 10 sections / 48 feature cards rendered from `packages/web/src/docs/content.ts`; status badges live/shadow/design; search + scroll-spy pill nav; update rule in conventions + page footer | Keep `content.ts` in sync on every ship (conventions rule) |
+| System docs page (`/docs`) | **Shipped live** (superadmin only); 10 sections / 49 feature cards rendered from `packages/web/src/docs/content.ts`; status badges live/shadow/design; search + scroll-spy pill nav; update rule in conventions + page footer | Keep `content.ts` in sync on every ship (conventions rule) |
 | Client Service role (display tier) | **Shipped live**; `users.display_role` rides on `role='receptionist'` (reception parity — prod `users.role` CHECK blocks a 7th DB role value); violet badge in admin users table + header + profile; `roleLabel()` in `web/lib/roles.ts` | Migration applied on prod 2026-07-20 |
 | Visitor satisfaction survey | **Shipped live**; kiosk post-checkout 5-star survey (single-use KV `survey_token`, 10-min TTL) → optional comment → thanks; `visitor_surveys` table; Feedback page (stats/distribution/filters/CSV) gated reception-tier; ≤2★ fires `survey_low_rating` in-app + push | Run migration after deploy; watch response rate + first low-rating alert |
 | Face-match (enrolled reference) | **Design-only** — specs from 2026-04 exist, no implementation | Its own project; risk-fusion input stays optional until then |
@@ -146,6 +146,16 @@ relevant conventions; the user says "work the loop" to activate it.
 - Staff clock flow: tap → presence scan (GPS warms in parallel) → geofence →
   liveness prompt → MediaPipe challenge burst → WebAuthn/PIN re-auth → submit.
 - Audit: append-only hash-chained `audit_log`; `recordAudit` on sensitive mutations.
+
+## Session log — 2026-07-24
+
+Specs/plans: `2026-07-24-self-service-bio-data-design.md` + plan.
+Commits: `67256b8` (sidebar footer pinned — nav rail scrolls with a subtle
+hover-reveal scrollbar when items overflow), self-service bio data:
+`PATCH /auth/profile` gains PIN-gated `name` (+ `profile.update` audit entries
+for name/email), VMS My Profile editable name field, staff PWA's first profile
+surface (`ProfileModal` from a new BottomNav Profile button), `/auth/me` +
+pin-login now return staff_id/nss_number/intern_code/phone. No migration needed.
 
 ## Session log — 2026-07-21
 
