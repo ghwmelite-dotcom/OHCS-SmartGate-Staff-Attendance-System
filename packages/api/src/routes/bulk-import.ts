@@ -264,8 +264,10 @@ bulkImportRoutes.post('/officers', async (c) => {
   return success(c, { imported, skipped, errors });
 });
 
-// Bulk import NSS service personnel
-const NSS_NUMBER_REGEX = /^NSS[A-Z]{3}\d{7}$/;
+// Bulk import NSS service personnel.
+// Accepts the legacy NSS-prefixed format (NSS + 3 letters + 7 digits) and the
+// newer NSSA format (4-letter institution code + 12 digits, e.g. GIOT726234454925).
+const NSS_NUMBER_REGEX = /^(?:NSS[A-Z]{3}\d{7}|[A-Z]{4}\d{12})$/;
 
 const nssRowSchema = z.object({
   name: z.string().min(1).max(255),
@@ -305,7 +307,7 @@ bulkImportRoutes.post('/nss', async (c) => {
     const normalizedNss = nss_number.toUpperCase().trim();
 
     if (!NSS_NUMBER_REGEX.test(normalizedNss)) {
-      errors.push({ row: i + 1, message: `Invalid NSS number: ${nss_number} — expected NSS + 3 letters + 7 digits (e.g. NSSGUE8364724)` });
+      errors.push({ row: i + 1, message: `Invalid NSS number: ${nss_number} — expected NSS + 3 letters + 7 digits (e.g. NSSGUE8364724) or 4 letters + 12 digits (e.g. GIOT726234454925)` });
       skipped++;
       continue;
     }

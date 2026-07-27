@@ -84,7 +84,7 @@ export function InternRegistrationFields({
             onChange={(e) => onChange('email', e.target.value)}
             type="email"
             className={inputCls}
-            placeholder="akua.boateng@ohcs.gov.gh"
+            placeholder="akua.boateng@gmail.com"
           />
         </FormField>
       </div>

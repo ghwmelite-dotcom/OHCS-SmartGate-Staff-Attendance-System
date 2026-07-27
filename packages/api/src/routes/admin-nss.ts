@@ -16,7 +16,10 @@ export const adminNssRoutes = new Hono<{ Bindings: Env; Variables: { session: Se
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-const NSS_NUMBER_REGEX = /^NSS[A-Z]{3}\d{7}$/;
+// Accepts the legacy NSS-prefixed format (NSS + 3 letters + 7 digits, e.g.
+// NSSGUE8364724) and the newer NSSA format (4-letter institution code +
+// 12 digits, e.g. GIOT726234454925).
+const NSS_NUMBER_REGEX = /^(?:NSS[A-Z]{3}\d{7}|[A-Z]{4}\d{12})$/;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
@@ -87,7 +90,8 @@ const createNssSchema = z.object({
   nss_number: z
     .string()
     .trim()
-    .regex(NSS_NUMBER_REGEX, 'NSS number must match format NSSXXX0000000 (e.g. NSSGUE8364724)'),
+    .toUpperCase()
+    .regex(NSS_NUMBER_REGEX, 'NSS number must be NSS + 3 letters + 7 digits (e.g. NSSGUE8364724) or the newer 4 letters + 12 digits (e.g. GIOT726234454925)'),
   nss_start_date: z.string().refine(isValidIsoDate, 'nss_start_date must be ISO YYYY-MM-DD'),
   nss_end_date: z.string().refine(isValidIsoDate, 'nss_end_date must be ISO YYYY-MM-DD'),
   directorate_id: z.string().min(1, 'directorate_id is required'),
@@ -845,7 +849,7 @@ adminNssRoutes.post('/bulk-import', async (c) => {
 
     const name = (r.name ?? '').toString().trim();
     const email = (r.email ?? '').toString().trim().toLowerCase();
-    const nss_number = (r.nss_number ?? '').toString().trim();
+    const nss_number = (r.nss_number ?? '').toString().trim().toUpperCase();
     const nss_start_date = (r.nss_start_date ?? '').toString().trim();
     const nss_end_date = (r.nss_end_date ?? '').toString().trim();
     const dirAbbrRaw = (r.directorate_abbreviation ?? '').toString().trim();
@@ -857,7 +861,7 @@ adminNssRoutes.post('/bulk-import', async (c) => {
       skipped.push({ row: rowNumber, reason: 'invalid email' }); continue;
     }
     if (!NSS_NUMBER_REGEX.test(nss_number)) {
-      skipped.push({ row: rowNumber, reason: 'nss_number must match NSSXXX0000000' }); continue;
+      skipped.push({ row: rowNumber, reason: 'nss_number must be NSSXXX0000000 or the newer XXXX000000000000 (e.g. GIOT726234454925)' }); continue;
     }
     if (!isValidIsoDate(nss_start_date)) {
       skipped.push({ row: rowNumber, reason: 'nss_start_date must be ISO YYYY-MM-DD' }); continue;

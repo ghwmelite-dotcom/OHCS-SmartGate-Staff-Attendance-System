@@ -26,7 +26,7 @@ const TAB_COPY: Record<Tab, { label: string; placeholder: string; helper: string
   },
   nss: {
     label: 'NSS Number',
-    placeholder: 'e.g. NSSGUE8364724',
+    placeholder: 'e.g. GIOT726234454925',
     helper: 'From your NSS posting letter',
   },
   intern: {

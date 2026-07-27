@@ -76,14 +76,17 @@ interface BulkResponse {
   pins: BulkInsertedRow[];
 }
 
-const NSS_NUMBER_REGEX = /^NSS[A-Z]{3}\d{7}$/;
+// Accepts the legacy NSS-prefixed format (NSS + 3 letters + 7 digits, e.g.
+// NSSGUE8364724) and the newer NSSA format (4-letter institution code +
+// 12 digits, e.g. GIOT726234454925).
+const NSS_NUMBER_REGEX = /^(?:NSS[A-Z]{3}\d{7}|[A-Z]{4}\d{12})$/;
 
 const nssFormSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   email: z.string().email('Invalid email').max(255),
   nss_number: z
     .string()
-    .regex(NSS_NUMBER_REGEX, 'Format: NSSXXX0000000 (e.g. NSSGUE8364724)'),
+    .regex(NSS_NUMBER_REGEX, 'Format: NSSXXX0000000 (NSSGUE8364724) or the newer XXXX000000000000 (GIOT726234454925)'),
   nss_start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
   nss_end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
   directorate_id: z.string().min(1, 'Select a directorate'),
@@ -105,8 +108,8 @@ const CSV_HEADERS = [
 function downloadTemplate() {
   const example = [
     'Akua Boateng',
-    'akua.boateng@ohcs.gov.gh',
-    'NSSGUE8364724',
+    'akua.boateng@gmail.com',
+    'GIOT726234454925',
     '2025-09-01',
     '2026-08-31',
     'RSIMD',
@@ -333,7 +336,7 @@ function SingleTab({ onDone }: { onDone: () => void }) {
           <input {...form.register('name')} className={inputCls} placeholder="Akua Boateng" autoFocus />
         </FormField>
         <FormField label="Email" error={form.formState.errors.email?.message}>
-          <input {...form.register('email')} type="email" className={inputCls} placeholder="akua.boateng@ohcs.gov.gh" />
+          <input {...form.register('email')} type="email" className={inputCls} placeholder="akua.boateng@gmail.com" />
         </FormField>
       </div>
 
@@ -342,7 +345,7 @@ function SingleTab({ onDone }: { onDone: () => void }) {
         error={form.formState.errors.nss_number?.message}
         hint={
           <span className={cn('font-mono', nssNumberValid ? 'text-success' : 'text-muted')}>
-            Format: NSSXXX0000000 — e.g. NSSGUE8364724
+            Format: 4 letters + 12 digits — e.g. GIOT726234454925 (legacy NSSXXX0000000 also accepted)
           </span>
         }
       >
@@ -353,8 +356,8 @@ function SingleTab({ onDone }: { onDone: () => void }) {
             },
           })}
           className={cn(inputCls, 'uppercase font-mono tracking-wide')}
-          placeholder="NSSGUE8364724"
-          maxLength={13}
+          placeholder="GIOT726234454925"
+          maxLength={16}
         />
       </FormField>
 
@@ -642,7 +645,7 @@ function BulkTab() {
           onChange={(e) => setCsvText(e.target.value)}
           rows={6}
           className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-background text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          placeholder={`${CSV_HEADERS.join(',')}\nAkua Boateng,akua.boateng@ohcs.gov.gh,NSSGUE8364724,2025-09-01,2026-08-31,RSIMD`}
+          placeholder={`${CSV_HEADERS.join(',')}\nAkua Boateng,akua.boateng@gmail.com,GIOT726234454925,2025-09-01,2026-08-31,RSIMD`}
         />
         {csvText && (
           <p className="mt-1 text-[11px] text-muted">

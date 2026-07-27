@@ -166,7 +166,14 @@ responses become a clear `BAD_RESPONSE` error with console diagnostics
 accuracy cap 30→35m, wall buffer 8→10m (client `geofence.ts` + server
 `clock.ts` in sync; worst-case buffer 45m stays short of the ~46m neighbour
 ministries). Regression tests: `api.test.ts` (submit URL + non-JSON guard),
-`geofence.test.ts` (tolerance bands). No migration needed.
+`geofence.test.ts` (tolerance bands). NSS registration (NSS type only):
+`NSS_NUMBER_REGEX` now also accepts the newer NSSA format — 4-letter
+institution code + 12 digits (e.g. GIOT726234454925) — alongside the legacy
+NSS + 3 + 7 format, in `admin-nss.ts`, `bulk-import.ts` and
+`NssRegistrationModal.tsx` (kept in sync); values normalised to uppercase
+server-side. Email fields on NSS/Intern forms accept any provider (validation
+was always provider-agnostic; placeholders/examples updated to reflect it).
+No migration needed.
 
 ## Session log — 2026-07-24
 
