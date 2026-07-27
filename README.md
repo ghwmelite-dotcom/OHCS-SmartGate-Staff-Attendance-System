@@ -20,7 +20,7 @@ OHCS SmartGate is a two-app system serving the Office of the Head of the Civil S
 
 Both apps run as independent Progressive Web Apps, share a single Cloudflare Workers API, and deploy globally on Cloudflare's edge network for sub-100ms latency across West Africa.
 
-> **Production URLs** · Staff: [staff-attendance.pages.dev](https://staff-attendance.pages.dev) · VMS: [ohcs-smartgate.pages.dev](https://ohcs-smartgate.pages.dev) · API: [ohcs-smartgate-api.ghwmelite.workers.dev](https://ohcs-smartgate-api.ghwmelite.workers.dev)
+> **Production URLs** · Staff: [staff-attendance.ohcsghana.org](https://staff-attendance.ohcsghana.org) · VMS: [smartgate.ohcsghana.org](https://smartgate.ohcsghana.org) · API: [ohcs-smartgate-api.ohcsghana-main.workers.dev](https://ohcs-smartgate-api.ohcsghana-main.workers.dev)
 
 ---
 
