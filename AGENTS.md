@@ -175,6 +175,20 @@ server-side. Email fields on NSS/Intern forms accept any provider (validation
 was always provider-agnostic; placeholders/examples updated to reflect it).
 No migration needed.
 
+Attendance-photo investigation (RSIMD report: clock-ins registered but no
+photo_url / blank PDF photo cell): attendance registration itself is complete
+— `/attendance/records` LEFT JOINs all active users, nothing filters on QR or
+photo, and the PDF always renders the row (photo cell just embeds
+`clock_in_photo` when present). `photo_url` is set ONLY from the liveness
+burst's canonical frame (sync enforce path or shadow-mode waitUntil path);
+burst-less submits (camera error, prompt-fetch failure, manual review, iOS
+fallback) and `skipped` decisions legitimately have no photo — QR-skip is
+unrelated to frames. Morning clock-ins predated the trailing-slash fix
+(deployed ~13:00 UTC), so affected staff got through via burst-less paths.
+Hardening: the shadow-mode background liveness verification's catch now fires
+`alertAdminError` ('clock:liveness-background') — previously a systemic
+Workers AI failure silently stripped photos with no signal.
+
 Product decision (initial PINs): NSS/intern initial PINs are random 6-digit
 (`generateInitialPin`), shown once to the admin at registration / in the bulk
 credential download, and forced-reset on first login. Using the last 4 digits

@@ -16,6 +16,7 @@ import { ALL_CHALLENGES, verifyLivenessBurst, getReviewCount, incrementReviewCou
 import type { LivenessChallenge, LivenessSignature } from '../services/liveness/types';
 import { computeRiskScore, riskBand, isBlockable, BLOCK_THRESHOLD, type RiskInput, type RiskFactor } from '../services/risk-score';
 import { sha256Hex } from '../db/migrations-index';
+import { alertAdminError } from '../lib/error-alert';
 
 export const clockRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -690,7 +691,13 @@ clockRoutes.post('/', async (c) => {
         }
         devLog(c.env, `[CLOCK_LIVENESS_BG] ${id} decision=${verification.decision} ms=${verification.signature.ms_total}`);
       } catch (e) {
+        // A failed background verification leaves the row with NULL liveness
+        // fields AND no photo_url — silent photo loss for an otherwise valid
+        // clock-in. Surface it (prod-only, throttled, PII-free) so a systemic
+        // Workers AI failure is noticed instead of discovered via blank photos
+        // in the attendance export.
         devLog(c.env, `[CLOCK_LIVENESS_BG] ${id} background verification threw: ${e instanceof Error ? e.message : String(e)}`);
+        await alertAdminError(c.env, 'clock:liveness-background', e);
       }
     })());
   }
