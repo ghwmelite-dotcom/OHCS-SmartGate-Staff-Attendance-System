@@ -175,6 +175,13 @@ server-side. Email fields on NSS/Intern forms accept any provider (validation
 was always provider-agnostic; placeholders/examples updated to reflect it).
 No migration needed.
 
+Product decision (initial PINs): NSS/intern initial PINs are random 6-digit
+(`generateInitialPin`), shown once to the admin at registration / in the bulk
+credential download, and forced-reset on first login. Using the last 4 digits
+of the NSS number as the default PIN was raised and **rejected** — predictable
+(anyone who knows a colleague's NSS number can guess it) and off-length (PINs
+are 6-digit everywhere). Distribution path = the bulk-import credential CSV.
+
 ## Session log — 2026-07-24
 
 Specs/plans: `2026-07-24-self-service-bio-data-design.md` + plan.
