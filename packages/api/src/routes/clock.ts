@@ -28,7 +28,7 @@ export const clockRoutes = new Hono<{ Bindings: Env; Variables: { session: Sessi
 // The accuracy-aware buffer (WALL_BUFFER_METERS + accuracy) absorbs GPS
 // jitter for staff right at the walls/doorway. NOTE: this is a tightly-packed
 // ministries block (Ministry of Justice ~46m, Controller & Accountant General's
-// ~49m away) — the worst-case buffer (8 + 30m accuracy cap = 38m) stays short
+// ~49m away) — the worst-case buffer (10 + 35m accuracy cap = 45m) stays short
 // of them, and borderline accepts are risk-weighted via the geofence_margin
 // risk factor rather than trusted blindly.
 type LatLng = readonly [number, number];
@@ -42,15 +42,18 @@ const OHCS_POLYGONS: readonly (readonly LatLng[])[] = [
 ];
 
 // Reject a clock-in if the device can't localise to better than this many
-// metres. Tight cap: GPS error directly translates to false-positive risk.
-const MAX_GPS_ACCURACY_METERS = 30;
+// metres. Kept tight (35m): GPS error directly translates to false-positive
+// risk, and the worst-case buffer this enables (10 + 35 = 45m) stays short of
+// the neighbouring ministries (~46-49m).
+const MAX_GPS_ACCURACY_METERS = 35;
 
 // Wall buffer to absorb mobile GPS jitter for staff genuinely inside the
 // building. Field testing showed a 5m buffer was rejecting users standing
-// inside (~5-10m typical fix error indoors), so bumped to 8m. Anything
-// noticeably larger starts re-opening the across-the-street false positive,
-// since the nearest road kerb is ~10-15m from the building footprint.
-const WALL_BUFFER_METERS = 8;
+// inside (~5-10m typical fix error indoors), so bumped to 8m, then 10m during
+// the RSIMD pilot (indoor drift was still rejecting genuinely-inside staff).
+// Anything noticeably larger starts re-opening the across-the-street false
+// positive, since the nearest road kerb is ~10-15m from the building footprint.
+const WALL_BUFFER_METERS = 10;
 
 // Ray-casting: cast a horizontal ray east from the point and count crossings.
 function pointInPolygon(lat: number, lng: number, poly: readonly LatLng[]): boolean {
@@ -455,7 +458,7 @@ clockRoutes.post('/', async (c) => {
   // → a genuinely-inside user rejected at 0.5×). The full reported accuracy is
   // therefore added to the wall buffer. Capped by MAX_GPS_ACCURACY_METERS so a
   // spoofed accuracy can't open the door arbitrarily wide — worst case is
-  // 8 + 30 = 38m, still short of the neighbouring ministries (~46-49m), and
+  // 10 + 35 = 45m, still short of the neighbouring ministries (~46-49m), and
   // borderline accepts are risk-weighted via the geofence_margin risk factor.
   const inside = insideAnyPolygon(latitude, longitude);
   const distance = inside ? 0 : distanceToNearestPolygonMeters(latitude, longitude);

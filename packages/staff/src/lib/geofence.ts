@@ -59,14 +59,16 @@ function distanceToPolygonMetersOne(lat: number, lng: number, poly: readonly Lat
   return min;
 }
 
-export const MAX_GPS_ACCURACY_METERS = 30;
+export const MAX_GPS_ACCURACY_METERS = 35;
 // Mirror of server WALL_BUFFER_METERS — keep in sync.
-export const WALL_BUFFER_METERS = 8;
+export const WALL_BUFFER_METERS = 10;
 
 // Same accuracy-aware buffer as the server: a fix's tolerance grows with the
 // device's reported uncertainty. Reported accuracy is ~1σ under open sky;
 // indoors with multipath the true error routinely exceeds it (a ±14m fix can
 // land 20m+ off), so the full reported accuracy is added to the wall buffer.
+// Worst case 10 + 35 (accuracy cap) = 45m — kept deliberately short of the
+// neighbouring ministries (~46-49m) so a spoofed accuracy can't reach them.
 export function effectiveBufferMeters(accuracy: number | undefined): number {
   const acc = accuracy && accuracy > 0 ? accuracy : 0;
   return WALL_BUFFER_METERS + acc;

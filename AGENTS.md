@@ -91,6 +91,13 @@ relevant conventions; the user says "work the loop" to activate it.
 
 ## Operational gotchas (learned the hard way)
 
+- **Hono strict routing: `/api/x/` ≠ `/api/x`.** A trailing-slash request 404s
+  with Hono's default plain-text `404 Not Found` body — and any client that
+  blindly calls `res.json()` on it shows V8's raw "Unexpected non-whitespace
+  character after JSON at position 4". Client fetches must match mounted paths
+  exactly; staff `api.ts` `readJsonEnvelope` converts non-JSON bodies into a
+  clear `BAD_RESPONSE` error (2026-07-27 incident).
+
 - **Migration-before-deploy sequencing.** When `app_settings` (or any table read by
   hot code) gains columns, the API deploy will 500 until the migration runs — the
   2026-07-19 smoke-check incident. Order: deploy → immediately run migrations.
@@ -146,6 +153,20 @@ relevant conventions; the user says "work the loop" to activate it.
 - Staff clock flow: tap → presence scan (GPS warms in parallel) → geofence →
   liveness prompt → MediaPipe challenge burst → WebAuthn/PIN re-auth → submit.
 - Audit: append-only hash-chained `audit_log`; `recordAudit` on sensitive mutations.
+
+## Session log — 2026-07-27
+
+RSIMD pilot prep. Fix: liveness (multipart) clock submits posted to
+`/api/clock/` — Hono strict routing 404s the trailing slash with plain-text
+"404 Not Found", which staff saw as "Unexpected non-whitespace character after
+JSON at position 4" (hit every Android user who completed liveness; iOS
+escaped via its burst-less fallback). Now posts to `/api/clock`; non-JSON
+responses become a clear `BAD_RESPONSE` error with console diagnostics
+(`readJsonEnvelope` in staff `api.ts`). Geofence loosened for the pilot:
+accuracy cap 30→35m, wall buffer 8→10m (client `geofence.ts` + server
+`clock.ts` in sync; worst-case buffer 45m stays short of the ~46m neighbour
+ministries). Regression tests: `api.test.ts` (submit URL + non-JSON guard),
+`geofence.test.ts` (tolerance bands). No migration needed.
 
 ## Session log — 2026-07-24
 

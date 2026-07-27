@@ -14,6 +14,22 @@ class ApiError extends Error {
   constructor(public code: string, message: string, public status: number) { super(message); }
 }
 
+// Parse a response body that MUST be the JSON envelope. A non-JSON body means
+// the request never reached a healthy API route (Hono's plain-text 404 on a
+// route miss, an edge/carrier error page, …). Surface a clear, actionable
+// message instead of V8's raw JSON.parse SyntaxError ("Unexpected
+// non-whitespace character after JSON at position …") — staff can't act on
+// that. The raw status + body snippet go to the console for remote diagnosis.
+async function readJsonEnvelope<T>(res: Response): Promise<ApiResponse<T>> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as ApiResponse<T>;
+  } catch {
+    console.error('[api] non-JSON response', { status: res.status, url: res.url, body: text.slice(0, 200) });
+    throw new ApiError('BAD_RESPONSE', `Unexpected response from the server (HTTP ${res.status}). Please try again.`, res.status);
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -26,7 +42,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<ApiR
     credentials: 'include',
     headers,
   });
-  const json = await res.json() as ApiResponse<T>;
+  const json = await readJsonEnvelope<T>(res);
   if (!res.ok || json.error) {
     if (res.status === 401 && !path.startsWith('/auth/')) window.location.href = '/login';
     throw new ApiError(json.error?.code ?? 'UNKNOWN', json.error?.message ?? 'Error', res.status);
@@ -139,13 +155,15 @@ export async function submitClock(input: ClockSubmission): Promise<ClockResult> 
     body = JSON.stringify(payload);
   }
 
-  const res = await fetch(`${API_BASE}/clock/`, {
+  // NOTE: no trailing slash — Hono's strict routing 404s `/api/clock/` with a
+  // plain-text body, which used to surface as a raw JSON.parse SyntaxError.
+  const res = await fetch(`${API_BASE}/clock`, {
     method: 'POST',
     credentials: 'include',
     headers,
     body,
   });
-  const json = await res.json() as ApiResponse<ClockResult>;
+  const json = await readJsonEnvelope<ClockResult>(res);
   if (!res.ok || json.error) {
     if (res.status === 401) window.location.href = '/login';
     throw new ApiError(json.error?.code ?? 'UNKNOWN', json.error?.message ?? 'Error', res.status);
