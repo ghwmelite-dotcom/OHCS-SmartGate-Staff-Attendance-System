@@ -8,7 +8,7 @@ import { visitorPhotoKey } from '../lib/photo-key';
 
 const PERSONAL_CATEGORIES = ['personal_visit'];
 
-const PUSH_WHITELIST = new Set(['visitor_arrival', 'clock_reminder', 'late_clock_alert', 'monthly_report_ready', 'absence_notice', 'checkout_sweep', 'sla_breach', 'watchlist_alert', 'survey_low_rating']);
+const PUSH_WHITELIST = new Set(['visitor_arrival', 'clock_reminder', 'clock_out_reminder', 'late_clock_alert', 'monthly_report_ready', 'absence_notice', 'checkout_sweep', 'sla_breach', 'watchlist_alert', 'survey_low_rating']);
 
 interface VisitNotifyData {
   visit_id: string;

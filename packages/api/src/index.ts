@@ -37,7 +37,7 @@ import { notificationsPushRoutes } from './routes/notifications-push';
 import { attendanceRoutes } from './routes/attendance';
 import { surveyRoutes } from './routes/surveys';
 import { sendDailySummary as sendDailySummaryFn } from './services/daily-summary';
-import { sendClockReminders, sendMonthlyReportReady } from './services/reminders';
+import { sendClockReminders, sendClockOutReminders, sendMonthlyReportReady } from './services/reminders';
 import { runNssEndOfServiceCheck } from './services/nss-eos';
 import { runCheckoutSweep } from './services/checkout-sweep';
 import { runSlaEscalation } from './services/sla-escalation';
@@ -160,12 +160,21 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil((async () => {
       switch (event.cron) {
-        case '*/15 7-9 * * 1-5':
+        case '*/15 8-10 * * 1-5':
+        case '0 11 * * 1-5':
           try {
             await sendClockReminders(env);
           } catch (err) {
             console.error(`[scheduled] clock-reminders failed: ${err instanceof Error ? err.message : String(err)}`);
             await alertAdminError(env, 'cron:clock-reminders', err);
+          }
+          break;
+        case '*/15 17-18 * * 1-5':
+          try {
+            await sendClockOutReminders(env);
+          } catch (err) {
+            console.error(`[scheduled] clock-out-reminders failed: ${err instanceof Error ? err.message : String(err)}`);
+            await alertAdminError(env, 'cron:clock-out-reminders', err);
           }
           break;
         case '0 9 1 * *':

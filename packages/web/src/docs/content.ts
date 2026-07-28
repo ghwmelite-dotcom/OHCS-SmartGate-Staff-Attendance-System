@@ -82,8 +82,9 @@ export const DOC_SECTIONS: DocSection[] = [
         status: 'live',
         summary: 'A fleet of scheduled jobs keeps the system tidy and the right people informed.',
         details: [
-          'Clock reminders · daily/weekly/monthly/yearly summaries · NSS end-of-service',
-          'SLA escalation every 15 min (8–17, Mon–Fri) · auto-checkout sweep 17:15 weekdays',
+          'Clock nudge ladder: clock-in nudges every 30 min 08:00–11:00, clock-out nudges 17:00/17:30 — per-user, stop the moment the officer complies',
+          'Push opt-in banner after login (14-day snooze) so nudges reach phones even with the app closed',
+          'Daily/weekly/monthly/yearly summaries · NSS end-of-service · SLA escalation every 15 min (8–17, Mon–Fri) · auto-checkout sweep 17:15 weekdays',
           'Nightly maintenance: photo retention purge + D1→R2 backup',
         ],
       },

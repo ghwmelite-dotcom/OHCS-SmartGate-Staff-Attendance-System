@@ -10,6 +10,7 @@ import { ConfettiBurst } from '@/components/ConfettiBurst';
 import { ReauthModal } from '@/components/ReauthModal';
 import { PresenceScanner } from '@/components/PresenceScanner';
 import { WebAuthnNudgeBanner } from '@/components/WebAuthnNudgeBanner';
+import { PushNudgeBanner } from '@/components/PushNudgeBanner';
 import { LivenessCapture } from '@/lib/liveness/LivenessCapture';
 import type { FrameBurst } from '@/lib/liveness/types';
 import { api, fetchClockPrompt, submitClock as apiSubmitClock, type ClockPrompt } from '@/lib/api';
@@ -685,6 +686,7 @@ export function ClockPage() {
 
           {/* IDLE — show big buttons */}
           {phase === 'idle' && (
+            <><div className="w-full mb-4"><PushNudgeBanner /></div>
             <div className="space-y-4 w-full">
               {canClockIn && (
                 <MagneticButton
@@ -715,7 +717,7 @@ export function ClockPage() {
                   <p className="text-[14px] text-muted mt-1">See you tomorrow 👋</p>
                 </div>
               )}
-            </div>
+            </div></>
           )}
 
           {/* LOCATING */}

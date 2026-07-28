@@ -156,6 +156,17 @@ relevant conventions; the user says "work the loop" to activate it.
 
 ## Session log — 2026-07-27
 
+Clock nudge ladder shipped (spec + plan `2026-07-27-clock-nudge-ladder*`):
+clock-in nudges every 30 min 08:00–11:00 and clock-out nudges 17:00/17:30,
+weekday + holiday/absence aware, **activated accounts only**
+(`pin_acknowledged=1`), per-user-per-slot KV dedupe; every tick re-queries
+clock status so the ladder stops the moment the officer complies. Crons:
+`*/15 7-9` replaced by `*/15 8-10` + `0 11`, added `*/15 17-18` (all Mon–Fri).
+New `clock_out_reminder` type added to the push whitelist. `PushNudgeBanner`
+in the staff PWA offers one-tap push opt-in post-login (14-day snooze) so
+nudges reach phones with the app closed. Tests: slot/message logic + audience
+SQL via node:sqlite (`reminders.test.ts`). Docs card updated.
+
 RSIMD pilot prep. Fix: liveness (multipart) clock submits posted to
 `/api/clock/` — Hono strict routing 404s the trailing slash with plain-text
 "404 Not Found", which staff saw as "Unexpected non-whitespace character after
