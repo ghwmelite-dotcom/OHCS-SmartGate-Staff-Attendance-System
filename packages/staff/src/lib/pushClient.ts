@@ -56,6 +56,25 @@ export async function enablePush(): Promise<void> {
   }
 }
 
+export interface TestPushResult {
+  sent: number;
+  delivered: number;
+  results: Array<{ provider: string; status: number; ok: boolean; error?: string }>;
+  hint?: string;
+}
+
+/** Send a diagnostic push to this device and return the per-subscription status. */
+export async function testPush(): Promise<TestPushResult> {
+  const res = await fetch(`${API_BASE}/api/notifications/push/test`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: authHeaders(),
+  });
+  const body = await res.json() as { data?: TestPushResult; error?: { message?: string } };
+  if (!res.ok || !body.data) throw new Error(body.error?.message || `Test failed (${res.status})`);
+  return body.data;
+}
+
 export async function disablePush(): Promise<void> {
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
