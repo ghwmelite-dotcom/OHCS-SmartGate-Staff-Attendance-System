@@ -12,11 +12,10 @@ import { rateLimit } from '../lib/rate-limit';
 import { resolveOverride } from '../services/override';
 import { validatePresenceToken, validatePresenceCode } from '../services/presence';
 import { isJpeg } from '../lib/image-magic';
-import { ALL_CHALLENGES, verifyLivenessBurst, getReviewCount, incrementReviewCount } from '../services/liveness';
+import { ALL_CHALLENGES, verifyLivenessBurst, getReviewCount, incrementReviewCount, LIVENESS_ENGINE_VERSION } from '../services/liveness';
 import type { LivenessChallenge, LivenessSignature } from '../services/liveness/types';
 import { computeRiskScore, riskBand, isBlockable, BLOCK_THRESHOLD, type RiskInput, type RiskFactor } from '../services/risk-score';
 import { sha256Hex } from '../db/migrations-index';
-import { alertAdminError } from '../lib/error-alert';
 
 export const clockRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -197,6 +196,8 @@ clockRoutes.post('/', async (c) => {
 
   let body: z.infer<typeof clockSchema>;
   let frames: ArrayBuffer[] | null = null;
+  // On-device (MediaPipe) verdict for whether the challenge motion completed.
+  let clientClaimedCompleted = false;
 
   if (isMultipart) {
     const form = await c.req.formData();
@@ -220,6 +221,7 @@ clockRoutes.post('/', async (c) => {
     const total = f0.size + f1.size + f2.size;
     if (total > TOTAL_LIMIT) return error(c, 'BURST_TOO_LARGE', 'Liveness burst exceeds size limit', 413);
     frames = [await f0.arrayBuffer(), await f1.arrayBuffer(), await f2.arrayBuffer()];
+    clientClaimedCompleted = form.get('challenge_action_completed') === 'true';
   } else {
     let parsed: unknown;
     try { parsed = await c.req.json(); } catch { return error(c, 'BAD_JSON', 'Invalid JSON body', 400); }
@@ -389,33 +391,28 @@ clockRoutes.post('/', async (c) => {
   }
 
   // ---- LIVENESS GATE ----
+  // Detection runs on-device: the staff PWA uses MediaPipe to confirm the
+  // challenge motion and reports the result as `challenge_action_completed`.
+  // The server trusts that verdict and independently gates on frame sharpness
+  // computed from the raw JPEG bytes (no image-decode, no Workers AI). It runs
+  // in both modes; shadow mode records the decision but never blocks — the
+  // fail-return and the manual-review cap below are gated on enforceLiveness.
   let livenessSignature: LivenessSignature | null = null;
   let livenessDecision: LivenessSignature['decision'] | null = null;
   let canonicalFrame: ArrayBuffer | null = null;
-  // When true, defer verifyLivenessBurst to a waitUntil background task so the
-  // user-visible response doesn't pay Workers AI cold-start latency. Only
-  // safe in shadow mode — enforce mode must gate the response on the result.
-  let deferLivenessVerification = false;
 
   if (frames && challengeAction) {
-    if (enforceLiveness) {
-      const verification = await verifyLivenessBurst({
-        ai: c.env.AI,
-        frames,
-        challenge: challengeAction,
-        modelVersion: settings.clockin_liveness_model_version,
-      });
-      livenessSignature = verification.signature;
-      livenessDecision = verification.decision;
-      canonicalFrame = verification.canonicalFrame;
+    const verification = await verifyLivenessBurst({
+      frames,
+      challenge: challengeAction,
+      clientCompleted: clientClaimedCompleted,
+    });
+    livenessSignature = verification.signature;
+    livenessDecision = verification.decision;
+    canonicalFrame = verification.canonicalFrame;
 
-      if (verification.decision === 'fail') {
-        return error(c, 'LIVENESS_FAILED', 'Liveness check failed. Please try again or submit for HR review.', 401);
-      }
-    } else {
-      // Shadow mode: insert with NULL liveness fields, run verification +
-      // R2 write in the background after the response goes out.
-      deferLivenessVerification = true;
+    if (enforceLiveness && verification.decision === 'fail') {
+      return error(c, 'LIVENESS_FAILED', 'Liveness check failed. Please try again or submit for HR review.', 401);
     }
   } else if (enforceLiveness) {
     livenessDecision = 'manual_review';
@@ -427,14 +424,15 @@ clockRoutes.post('/', async (c) => {
       face_score: 0,
       sharpness: 0,
       decision: 'manual_review',
-      model_version: settings.clockin_liveness_model_version,
+      model_version: LIVENESS_ENGINE_VERSION,
       screen_artifact_score: null,
       ms_total: 0,
     };
   }
 
-  // Manual-review cap — check BEFORE geofence (matches plan flow)
-  if (livenessDecision === 'manual_review') {
+  // Manual-review cap — enforce mode only (shadow mode records but never blocks).
+  // Checked BEFORE geofence (matches plan flow).
+  if (enforceLiveness && livenessDecision === 'manual_review') {
     const used = await getReviewCount(c.env.KV, session.userId);
     if (used >= settings.clockin_liveness_review_cap_per_week) {
       return error(c, 'LIVENESS_REVIEW_CAP', "You have reached this week's manual-review limit. Please contact HR.", 429);
@@ -529,7 +527,7 @@ clockRoutes.post('/', async (c) => {
 
     riskInput = {
       faceMatchStatus: null, // face-match not shipped (2026-04-29 spec); wire match_status here when it lands
-      livenessDecision,      // null in liveness-shadow mode — recomputed in the waitUntil below
+      livenessDecision,      // verified inline above; null only when no frames were submitted
       reauthMethod,
       geofence: {
         inside,
@@ -555,8 +553,6 @@ clockRoutes.post('/', async (c) => {
     riskFactors = r.factors;
 
     // Band enforcement — enforce mode only; shadow (1) never reaches this.
-    // With liveness in shadow mode the verdict is still pending here, so
-    // isBlockable is false and no block can fire — intended proportionality.
     if (settings.risk_fusion_mode === 2 && riskScore >= BLOCK_THRESHOLD) {
       const stepUpClean = livenessDecision === 'pass' && reauthMethod === 'webauthn'; // PIN fallback not accepted
       if (!stepUpClean) {
@@ -633,73 +629,14 @@ clockRoutes.post('/', async (c) => {
     devLog(c.env, `[CLOCK_RISK] ${id} score=${riskScore} band=${riskBand(riskScore)} factors=${riskFactors.map((f) => `${f.name}:${f.condition}:${f.weight > 0 ? '+' : ''}${f.weight}`).join(', ')}`);
   }
 
-  // Write canonical frame to R2 when verification produced one. We persist for
-  // both confident passes AND manual_review decisions so HR has an image to
-  // adjudicate; only `skipped` (AI unavailable — frame is not a verified
-  // capture) is excluded.
-  if (canonicalFrame && livenessDecision && livenessDecision !== 'skipped') {
+  // Write the canonical (sharpest) frame to R2. Persisted for both passes AND
+  // manual_review so HR has an image to adjudicate. Liveness is verified inline
+  // (no AI, no background defer), so the decision and frame are already known.
+  if (canonicalFrame && livenessDecision) {
     const r2Key = `photos/clock/${id}.jpg`;
     await c.env.STORAGE.put(r2Key, canonicalFrame, { httpMetadata: { contentType: 'image/jpeg' } });
     await c.env.DB.prepare('UPDATE clock_records SET photo_url = ? WHERE id = ?')
       .bind(`/api/photos/clock/${id}`, id).run();
-  }
-
-  // Shadow-mode: kick off liveness verification in the background. The row was
-  // already inserted with NULL liveness fields; this closure UPDATEs them once
-  // the (slow) AI work finishes. Saves ~3-7s of user-visible latency per
-  // clock-in by not blocking the response on Workers AI cold-start.
-  if (deferLivenessVerification && frames && challengeAction) {
-    const challenge = challengeAction;
-    const capturedFrames = frames;
-    const modelVersion = settings.clockin_liveness_model_version;
-    // Captured for the deferred risk recompute (null when risk_fusion_mode = 0).
-    const capturedRiskInput = riskInput;
-    c.executionCtx.waitUntil((async () => {
-      try {
-        const verification = await verifyLivenessBurst({
-          ai: c.env.AI,
-          frames: capturedFrames,
-          challenge,
-          modelVersion,
-        });
-        await c.env.DB.prepare(
-          'UPDATE clock_records SET liveness_decision = ?, liveness_signature = ? WHERE id = ?'
-        ).bind(
-          verification.decision,
-          JSON.stringify(verification.signature),
-          id,
-        ).run();
-        // Risk recompute: the row was scored with a pending (null) liveness
-        // verdict; fold the real verdict in now. Bands are NOT re-enforced in
-        // the background — a late verdict moves the row into/out of review,
-        // never blocks after the fact.
-        if (capturedRiskInput) {
-          const rescored = computeRiskScore({ ...capturedRiskInput, livenessDecision: verification.decision });
-          await c.env.DB.prepare(
-            'UPDATE clock_records SET risk_score = ?, risk_factors = ? WHERE id = ?'
-          ).bind(rescored.score, JSON.stringify(rescored.factors), id).run();
-        }
-        // Persist the canonical frame for passes AND manual_review (HR needs an
-        // image to adjudicate review cases); only skip when AI was unavailable.
-        if (verification.decision !== 'skipped') {
-          const r2Key = `photos/clock/${id}.jpg`;
-          await c.env.STORAGE.put(r2Key, verification.canonicalFrame, {
-            httpMetadata: { contentType: 'image/jpeg' },
-          });
-          await c.env.DB.prepare('UPDATE clock_records SET photo_url = ? WHERE id = ?')
-            .bind(`/api/photos/clock/${id}`, id).run();
-        }
-        devLog(c.env, `[CLOCK_LIVENESS_BG] ${id} decision=${verification.decision} ms=${verification.signature.ms_total}`);
-      } catch (e) {
-        // A failed background verification leaves the row with NULL liveness
-        // fields AND no photo_url — silent photo loss for an otherwise valid
-        // clock-in. Surface it (prod-only, throttled, PII-free) so a systemic
-        // Workers AI failure is noticed instead of discovered via blank photos
-        // in the attendance export.
-        devLog(c.env, `[CLOCK_LIVENESS_BG] ${id} background verification threw: ${e instanceof Error ? e.message : String(e)}`);
-        await alertAdminError(c.env, 'clock:liveness-background', e);
-      }
-    })());
   }
 
   // Consume the prompt — single-use enforced by KV.delete after a successful insert.
