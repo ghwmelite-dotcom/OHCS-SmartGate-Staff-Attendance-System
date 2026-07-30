@@ -16,7 +16,8 @@ import { getOfficeStatus } from './office-hours';
 
 const MORNING_FIRST_SLOT = 8 * 60;   // 08:00
 const MORNING_LAST_SLOT = 11 * 60;   // 11:00 inclusive
-const EVENING_SLOTS = [17 * 60, 17 * 60 + 30] as const; // 17:00, 17:30
+const EVENING_FIRST_SLOT = 15 * 60 + 30; // 15:30
+const EVENING_LAST_SLOT = 17 * 60;       // 17:00 inclusive
 
 function slotOf(nowMin: number): number {
   return Math.floor(nowMin / 30) * 30;
@@ -28,10 +29,10 @@ export function morningSlot(nowMin: number): number | null {
   return s >= MORNING_FIRST_SLOT && s <= MORNING_LAST_SLOT ? s : null;
 }
 
-/** Active evening slot for a given time, or null when outside the 17:00/17:30 windows. */
+/** Active evening slot for a given time, or null when outside 15:30–17:00. */
 export function eveningSlot(nowMin: number): number | null {
   const s = slotOf(nowMin);
-  return (EVENING_SLOTS as readonly number[]).includes(s) ? s : null;
+  return s >= EVENING_FIRST_SLOT && s <= EVENING_LAST_SLOT ? s : null;
 }
 
 export interface NudgeMessage { title: string; body: string }
@@ -69,17 +70,18 @@ export function buildClockInMessage(
   };
 }
 
-/** Evening message ladder. */
+/** Evening message ladder: soft, leave-time reminders from 15:30, then a
+ *  firmer "still in office" nudge in the 17:00 close-of-day slot. */
 export function buildClockOutMessage(slot: number, firstName: string): NudgeMessage {
-  if (slot >= EVENING_SLOTS[1]) {
+  if (slot >= EVENING_LAST_SLOT) {
     return {
       title: 'Still showing as in office',
       body: `${firstName}, tap to clock out and close your day.`,
     };
   }
   return {
-    title: `Wrapping up, ${firstName}?`,
-    body: "Don't forget to clock out before you leave.",
+    title: `Heading out, ${firstName}?`,
+    body: "When you leave, don't forget to clock out — one tap does it.",
   };
 }
 
@@ -187,8 +189,10 @@ export async function sendClockReminders(env: Env, now: Date = new Date()): Prom
 }
 
 /**
- * Evening clock-out ladder — fired by the weekday `*\/15 17-18` cron. Nudges
- * in the 17:00 and 17:30 slots to anyone clocked in but not yet clocked out.
+ * Evening clock-out ladder — fired by the weekday `*\/15 15-17` cron. Nudges
+ * every 30 min from 15:30 to 17:00 to anyone clocked in but not yet clocked
+ * out, stopping as soon as the officer clocks out (audience re-queried every
+ * tick).
  */
 export async function sendClockOutReminders(env: Env, now: Date = new Date()): Promise<void> {
   const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes();
