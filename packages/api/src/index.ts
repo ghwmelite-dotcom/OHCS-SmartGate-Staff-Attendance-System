@@ -169,7 +169,7 @@ export default {
             await alertAdminError(env, 'cron:clock-reminders', err);
           }
           break;
-        case '*/15 17-18 * * 1-5':
+        case '*/15 15-17 * * 1-5':
           try {
             await sendClockOutReminders(env);
           } catch (err) {

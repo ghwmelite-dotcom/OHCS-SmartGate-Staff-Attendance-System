@@ -1,7 +1,7 @@
 /**
  * Clock nudge ladder tests (spec: docs/superpowers/specs/2026-07-27-clock-nudge-ladder-design.md).
  *
- * - Slot gating: morning 08:00–11:00 (30-min slots), evening 17:00/17:30 only.
+ * - Slot gating: morning 08:00–11:00, evening 15:30–17:00 (30-min slots).
  * - Message ladder: tone escalation, streak hook, final-slot copy.
  * - Audience SQL (REAL queries via node:sqlite, pattern from
  *   admin-nss-export.test.ts): activated-only targeting, compliance stops the
@@ -38,13 +38,18 @@ describe('morningSlot', () => {
 });
 
 describe('eveningSlot', () => {
-  it('is only the 17:00 and 17:30 slots', () => {
-    expect(eveningSlot(16 * 60 + 59)).toBeNull();
-    expect(eveningSlot(17 * 60)).toBe(1020);
-    expect(eveningSlot(17 * 60 + 14)).toBe(1020);
-    expect(eveningSlot(17 * 60 + 30)).toBe(1050);
-    expect(eveningSlot(17 * 60 + 45)).toBe(1050);
-    expect(eveningSlot(18 * 60)).toBeNull();
+  it('is null before 15:30 and once the 17:00 slot window closes', () => {
+    expect(eveningSlot(15 * 60 + 29)).toBeNull(); // 15:29 tick lands in the 15:00 slot
+    expect(eveningSlot(17 * 60 + 15)).toBe(1020); // 17:15 tick still lands in the 17:00 slot
+    expect(eveningSlot(17 * 60 + 30)).toBeNull();
+  });
+
+  it('maps ticks into 30-min slots across 15:30–17:00', () => {
+    expect(eveningSlot(15 * 60 + 30)).toBe(930);
+    expect(eveningSlot(15 * 60 + 45)).toBe(930);
+    expect(eveningSlot(16 * 60)).toBe(960);
+    expect(eveningSlot(16 * 60 + 30)).toBe(990);
+    expect(eveningSlot(17 * 60)).toBe(1020); // final slot inclusive
   });
 });
 
@@ -75,9 +80,10 @@ describe('buildClockInMessage', () => {
 });
 
 describe('buildClockOutMessage', () => {
-  it('soft first nudge at 17:00, firmer at 17:30', () => {
-    expect(buildClockOutMessage(1020, 'Kofi').title).toContain('Wrapping up');
-    expect(buildClockOutMessage(1050, 'Kofi').title).toContain('Still showing');
+  it('soft leave-time nudge before 17:00, firmer at the 17:00 close slot', () => {
+    expect(buildClockOutMessage(930, 'Kofi').title).toContain('Heading out'); // 15:30
+    expect(buildClockOutMessage(990, 'Kofi').title).toContain('Heading out'); // 16:30
+    expect(buildClockOutMessage(1020, 'Kofi').title).toContain('Still showing'); // 17:00
   });
 });
 
