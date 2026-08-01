@@ -15,6 +15,7 @@ export interface AppSettings {
   presence_qr_mode?: number;
   risk_fusion_mode?: number;
   risk_fusion_block_enabled?: number;
+  reminder_directorate_ids?: string;
   updated_by: string | null;
   updated_at: string;
 }
@@ -38,6 +39,7 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
   const [presenceQrMode, setPresenceQrMode] = useState(current.presence_qr_mode ?? 0);
   const [riskFusionMode, setRiskFusionMode] = useState(current.risk_fusion_mode ?? 0);
   const [riskFusionBlock, setRiskFusionBlock] = useState((current.risk_fusion_block_enabled ?? 0) === 1);
+  const [reminderDirs, setReminderDirs] = useState(current.reminder_directorate_ids ?? '');
   const [localErr, setLocalErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,10 +53,11 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
     setPresenceQrMode(current.presence_qr_mode ?? 0);
     setRiskFusionMode(current.risk_fusion_mode ?? 0);
     setRiskFusionBlock((current.risk_fusion_block_enabled ?? 0) === 1);
+    setReminderDirs(current.reminder_directorate_ids ?? '');
   }, [current]);
 
   const mutation = useMutation({
-    mutationFn: (body: { work_start_time: string; late_threshold_time: string; work_end_time: string; reception_override_pin?: string; clockin_reauth_enforce: number; clockin_passive_liveness_enforce: number; presence_qr_mode: number; risk_fusion_mode: number; risk_fusion_block_enabled: number }) =>
+    mutationFn: (body: { work_start_time: string; late_threshold_time: string; work_end_time: string; reception_override_pin?: string; clockin_reauth_enforce: number; clockin_passive_liveness_enforce: number; presence_qr_mode: number; risk_fusion_mode: number; risk_fusion_block_enabled: number; reminder_directorate_ids: string }) =>
       api.put<AppSettings>('/admin/settings', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['app-settings'] });
@@ -86,6 +89,7 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
       presence_qr_mode: presenceQrMode,
       risk_fusion_mode: riskFusionMode,
       risk_fusion_block_enabled: riskFusionBlock ? 1 : 0,
+      reminder_directorate_ids: reminderDirs.trim(),
     });
   }
 
@@ -248,6 +252,24 @@ export function SettingsModal({ current, canEdit, onClose }: Props) {
                 <p className="text-[11px] text-foreground">Enforcing can block legitimate clock-ins (liveness false-rejects, or offline clock-ins with no prompt). Roll out one at a time and watch the HR-review queue.</p>
               </div>
             )}
+          </div>
+
+          <div className="border-t border-border pt-4">
+            <label className="block text-[13px] font-semibold text-foreground mb-1">
+              Reminder directorates (pilot scope)
+            </label>
+            <input
+              type="text"
+              autoComplete="off"
+              value={reminderDirs}
+              onChange={e => setReminderDirs(e.target.value)}
+              disabled={!canEdit}
+              placeholder="e.g. dir_rsimd"
+              className="w-full h-10 px-3 rounded-xl border border-border bg-background text-[14px] font-mono focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed"
+            />
+            <p className="text-[11px] text-muted mt-1">
+              Comma-separated directorate ids. Only staff in these directorates receive clock-in/out nudges. Empty = all directorates.
+            </p>
           </div>
 
           <div className="border-t border-border pt-4">

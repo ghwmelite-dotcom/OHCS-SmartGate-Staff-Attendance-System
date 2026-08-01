@@ -10,6 +10,16 @@ const PERSONAL_CATEGORIES = ['personal_visit'];
 
 const PUSH_WHITELIST = new Set(['visitor_arrival', 'clock_reminder', 'clock_out_reminder', 'late_clock_alert', 'monthly_report_ready', 'absence_notice', 'checkout_sweep', 'sla_breach', 'watchlist_alert', 'survey_low_rating']);
 
+// Telegram delivery from the sendTypedNotification funnel is restricted to the
+// staff clock reminders — visitor_arrival and watchlist_alert already send
+// Telegram through their own dedicated paths (sendArrivalAlert /
+// notifyTelegramAdminChat), so whitelisting them here would double-fire.
+const TELEGRAM_WHITELIST = new Set(['clock_reminder', 'clock_out_reminder']);
+
+// Branded staff-PWA origin; mirrors services/email.ts. env.STAFF_APP_URL wins
+// when set (wrangler.toml [vars] sets it in both prod and dev).
+const DEFAULT_STAFF_APP_URL = 'https://staff-attendance.ohcsghana.org';
+
 interface VisitNotifyData {
   visit_id: string;
   host_officer_id: string;
@@ -439,6 +449,37 @@ export async function sendTypedNotification(env: Env, opts: {
     `INSERT INTO notifications (id, user_id, type, title, body, visit_id)
      VALUES (?, ?, ?, ?, ?, ?)`
   ).bind(notifId, opts.userId, opts.type, opts.title, opts.body, opts.visitId ?? null).run();
+
+  // Best-effort Telegram arm (spec §6.1) — staff clock reminders only, so
+  // nudges reach officers with the PWA closed even without push permission.
+  // Never throws into the caller.
+  if (TELEGRAM_WHITELIST.has(opts.type) && env.TELEGRAM_BOT_TOKEN) {
+    try {
+      const chatId = await env.KV.get(`telegram-user:${opts.userId}`);
+      if (chatId) {
+        const ent = await env.DB.prepare(
+          `SELECT d.abbreviation AS abbr FROM users u
+             LEFT JOIN directorates d ON d.id = u.directorate_id
+            WHERE u.id = ?`
+        ).bind(opts.userId).first<{ abbr: string | null }>();
+        const label = `${ent?.abbr ?? 'OHCS'} Attendance`;
+        const base = env.STAFF_APP_URL ?? DEFAULT_STAFF_APP_URL;
+        const text = [
+          `<b>${escapeHtml(opts.title)}</b>`,
+          '',
+          escapeHtml(opts.body),
+          '',
+          `<a href="${base}${opts.url}">Open clock page</a>`,
+          '',
+          `— ${escapeHtml(label)}`,
+        ].join('\n');
+        const ok = await sendTelegramMessage({ chatId, text, token: env.TELEGRAM_BOT_TOKEN });
+        await recordNotifyOutcome(env, 'telegram', ok);
+      }
+    } catch (err) {
+      devError(env, '[notifier] telegram reminder send failed', err);
+    }
+  }
 
   if (PUSH_WHITELIST.has(opts.type)) {
     const subs = await env.DB.prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?')

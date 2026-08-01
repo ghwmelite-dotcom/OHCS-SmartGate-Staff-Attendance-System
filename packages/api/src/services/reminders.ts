@@ -98,18 +98,26 @@ const AUDIENCE_SQL = `
         AND ? BETWEEN a.notice_date AND COALESCE(a.expected_return_date, a.notice_date)
     )`;
 
-/** Morning audience: eligible users with NO clock_in today. Binds: date, date. */
-export function buildClockInNudgeQuery(): string {
+/** Morning audience: eligible users with NO clock_in today. Binds: date, date,
+ *  then one bind per directorate id when an allowlist is given (appended last
+ *  so the existing date binds keep their order). */
+export function buildClockInNudgeQuery(directorateIds: string[] = []): string {
+  const dirFilter = directorateIds.length
+    ? ` AND u.directorate_id IN (${directorateIds.map(() => '?').join(',')})`
+    : '';
   return `SELECT u.id, u.name, u.current_streak ${AUDIENCE_SQL}
     AND NOT EXISTS (
       SELECT 1 FROM clock_records c
       WHERE c.user_id = u.id AND c.type = 'clock_in' AND DATE(c.timestamp) = ?
-    )`;
+    )${dirFilter}`;
 }
 
 /** Evening audience: eligible users WITH a clock_in and NO clock_out today.
- *  Binds: date, date, date. */
-export function buildClockOutNudgeQuery(): string {
+ *  Binds: date, date, date, then one bind per directorate id (appended last). */
+export function buildClockOutNudgeQuery(directorateIds: string[] = []): string {
+  const dirFilter = directorateIds.length
+    ? ` AND u.directorate_id IN (${directorateIds.map(() => '?').join(',')})`
+    : '';
   return `SELECT u.id, u.name ${AUDIENCE_SQL}
     AND EXISTS (
       SELECT 1 FROM clock_records c
@@ -118,7 +126,13 @@ export function buildClockOutNudgeQuery(): string {
     AND NOT EXISTS (
       SELECT 1 FROM clock_records c
       WHERE c.user_id = u.id AND c.type = 'clock_out' AND DATE(c.timestamp) = ?
-    )`;
+    )${dirFilter}`;
+}
+
+/** Parse the `reminder_directorate_ids` CSV setting into a clean id list.
+ *  Empty/unset ⇒ [] ⇒ no directorate filter (everyone). */
+function parseDirectorateIds(csv: string | undefined): string[] {
+  return (csv ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
 /** Holiday/weekend suppression (Ghana = UTC, so UTC getters are local time). */
@@ -171,9 +185,10 @@ export async function sendClockReminders(env: Env, now: Date = new Date()): Prom
   const settings = await getAppSettings(env);
   const thresholdMin = hhmmToMinutes(settings.late_threshold_time);
   const date = now.toISOString().slice(0, 10);
+  const dirIds = parseDirectorateIds(settings.reminder_directorate_ids);
 
-  const rows = await env.DB.prepare(buildClockInNudgeQuery())
-    .bind(date, date)
+  const rows = await env.DB.prepare(buildClockInNudgeQuery(dirIds))
+    .bind(date, date, ...dirIds)
     .all<NudgeTarget & { current_streak: number }>();
 
   const sent = await sendSlotNudges(env, rows.results ?? [], 'in', date, slot, (u) =>
@@ -200,9 +215,11 @@ export async function sendClockOutReminders(env: Env, now: Date = new Date()): P
   if (slot === null) return;
   if (!(await isOfficeDay(env, now))) return;
 
+  const settings = await getAppSettings(env);
   const date = now.toISOString().slice(0, 10);
-  const rows = await env.DB.prepare(buildClockOutNudgeQuery())
-    .bind(date, date, date)
+  const dirIds = parseDirectorateIds(settings.reminder_directorate_ids);
+  const rows = await env.DB.prepare(buildClockOutNudgeQuery(dirIds))
+    .bind(date, date, date, ...dirIds)
     .all<NudgeTarget>();
 
   const sent = await sendSlotNudges(env, rows.results ?? [], 'out', date, slot, (u) =>

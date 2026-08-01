@@ -160,6 +160,28 @@ async function handleArrivalCallback(c: Ctx, cb: ArrivalCallbackQuery): Promise<
 
 async function handleStart(c: Ctx, chatId: number, args: string): Promise<void> {
   if (args) {
+    // User-level link token (spec §6.2) — minted by POST /api/notifications/telegram/link-token.
+    const userId = await c.env.KV.get(`telegram-user-link:${args}`);
+    if (userId) {
+      await c.env.KV.put(`telegram-user:${userId}`, String(chatId));
+      await c.env.KV.delete(`telegram-user-link:${args}`);
+      // If this user maps to an officer record (by email, then name — same
+      // lookup as /link), mirror the chat onto the officer so they ALSO get
+      // visitor arrival alerts.
+      const u = await c.env.DB.prepare('SELECT name, email FROM users WHERE id = ?').bind(userId).first<{ name: string; email: string | null }>();
+      if (u) {
+        const officer = await c.env.DB.prepare('SELECT id FROM officers WHERE email = ? OR name = ?').bind(u.email, u.name).first<{ id: string }>();
+        if (officer) {
+          await c.env.DB.prepare('UPDATE officers SET telegram_chat_id = ? WHERE id = ?').bind(String(chatId), officer.id).run();
+        }
+      }
+      await sendTelegramMessage({
+        chatId: String(chatId),
+        text: [`✅ <b>Connected!</b>`, '', `You'll now get your clock-in and clock-out reminders here on Telegram.`].join('\n'),
+        token: c.env.TELEGRAM_BOT_TOKEN,
+      });
+      return;
+    }
     const officerId = await c.env.KV.get(`officer-link:${args}`);
     if (officerId) {
       await c.env.DB.prepare('UPDATE officers SET telegram_chat_id = ? WHERE id = ?').bind(String(chatId), officerId).run();

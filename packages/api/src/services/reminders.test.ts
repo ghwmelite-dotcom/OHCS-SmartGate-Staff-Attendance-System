@@ -101,7 +101,8 @@ function newDb(): SqliteDb {
   db.exec(`
     CREATE TABLE users (
       id TEXT PRIMARY KEY, name TEXT, is_active INTEGER, pin_acknowledged INTEGER,
-      staff_id TEXT, nss_number TEXT, intern_code TEXT, current_streak INTEGER
+      staff_id TEXT, nss_number TEXT, intern_code TEXT, current_streak INTEGER,
+      directorate_id TEXT
     );
     CREATE TABLE clock_records (user_id TEXT, type TEXT, timestamp TEXT);
     CREATE TABLE absence_notices (user_id TEXT, notice_date TEXT, expected_return_date TEXT);
@@ -113,22 +114,22 @@ const DAY = '2026-07-27';
 
 function seedUsers(db: SqliteDb) {
   const ins = db.prepare(
-    'INSERT INTO users (id, name, is_active, pin_acknowledged, staff_id, nss_number, intern_code, current_streak) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO users (id, name, is_active, pin_acknowledged, staff_id, nss_number, intern_code, current_streak, directorate_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   );
-  // u1 eligible — active, activated, identifier, no clock-in
-  ins.run('u1', 'Ama Eligible', 1, 1, '896239', null, null, 3);
-  // u2 clocked in today (evening candidate)
-  ins.run('u2', 'Kofi ClockedIn', 1, 1, '896240', null, null, 1);
+  // u1 eligible — active, activated, identifier, no clock-in (RSIMD)
+  ins.run('u1', 'Ama Eligible', 1, 1, '896239', null, null, 3, 'dir_rsimd');
+  // u2 clocked in today (evening candidate, RSIMD)
+  ins.run('u2', 'Kofi ClockedIn', 1, 1, '896240', null, null, 1, 'dir_rsimd');
   // u3 never activated — excluded
-  ins.run('u3', 'Esi Dormant', 1, 0, '896241', null, null, 0);
+  ins.run('u3', 'Esi Dormant', 1, 0, '896241', null, null, 0, 'dir_rsimd');
   // u4 inactive — excluded
-  ins.run('u4', 'Yaw Inactive', 0, 1, '896242', null, null, 0);
+  ins.run('u4', 'Yaw Inactive', 0, 1, '896242', null, null, 0, 'dir_rsimd');
   // u5 no identifier — excluded
-  ins.run('u5', 'Akos NoId', 1, 1, null, null, null, 0);
+  ins.run('u5', 'Akos NoId', 1, 1, null, null, null, 0, 'dir_rsimd');
   // u6 absence notice covering today — excluded
-  ins.run('u6', 'Kweku Away', 1, 1, '896243', null, null, 0);
+  ins.run('u6', 'Kweku Away', 1, 1, '896243', null, null, 0, 'dir_rsimd');
   // u7 clocked in AND out — excluded from evening
-  ins.run('u7', 'Abena Done', 1, 1, '896244', null, null, 5);
+  ins.run('u7', 'Abena Done', 1, 1, '896244', null, null, 5, 'dir_rsimd');
 
   const clock = db.prepare('INSERT INTO clock_records (user_id, type, timestamp) VALUES (?, ?, ?)');
   clock.run('u2', 'clock_in', `${DAY}T08:05:00.000Z`);
@@ -172,5 +173,57 @@ describe('buildClockOutNudgeQuery', () => {
       .run('u2', 'clock_out', `${DAY}T17:05:00.000Z`);
     const rows = db.prepare(buildClockOutNudgeQuery()).all(DAY, DAY, DAY);
     expect(rows).toHaveLength(0);
+  });
+});
+
+/* ---------- Directorate allowlist (spec §6.0) ---------- */
+
+function seedOtherDirectorateUsers(db: SqliteDb) {
+  const ins = db.prepare(
+    'INSERT INTO users (id, name, is_active, pin_acknowledged, staff_id, nss_number, intern_code, current_streak, directorate_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  );
+  // u9 eligible morning candidate in a different directorate
+  ins.run('u9', 'Kojo Other', 1, 1, '896245', null, null, 2, 'dir_other');
+  // u10 eligible evening candidate in a different directorate
+  ins.run('u10', 'Efua Other', 1, 1, '896246', null, null, 1, 'dir_other');
+  db.prepare('INSERT INTO clock_records (user_id, type, timestamp) VALUES (?, ?, ?)')
+    .run('u10', 'clock_in', `${DAY}T08:03:00.000Z`);
+}
+
+describe('directorate allowlist', () => {
+  it('clock-in audience includes RSIMD and excludes other directorates when allowlisted', () => {
+    const db = newDb();
+    seedUsers(db);
+    seedOtherDirectorateUsers(db);
+    const rows = db.prepare(buildClockInNudgeQuery(['dir_rsimd']))
+      .all(DAY, DAY, 'dir_rsimd') as Array<{ id: string }>;
+    expect(rows.map((r) => r.id)).toEqual(['u1']);
+  });
+
+  it('clock-in audience is unfiltered when the allowlist is empty', () => {
+    const db = newDb();
+    seedUsers(db);
+    seedOtherDirectorateUsers(db);
+    const rows = db.prepare(buildClockInNudgeQuery([]))
+      .all(DAY, DAY) as Array<{ id: string }>;
+    expect(rows.map((r) => r.id).sort()).toEqual(['u1', 'u9']);
+  });
+
+  it('clock-out audience includes RSIMD and excludes other directorates when allowlisted', () => {
+    const db = newDb();
+    seedUsers(db);
+    seedOtherDirectorateUsers(db);
+    const rows = db.prepare(buildClockOutNudgeQuery(['dir_rsimd']))
+      .all(DAY, DAY, DAY, 'dir_rsimd') as Array<{ id: string }>;
+    expect(rows.map((r) => r.id)).toEqual(['u2']);
+  });
+
+  it('clock-out audience is unfiltered when the allowlist is empty', () => {
+    const db = newDb();
+    seedUsers(db);
+    seedOtherDirectorateUsers(db);
+    const rows = db.prepare(buildClockOutNudgeQuery())
+      .all(DAY, DAY, DAY) as Array<{ id: string }>;
+    expect(rows.map((r) => r.id).sort()).toEqual(['u10', 'u2']);
   });
 });

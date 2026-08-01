@@ -23,9 +23,15 @@ export interface AppSettings {
   // Attendance risk fusion (added by migration-clock-risk.sql)
   risk_fusion_mode: number;           // 0 = off, 1 = shadow (persist+log only), 2 = enforce
   risk_fusion_block_enabled: number;  // 0 = ≥60 band flags only, 1 = ≥60 may block (guardrail still applies)
+  // Clock-reminder directorate allowlist (default-seeded, no column yet)
+  reminder_directorate_ids: string;   // CSV of directorates.id; empty = no filter
 }
 
 const KV_KEY = 'app-settings:v2';
+// Column-less override for the reminder directorate allowlist (spec forbids an
+// app_settings migration for this key). Stored as a plain string; '' is a
+// meaningful value (no filter / all directorates) — only null means "unset".
+export const REMINDER_DIRECTORATE_IDS_KV_KEY = 'app-settings:reminder-directorate-ids';
 const KV_TTL = 300;          // 5 min KV cache
 const MEMO_TTL_MS = 60_000;  // 60s per-isolate memo
 
@@ -46,6 +52,7 @@ const DEFAULTS: AppSettings = {
   presence_qr_mode: 0,
   risk_fusion_mode: 0,
   risk_fusion_block_enabled: 0,
+  reminder_directorate_ids: 'dir_rsimd',
 };
 
 let memo: { value: AppSettings; ts: number } | null = null;
@@ -56,8 +63,9 @@ export async function getAppSettings(env: Env): Promise<AppSettings> {
 
   const cached = await env.KV.get(KV_KEY, 'json') as AppSettings | null;
   if (cached) {
-    memo = { value: cached, ts: now };
-    return cached;
+    const merged = { ...DEFAULTS, ...cached };
+    memo = { value: merged, ts: now };
+    return merged;
   }
 
   const row = await env.DB.prepare(
@@ -70,7 +78,11 @@ export async function getAppSettings(env: Env): Promise<AppSettings> {
      FROM app_settings WHERE id = 1`
   ).first<AppSettings>();
 
-  const settings = row ?? DEFAULTS;
+  const settings = row ? { ...DEFAULTS, ...row } : { ...DEFAULTS };
+  // The directorate allowlist has no DB column — a superadmin-set KV override
+  // wins over DEFAULTS when present (including the empty-string "no filter").
+  const reminderDirs = await env.KV.get(REMINDER_DIRECTORATE_IDS_KV_KEY);
+  if (reminderDirs !== null) settings.reminder_directorate_ids = reminderDirs;
   await env.KV.put(KV_KEY, JSON.stringify(settings), { expirationTtl: KV_TTL });
   memo = { value: settings, ts: now };
   return settings;
