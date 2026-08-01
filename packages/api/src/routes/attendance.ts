@@ -308,6 +308,8 @@ attendanceRoutes.get('/by-directorate', async (c) => {
   const params: unknown[] = [lateAfter];
   params.push(date);
 
+  // Clock rows match by their EFFECTIVE date (device_info.capturedDate ??
+  // server timestamp date) — same attribution rule as /records and /today.
   const results = await c.env.DB.prepare(
     `SELECT d.abbreviation, d.name,
             COUNT(DISTINCT u.id) as total_staff,
@@ -315,7 +317,7 @@ attendanceRoutes.get('/by-directorate', async (c) => {
             COUNT(DISTINCT CASE WHEN TIME(ci.timestamp) > ? THEN ci.user_id END) as late
      FROM directorates d
      LEFT JOIN users u ON u.directorate_id = d.id AND u.is_active = 1 ${userTypeJoin}
-     LEFT JOIN clock_records ci ON ci.user_id = u.id AND ci.type = 'clock_in' AND DATE(ci.timestamp) = ?
+     LEFT JOIN clock_records ci ON ci.user_id = u.id AND ci.type = 'clock_in' AND ${clockEffectiveDateSql('ci')} = ?
      WHERE d.is_active = 1
      GROUP BY d.id
      ORDER BY d.abbreviation`
@@ -331,9 +333,13 @@ attendanceRoutes.get('/user/:userId/monthly', async (c) => {
   const userId = c.req.param('userId');
   const month = c.req.query('month') ?? new Date().toISOString().slice(0, 7); // YYYY-MM
 
+  // Group days by the EFFECTIVE date (device_info.capturedDate ?? server
+  // timestamp date) so offline replays land on the day they happened —
+  // same attribution rule as /records, /today and /by-directorate.
+  const effDate = clockEffectiveDateSql('clock_records');
   const records = await c.env.DB.prepare(
-    `SELECT DATE(timestamp) as date, type, TIME(timestamp) as time
-     FROM clock_records WHERE user_id = ? AND strftime('%Y-%m', timestamp) = ?
+    `SELECT ${effDate} as date, type, TIME(timestamp) as time
+     FROM clock_records WHERE user_id = ? AND strftime('%Y-%m', ${effDate}) = ?
      ORDER BY timestamp`
   ).bind(userId, month).all();
 

@@ -13,6 +13,22 @@ class ApiError extends Error {
   }
 }
 
+// Parse a response body that MUST be the JSON envelope. A non-JSON body means
+// the request never reached a healthy API route (Hono's plain-text 404 on a
+// route miss, an edge error page, …) — surface a clear error instead of V8's
+// raw JSON.parse SyntaxError ("Unexpected non-whitespace character after JSON
+// at position …"). Same discipline as the staff app's readJsonEnvelope; the
+// raw status + body snippet go to the console for diagnosis.
+async function readJsonEnvelope<T>(res: Response): Promise<ApiResponse<T>> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as ApiResponse<T>;
+  } catch {
+    console.error('[api] non-JSON response', { status: res.status, url: res.url, body: text.slice(0, 200) });
+    throw new ApiError('BAD_RESPONSE', `Unexpected response from the server (HTTP ${res.status}). Please try again.`, res.status);
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -27,7 +43,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<ApiR
     headers,
   });
 
-  const json = await res.json() as ApiResponse<T>;
+  const json = await readJsonEnvelope<T>(res);
 
   if (!res.ok || json.error) {
     // Session expired — redirect to login

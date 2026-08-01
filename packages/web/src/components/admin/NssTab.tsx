@@ -123,6 +123,7 @@ export function NssTab() {
     queryFn: () => {
       const params = new URLSearchParams();
       params.set('status', status);
+      params.set('limit', '500'); // API default is 100 (max 500) — large cohorts were silently truncated
       if (directorateId) params.set('directorate_id', directorateId);
       if (debouncedSearch) params.set('q', debouncedSearch);
       if (typeFilter !== 'all') params.set('type', typeFilter);
@@ -147,7 +148,7 @@ export function NssTab() {
   // Always-active count (for stat card + banner)
   const { data: activeAllData } = useQuery({
     queryKey: ['nss-users', 'active', '', ''],
-    queryFn: () => api.get<NssListRow[]>('/admin/nss?status=active'),
+    queryFn: () => api.get<NssListRow[]>('/admin/nss?status=active&limit=500'),
     staleTime: 30_000,
   });
   const activeAll = activeAllData?.data ?? [];

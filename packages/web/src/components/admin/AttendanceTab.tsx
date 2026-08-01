@@ -56,10 +56,24 @@ interface DirBreakdown {
   late: number;
 }
 
+// The segment pill survives reloads (an NSS admin shouldn't have to re-pick
+// the NSS segment every visit). Validated against the allowed set on read.
+const SEGMENT_STORAGE_KEY = 'ohcs.admin.attendance.segment';
+const ATTENDANCE_SEGMENTS: readonly AttendanceSegment[] = ['staff', 'nss', 'intern', 'all'];
+
+function loadStoredSegment(): AttendanceSegment {
+  try {
+    const raw = localStorage.getItem(SEGMENT_STORAGE_KEY);
+    return ATTENDANCE_SEGMENTS.includes(raw as AttendanceSegment) ? (raw as AttendanceSegment) : 'staff';
+  } catch {
+    return 'staff'; // storage unavailable (private mode etc.)
+  }
+}
+
 export function AttendanceTab() {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   const [dirFilter, setDirFilter] = useState('');
-  const [segment, setSegment] = useState<AttendanceSegment>('staff');
+  const [segment, setSegmentState] = useState<AttendanceSegment>(loadStoredSegment);
   const [monthlyUser, setMonthlyUser] = useState<{ id: string; name: string } | null>(null);
   const [pdfExporting, setPdfExporting] = useState(false);
   const [search, setSearch] = useState('');
@@ -74,6 +88,13 @@ export function AttendanceTab() {
   const queryClient = useQueryClient();
   const [clearingUserId, setClearingUserId] = useState<string | null>(null);
   const [dispositionClockId, setDispositionClockId] = useState<string | null>(null);
+
+  function setSegment(next: AttendanceSegment) {
+    setSegmentState(next);
+    try {
+      localStorage.setItem(SEGMENT_STORAGE_KEY, next);
+    } catch { /* storage unavailable — pill still works for the session */ }
+  }
 
   // TEMPORARY TEST TOOLING — paired with POST /api/clock/admin/clear-test-records.
   // Remove once the test cycle stabilises.
@@ -136,7 +157,7 @@ export function AttendanceTab() {
 
   const { data: overviewData } = useQuery({
     queryKey: ['attendance', 'today', selectedDate, segment],
-    queryFn: () => api.get<TodayOverview>(`/attendance/today?user_type=${segment}`),
+    queryFn: () => api.get<TodayOverview>(`/attendance/today?user_type=${segment}&date=${selectedDate}`),
   });
 
   const { data: recordsData, isLoading } = useQuery({
@@ -194,8 +215,21 @@ export function AttendanceTab() {
     return 'Attendance';
   }
 
+  // Inner text of the export marker, e.g. "search 'ama', risk: high" — null
+  // when no client-side filter is active. Exports always contain the FULL day
+  // register; when an on-screen filter is active, the marker is stamped into
+  // the file so the reader knows the screen was filtered but the file
+  // deliberately is not.
+  function activeFiltersNote(): string | null {
+    const parts: string[] = [];
+    const q = search.trim().replace(/\s+/g, ' ');
+    if (q) parts.push(`search '${q}'`);
+    if (riskFilter !== 'all') parts.push(`risk: ${riskFilter}`);
+    return parts.length > 0 ? parts.join(', ') : null;
+  }
+
   function exportAttendanceCSV() {
-    const source = filteredRecords;
+    const source = records; // full register, not the on-screen filter
     const headers = ['Name', 'Staff ID', 'Directorate', 'Clock In', 'Clock Out', 'Late', 'Left Early', 'Streak', 'Photo URL'];
     const rows = source.map(r => [
       r.name,
@@ -208,7 +242,11 @@ export function AttendanceTab() {
       String(r.current_streak),
       resolvePhotoUrl(r.clock_in_photo) ?? '',
     ]);
-    const csv = [headers, ...rows].map(row => row.map(c => `"${c}"`).join(',')).join('\n');
+    const note = activeFiltersNote();
+    const csv = [
+      ...(note ? [`# filters: ${note}`] : []),
+      ...[headers, ...rows].map(row => row.map(c => `"${c}"`).join(',')),
+    ].join('\n');
     downloadCSV(csv, `OHCS-${segmentFilenameSlug()}-${selectedDate}.csv`);
   }
 
@@ -216,7 +254,8 @@ export function AttendanceTab() {
     if (!overview || pdfExporting) return;
     setPdfExporting(true);
     try {
-      const doc = await generateAttendancePdf(selectedDate, filteredRecords, overview, segment);
+      const note = activeFiltersNote();
+      const doc = await generateAttendancePdf(selectedDate, records, overview, segment, note ?? undefined);
       doc.save(`OHCS-${segmentFilenameSlug()}-${selectedDate}.pdf`);
     } finally {
       setPdfExporting(false);
@@ -612,7 +651,7 @@ export function AttendanceTab() {
                     {expandedRow === r.user_id && r.liveness_signature && (
                       <tr className="bg-zinc-50/60">
                         <td colSpan={isSuperadmin ? 13 : 12} className="px-5 py-3">
-                          <LivenessEvidenceCard signature={JSON.parse(r.liveness_signature)} />
+                          <LivenessEvidenceCell signature={r.liveness_signature} />
                         </td>
                       </tr>
                     )}
@@ -635,6 +674,17 @@ function LivenessPill({ decision }: { decision: string | null }) {
     : 'bg-zinc-100 text-zinc-600';
   const label = decision ?? '—';
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>{label}</span>;
+}
+
+// Parses the stored liveness signature for the expanded evidence row. A
+// malformed payload (legacy/partial write) must not kill the whole tab on a
+// render throw — fall back to the plain dash pill.
+function LivenessEvidenceCell({ signature }: { signature: string }) {
+  try {
+    return <LivenessEvidenceCard signature={JSON.parse(signature)} />;
+  } catch {
+    return <LivenessPill decision={null} />;
+  }
 }
 
 // Presence-QR evidence badge (migration-clock-presence.sql): green QR / amber

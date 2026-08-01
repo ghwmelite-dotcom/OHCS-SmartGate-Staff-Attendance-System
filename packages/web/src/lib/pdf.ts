@@ -204,6 +204,7 @@ export async function generateAttendancePdf(
   records: AttendanceRow[],
   summary: AttendanceSummary,
   segment: AttendanceSegment = 'staff',
+  filtersNote?: string,
 ): Promise<jsPDF> {
   // Pre-fetch all photos in parallel (keyed by user_id)
   const photoEntries = await Promise.all(
@@ -252,8 +253,19 @@ export async function generateAttendancePdf(
   doc.setFillColor(0, 107, 63);
   doc.rect(third * 2, barY, third, 1.5, 'F');
 
+  // Screen-filter marker: the export always carries the full register, so
+  // when the on-screen view was filtered we say so under the title band —
+  // a partial-looking screen can't masquerade as a complete export.
+  let summaryY = 36;
+  if (filtersNote) {
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(180, 120, 20); // amber
+    doc.text(`Filters active on screen: ${filtersNote} — export contains the full register`, 14, 33.5);
+    summaryY = 42;
+  }
+
   // Summary stats
-  const summaryY = 36;
   doc.setTextColor(28, 24, 16);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');

@@ -59,12 +59,16 @@ function newDb(): SqliteDb {
     );
     INSERT INTO app_settings (id, work_start_time, late_threshold_time, work_end_time)
       VALUES (1, '08:00', '08:30', '17:00');
-    CREATE TABLE directorates (id TEXT PRIMARY KEY, name TEXT, abbreviation TEXT);
+    CREATE TABLE directorates (
+      id TEXT PRIMARY KEY, name TEXT, abbreviation TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1
+    );
     INSERT INTO directorates (id, name, abbreviation) VALUES ('dir1', 'Records', 'RSIMD');
     CREATE TABLE users (
       id TEXT PRIMARY KEY, name TEXT, staff_id TEXT, role TEXT DEFAULT 'staff',
       user_type TEXT DEFAULT 'staff', is_active INTEGER NOT NULL DEFAULT 1,
-      directorate_id TEXT, current_streak INTEGER NOT NULL DEFAULT 0
+      directorate_id TEXT, current_streak INTEGER NOT NULL DEFAULT 0,
+      longest_streak INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE clock_records (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL,
@@ -246,5 +250,45 @@ describe('GET /attendance/today — optional ?date aligned with /records', () =>
     expect(res.status).toBe(400);
     const res2 = await makeApp().request('/a/today?date=2026-8-3', {}, env);
     expect(res2.status).toBe(400);
+  });
+});
+
+// Commit B: /by-directorate and /user/:userId/monthly must attribute clock rows
+// by the same effective date (device_info.capturedDate ?? timestamp date) as
+// /records and /today, so offline replays don't fragment across endpoints.
+describe('GET /attendance/by-directorate — effective-date attribution', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(NOW)); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('counts a replayed record (capturedDate past) toward the capture date', async () => {
+    const { env } = makeEnv();
+    const res = await makeApp().request(`/a/by-directorate?date=${PAST}`, {}, env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: Array<{ abbreviation: string; present: number }> };
+    const dir1 = body.data.find((d) => d.abbreviation === 'RSIMD');
+    // u2, u5, u6 + replayed u7 (deactivated u3 doesn't join: is_active = 1 filter).
+    expect(dir1?.present).toBe(4);
+  });
+});
+
+describe('GET /attendance/user/:userId/monthly — effective-date attribution', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(NOW)); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('places a replayed record under its capturedDate month and day', async () => {
+    const { env } = makeEnv();
+    interface MonthlyBody { data: { total_days_present: number; daily_records: Record<string, { clock_in?: string }> } }
+
+    const res = await makeApp().request('/a/user/u7/monthly?month=2026-07', {}, env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as MonthlyBody;
+    expect(body.data.daily_records[PAST]).toBeDefined();
+    expect(body.data.total_days_present).toBe(1);
+
+    // …and NOT under the replay month (server timestamp is 2026-08-03).
+    const res2 = await makeApp().request('/a/user/u7/monthly?month=2026-08', {}, env);
+    expect(res2.status).toBe(200);
+    const body2 = await res2.json() as MonthlyBody;
+    expect(Object.keys(body2.data.daily_records)).toEqual([]);
   });
 });
