@@ -7,7 +7,8 @@ import {
   ARRIVAL_ACTIONS, type ArrivalAction,
   AVAILABILITY_STATUSES, type AvailabilityStatus,
 } from '../services/telegram';
-import { recordAudit, systemActor } from '../services/audit';
+import { auditActorFromContext, recordAudit, systemActor } from '../services/audit';
+import { timingSafeEqualStrings } from '../services/auth';
 import { success, error } from '../lib/response';
 import { escapeHtml } from '../lib/html';
 
@@ -27,7 +28,7 @@ export async function telegramWebhook(c: Context<{ Bindings: Env }>) {
   const expected = c.env.TELEGRAM_WEBHOOK_SECRET;
   if (expected) {
     const supplied = c.req.header('x-telegram-bot-api-secret-token');
-    if (supplied !== expected) {
+    if (!supplied || !timingSafeEqualStrings(supplied, expected)) {
       return c.json({ ok: false }, 401);
     }
   } else if (c.env.ENVIRONMENT === 'production') {
@@ -86,7 +87,7 @@ export async function telegramAttendanceWebhook(c: Context<{ Bindings: Env }>) {
   const expected = c.env.TELEGRAM_ATTENDANCE_WEBHOOK_SECRET;
   if (expected) {
     const supplied = c.req.header('x-telegram-bot-api-secret-token');
-    if (supplied !== expected) {
+    if (!supplied || !timingSafeEqualStrings(supplied, expected)) {
       return c.json({ ok: false }, 401);
     }
   } else if (c.env.ENVIRONMENT === 'production') {
@@ -210,6 +211,10 @@ async function handleStart(c: Ctx, chatId: number, args: string): Promise<void> 
     if (officerId) {
       await c.env.DB.prepare('UPDATE officers SET telegram_chat_id = ? WHERE id = ?').bind(String(chatId), officerId).run();
       await c.env.KV.delete(`officer-link:${args}`);
+      await recordAudit(c.env, systemActor('telegram-webhook', c.req.header('cf-connecting-ip') ?? null), {
+        action: 'telegram.link', entityType: 'officer', entityId: officerId,
+        summary: `Officer Telegram chat linked via one-time reception link (chat ${chatId})`,
+      });
       const row = await c.env.DB.prepare(
         `SELECT o.name, d.abbreviation AS dir FROM officers o LEFT JOIN directorates d ON o.directorate_id = d.id WHERE o.id = ?`
       ).bind(officerId).first<{ name: string; dir: string | null }>();
@@ -235,17 +240,24 @@ export async function handleUserLinkStart(c: Ctx, chatId: number, args: string, 
   const userId = await c.env.KV.get(`telegram-user-link:${args}`);
   if (!userId) return false;
   await c.env.KV.put(`telegram-user:${userId}`, String(chatId));
+  // Reverse lookup used to gate /admin (chat → user → role check).
+  await c.env.KV.put(`telegram-chat:${chatId}`, userId);
   await c.env.KV.delete(`telegram-user-link:${args}`);
-  // If this user maps to an officer record (by email, then name — same
-  // lookup as /link), mirror the chat onto the officer so they ALSO get
-  // visitor arrival alerts.
+  // If this user maps to an officer record (by email, then name), mirror the
+  // chat onto the officer so they ALSO get visitor arrival alerts.
   const u = await c.env.DB.prepare('SELECT name, email FROM users WHERE id = ?').bind(userId).first<{ name: string; email: string | null }>();
+  let officerMirrored = false;
   if (u) {
     const officer = await c.env.DB.prepare('SELECT id FROM officers WHERE email = ? OR name = ?').bind(u.email, u.name).first<{ id: string }>();
     if (officer) {
       await c.env.DB.prepare('UPDATE officers SET telegram_chat_id = ? WHERE id = ?').bind(String(chatId), officer.id).run();
+      officerMirrored = true;
     }
   }
+  await recordAudit(c.env, systemActor('telegram-webhook', c.req.header('cf-connecting-ip') ?? null), {
+    action: 'telegram.link', entityType: 'user', entityId: userId,
+    summary: `Telegram chat linked (chat ${chatId})${officerMirrored ? '; officer record mirrored' : ''}`,
+  });
   await sendTelegramMessage({
     chatId: String(chatId),
     text: [`✅ <b>Connected!</b>`, '', `You'll now get your clock-in and clock-out reminders here on Telegram.`].join('\n'),
@@ -269,7 +281,7 @@ export async function sendGreeting(c: Ctx, chatId: number, token: string, kind: 
         '',
         `I send visitor-arrival alerts and daily attendance summaries.`,
         '',
-        `Send /help to see everything I can do, or /link &lt;StaffID&gt; to start receiving alerts.`,
+        `Send /help to see everything I can do, or /link for linking instructions.`,
       ].join('\n');
   await sendTelegramMessage({ chatId: String(chatId), text, token });
 }
@@ -280,13 +292,13 @@ async function handleHelp(c: Ctx, chatId: number): Promise<void> {
     text: [
       `\u{1F1EC}\u{1F1ED} <b>OHCS SmartGate Bot — Commands</b>`,
       '',
-      `/link &lt;StaffID&gt; — Link your account to receive alerts`,
+      `/link — Linking instructions (one-time link from the dashboard or attendance app)`,
       `/status — Check your link &amp; alert status`,
       `/available — Mark yourself available`,
       `/meeting — Mark yourself in a meeting`,
       `/out — Mark yourself out of office`,
       `/unlink — Stop receiving visitor alerts`,
-      `/admin — Get daily attendance summaries`,
+      `/admin — Get daily summaries (linked administrators only)`,
       `/stop — Stop daily summaries`,
       `/help — Show this list`,
     ].join('\n'),
@@ -294,25 +306,31 @@ async function handleHelp(c: Ctx, chatId: number): Promise<void> {
   });
 }
 
+// /link <StaffID> used to link any chat to any account with zero identity
+// proof (security audit, 2026-08-01) — removed. Linking now requires a
+// one-time token: officers via the admin dashboard (officer-link / deep-link
+// flow), staff via the attendance app for clock reminders. This handler only
+// explains that; it performs NO writes.
 async function handleLink(c: Ctx, chatId: number, args: string): Promise<void> {
   const staffId = args.trim().toUpperCase();
   if (!staffId) {
     await sendTelegramMessage({ chatId: String(chatId), text: `Please include your Staff ID.\n\nExample: <code>/link 1334685</code>`, token: c.env.TELEGRAM_BOT_TOKEN });
     return;
   }
-  const user = await c.env.DB.prepare('SELECT id, name, email FROM users WHERE staff_id = ?').bind(staffId).first<{ id: string; name: string; email: string }>();
+  const user = await c.env.DB.prepare('SELECT id FROM users WHERE staff_id = ?').bind(staffId).first<{ id: string }>();
   if (!user) {
     await sendTelegramMessage({ chatId: String(chatId), text: `❌ Staff ID <code>${escapeHtml(staffId)}</code> not found. Check your ID and try again.`, token: c.env.TELEGRAM_BOT_TOKEN });
     return;
   }
-  const officer = await c.env.DB.prepare('SELECT id FROM officers WHERE email = ? OR name = ?').bind(user.email, user.name).first<{ id: string }>();
-  if (officer) {
-    await c.env.DB.prepare('UPDATE officers SET telegram_chat_id = ? WHERE id = ?').bind(String(chatId), officer.id).run();
-  }
-  await c.env.KV.put(`telegram-user:${user.id}`, String(chatId));
   await sendTelegramMessage({
     chatId: String(chatId),
-    text: [`✅ <b>Linked successfully!</b>`, '', `\u{1F464} ${user.name}`, `\u{1F4CB} Staff ID: ${staffId}`, '', `You'll now receive visitor arrival notifications. Send /admin for daily summaries.`].join('\n'),
+    text: [
+      `🔒 <b>Linking has moved.</b>`,
+      '',
+      `For security, /link no longer connects accounts. Use a one-time link instead:`,
+      `• <b>Officers</b> — open the one-time link from the admin dashboard to get visitor alerts.`,
+      `• <b>Staff</b> — link from the staff attendance app to get clock reminders.`,
+    ].join('\n'),
     token: c.env.TELEGRAM_BOT_TOKEN,
   });
 }
@@ -325,7 +343,7 @@ async function handleStatus(c: Ctx, chatId: number): Promise<void> {
   const lines = [`\u{1F4CB} <b>Your status</b>`, ''];
   lines.push(officer
     ? `Visitor alerts: <b>ON</b> — linked as ${officer.name}${officer.dir ? ` (${officer.dir})` : ''}.`
-    : `Visitor alerts: <b>OFF</b> — not linked. Send /link &lt;StaffID&gt;, or use the link from reception.`);
+    : `Visitor alerts: <b>OFF</b> — not linked. Use the one-time link from the admin dashboard or attendance app.`);
   if (officer) {
     const avail = AVAILABILITY_STATUSES[officer.availability_status ?? 'available'];
     lines.push(`Availability: ${avail.emoji} <b>${avail.label}</b> — change with /available, /meeting, /out.`);
@@ -335,6 +353,9 @@ async function handleStatus(c: Ctx, chatId: number): Promise<void> {
 }
 
 async function handleUnlink(c: Ctx, chatId: number): Promise<void> {
+  // Reverse lookup key always belongs to this chat — drop it regardless of
+  // whether an officer record is mirrored.
+  await c.env.KV.delete(`telegram-chat:${chatId}`);
   const rows = (await c.env.DB.prepare('SELECT id, email, name FROM officers WHERE telegram_chat_id = ?').bind(String(chatId)).all<{ id: string; email: string | null; name: string }>()).results ?? [];
   if (rows.length === 0) {
     await sendTelegramMessage({ chatId: String(chatId), text: `You aren’t linked, so there’s nothing to unlink.`, token: c.env.TELEGRAM_BOT_TOKEN });
@@ -348,15 +369,37 @@ async function handleUnlink(c: Ctx, chatId: number): Promise<void> {
     }
   }
   await c.env.DB.prepare('UPDATE officers SET telegram_chat_id = NULL WHERE telegram_chat_id = ?').bind(String(chatId)).run();
-  await sendTelegramMessage({ chatId: String(chatId), text: `Done — you’ll no longer receive visitor alerts. Re-link any time with /link or a fresh link from reception.`, token: c.env.TELEGRAM_BOT_TOKEN });
+  await sendTelegramMessage({ chatId: String(chatId), text: `Done — you’ll no longer receive visitor alerts. Re-link any time with a fresh one-time link from the dashboard or attendance app.`, token: c.env.TELEGRAM_BOT_TOKEN });
 }
 
+// Daily-summary registration is admin-only (security audit, 2026-08-01):
+// the sender's chat must be linked (telegram-chat: reverse key) to a user
+// whose role is admin/superadmin — the admin chat receives daily summaries
+// plus VIP/watchlist alerts.
 async function handleAdmin(c: Ctx, chatId: number): Promise<void> {
+  const userId = await c.env.KV.get(`telegram-chat:${chatId}`);
+  const user = userId
+    ? await c.env.DB.prepare('SELECT role FROM users WHERE id = ?').bind(userId).first<{ role: string }>()
+    : null;
+  if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) {
+    await sendTelegramMessage({
+      chatId: String(chatId),
+      text: `Daily summaries are for OHCS administrators. Link your administrator account from the dashboard (one-time link), then send /admin again.`,
+      token: c.env.TELEGRAM_BOT_TOKEN,
+    });
+    return;
+  }
   await c.env.KV.put('telegram-admin-chat-id', String(chatId));
   await sendTelegramMessage({ chatId: String(chatId), text: `✅ <b>Daily summaries enabled!</b>\n\nYou’ll receive attendance reports at 9:00 AM (Mon–Fri).\n\nSend /stop to unsubscribe.`, token: c.env.TELEGRAM_BOT_TOKEN });
 }
 
 async function handleStop(c: Ctx, chatId: number): Promise<void> {
+  // Only the registered admin chat may unsubscribe itself — anyone else gets
+  // a refusal and the registration stays intact.
+  if ((await c.env.KV.get('telegram-admin-chat-id')) !== String(chatId)) {
+    await sendTelegramMessage({ chatId: String(chatId), text: `Only the subscribed administrator chat can stop daily summaries.`, token: c.env.TELEGRAM_BOT_TOKEN });
+    return;
+  }
   await c.env.KV.delete('telegram-admin-chat-id');
   await sendTelegramMessage({ chatId: String(chatId), text: `Daily summaries disabled. Send /admin to re-enable.`, token: c.env.TELEGRAM_BOT_TOKEN });
 }
@@ -370,7 +413,7 @@ async function handleAvailability(c: Ctx, chatId: number, status: AvailabilitySt
   if (!officer) {
     await sendTelegramMessage({
       chatId: String(chatId),
-      text: `Your chat isn’t linked to an officer record yet — send /link &lt;StaffID&gt; first.`,
+      text: `Your chat isn’t linked to an officer record yet — link first with the one-time link from the admin dashboard or attendance app.`,
       token: c.env.TELEGRAM_BOT_TOKEN,
     });
     return;
@@ -417,6 +460,11 @@ export async function telegramLinkRoute(c: Context<{ Bindings: Env; Variables: {
   await c.env.DB.prepare(
     'UPDATE officers SET telegram_chat_id = ? WHERE id = ?'
   ).bind(chatId, officer.id).run();
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'telegram.link', entityType: 'officer', entityId: officer.id,
+    summary: `Officer Telegram chat linked via link code (chat ${chatId})`,
+  });
 
   await sendTelegramMessage({
     chatId,

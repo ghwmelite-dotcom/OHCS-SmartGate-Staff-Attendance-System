@@ -33,8 +33,14 @@ function newDb(): SqliteDb {
   const db: SqliteDb = new DatabaseSync(':memory:');
   db.exec(`
     CREATE TABLE directorates (id TEXT PRIMARY KEY, abbreviation TEXT);
-    CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, email TEXT, directorate_id TEXT);
+    CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, email TEXT, directorate_id TEXT, staff_id TEXT, role TEXT);
     CREATE TABLE officers (id TEXT PRIMARY KEY, name TEXT, email TEXT, telegram_chat_id TEXT);
+    CREATE TABLE audit_log (
+      id TEXT PRIMARY KEY, seq INTEGER UNIQUE, at TEXT,
+      actor_user_id TEXT, actor_role TEXT, actor_label TEXT,
+      action TEXT, entity_type TEXT, entity_id TEXT,
+      summary TEXT, changes TEXT, ip TEXT, prev_hash TEXT, hash TEXT
+    );
   `);
   return db;
 }
@@ -43,15 +49,13 @@ function newDb(): SqliteDb {
 function d1(db: SqliteDb) {
   return {
     prepare(sql: string) {
-      return {
-        bind(...params: unknown[]) {
-          return {
-            first: async <T = unknown>() => ((db.prepare(sql).get(...params) as T | undefined) ?? null),
-            all: async <T = unknown>() => ({ results: db.prepare(sql).all(...params) as T[] }),
-            run: async () => { db.prepare(sql).run(...params); return { success: true }; },
-          };
-        },
-      };
+      const bound = (...params: unknown[]) => ({
+        first: async <T = unknown>() => ((db.prepare(sql).get(...params) as T | undefined) ?? null),
+        all: async <T = unknown>() => ({ results: db.prepare(sql).all(...params) as T[] }),
+        run: async () => { db.prepare(sql).run(...params); return { success: true }; },
+      });
+      // Real D1 also allows first/all/run directly on the unbound statement.
+      return { bind: bound, ...bound() };
     },
   };
 }
@@ -319,5 +323,164 @@ describe('telegramAttendanceWebhook — dedicated attendance bot', () => {
     expect(r2.status).toBe(200);
     expect(fetchMock.mock.calls.length).toBe(callsBefore);
     expect([...store.keys()].filter((k) => k.startsWith('telegram-user:'))).toHaveLength(0);
+  });
+});
+
+/* ---------- bare /link is no longer a link path (audit fix, 2026-08-01) ---------- */
+
+describe('telegramWebhook /link — unauthenticated write removed', () => {
+  const cmd = (text: string, chatId = 555) => ({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: { chat: { id: chatId }, text } }),
+  });
+
+  it('replies with linking instructions and writes NOTHING for a known staff ID', async () => {
+    const { env, store, db } = makeEnv();
+    db.prepare("INSERT INTO users (id, name, email, staff_id, role) VALUES ('u1', 'Ama Serwaa', 'ama@ohcs.gov.gh', '1334685', 'staff')").run();
+    db.prepare("INSERT INTO officers (id, name, email) VALUES ('o1', 'Ama Serwaa', 'ama@ohcs.gov.gh')").run();
+    const fetchMock = stubTelegramFetch();
+
+    const res = await makeApp().request('/webhook', cmd('/link 1334685'), env);
+    expect(res.status).toBe(200);
+    const text = sentText(fetchMock);
+    expect(text).toContain('one-time link');
+    // No link writes of any kind.
+    expect([...store.keys()].filter((k) => k.startsWith('telegram-user:'))).toHaveLength(0);
+    expect([...store.keys()].filter((k) => k.startsWith('telegram-chat:'))).toHaveLength(0);
+    const officer = db.prepare("SELECT telegram_chat_id AS cid FROM officers WHERE id = 'o1'").get() as { cid: string | null };
+    expect(officer.cid).toBeNull();
+  });
+
+  it('keeps the staff-ID-not-found wording for unknown IDs', async () => {
+    const { env } = makeEnv();
+    const fetchMock = stubTelegramFetch();
+
+    const res = await makeApp().request('/webhook', cmd('/link 9999999'), env);
+    expect(res.status).toBe(200);
+    expect(sentText(fetchMock)).toContain('not found');
+  });
+});
+
+/* ---------- link writes: reverse key + audit trail ---------- */
+
+describe('link writes carry a reverse telegram-chat: key and an audit row', () => {
+  const startUpdate = (text: string) => ({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: { chat: { id: 555 }, text } }),
+  });
+
+  it('/start <token> writes telegram-chat:<chatId> and a telegram.link audit row', async () => {
+    const { env, store, db } = makeEnv();
+    store.set('telegram-user-link:tok123', 'u1');
+    db.prepare("INSERT INTO users (id, name, email) VALUES ('u1', 'Ama Serwaa', 'ama@ohcs.gov.gh')").run();
+    stubTelegramFetch();
+
+    const res = await makeApp().request('/webhook', startUpdate('/start tok123'), env);
+    expect(res.status).toBe(200);
+    expect(store.get('telegram-user:u1')).toBe('555');
+    expect(store.get('telegram-chat:555')).toBe('u1');
+    const audit = db.prepare("SELECT action, entity_type, entity_id FROM audit_log").all() as Array<{ action: string; entity_type: string; entity_id: string }>;
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toEqual({ action: 'telegram.link', entity_type: 'user', entity_id: 'u1' });
+  });
+
+  it('/unlink removes both telegram-user:<id> and telegram-chat:<chatId>', async () => {
+    const { env, store, db } = makeEnv();
+    store.set('telegram-user-link:tok123', 'u1');
+    db.prepare("INSERT INTO users (id, name, email) VALUES ('u1', 'Ama Serwaa', 'ama@ohcs.gov.gh')").run();
+    db.prepare("INSERT INTO officers (id, name, email) VALUES ('o1', 'Ama Serwaa', 'ama@ohcs.gov.gh')").run();
+    stubTelegramFetch();
+
+    await makeApp().request('/webhook', startUpdate('/start tok123'), env);
+    expect(store.get('telegram-user:u1')).toBe('555');
+    expect(store.get('telegram-chat:555')).toBe('u1');
+
+    const res = await makeApp().request('/webhook', startUpdate('/unlink'), env);
+    expect(res.status).toBe(200);
+    expect(store.has('telegram-user:u1')).toBe(false);
+    expect(store.has('telegram-chat:555')).toBe(false);
+    const officer = db.prepare("SELECT telegram_chat_id AS cid FROM officers WHERE id = 'o1'").get() as { cid: string | null };
+    expect(officer.cid).toBeNull();
+  });
+});
+
+/* ---------- /admin + /stop gating (audit fix, 2026-08-01) ---------- */
+
+describe('telegramWebhook /admin and /stop — admin-chat registration is gated', () => {
+  const cmd = (text: string, chatId: number) => ({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: { chat: { id: chatId }, text } }),
+  });
+
+  function seedUser(db: SqliteDb, id: string, role: string) {
+    db.prepare('INSERT INTO users (id, name, email, role) VALUES (?, ?, ?, ?)').run(id, `User ${id}`, `${id}@ohcs.gov.gh`, role);
+  }
+
+  it('refuses an unlinked chat and leaves KV untouched', async () => {
+    const { env, store } = makeEnv();
+    const fetchMock = stubTelegramFetch();
+
+    const res = await makeApp().request('/webhook', cmd('/admin', 900), env);
+    expect(res.status).toBe(200);
+    expect(sentText(fetchMock)).toContain('administrator');
+    expect(store.has('telegram-admin-chat-id')).toBe(false);
+  });
+
+  it('refuses a chat linked to a staff-role user', async () => {
+    const { env, store, db } = makeEnv();
+    seedUser(db, 'u-staff', 'staff');
+    store.set('telegram-chat:900', 'u-staff');
+    const fetchMock = stubTelegramFetch();
+
+    const res = await makeApp().request('/webhook', cmd('/admin', 900), env);
+    expect(res.status).toBe(200);
+    expect(sentText(fetchMock)).toContain('administrator');
+    expect(store.has('telegram-admin-chat-id')).toBe(false);
+  });
+
+  it('registers a chat linked to an admin-role user', async () => {
+    const { env, store, db } = makeEnv();
+    seedUser(db, 'u-admin', 'admin');
+    store.set('telegram-chat:900', 'u-admin');
+    const fetchMock = stubTelegramFetch();
+
+    const res = await makeApp().request('/webhook', cmd('/admin', 900), env);
+    expect(res.status).toBe(200);
+    expect(sentText(fetchMock)).toContain('Daily summaries enabled');
+    expect(store.get('telegram-admin-chat-id')).toBe('900');
+  });
+
+  it('registers a chat linked to a superadmin-role user', async () => {
+    const { env, store, db } = makeEnv();
+    seedUser(db, 'u-super', 'superadmin');
+    store.set('telegram-chat:900', 'u-super');
+    stubTelegramFetch();
+
+    const res = await makeApp().request('/webhook', cmd('/admin', 900), env);
+    expect(res.status).toBe(200);
+    expect(store.get('telegram-admin-chat-id')).toBe('900');
+  });
+
+  it('/stop from a stranger leaves the registered admin chat intact', async () => {
+    const { env, store } = makeEnv();
+    store.set('telegram-admin-chat-id', '555');
+    const fetchMock = stubTelegramFetch();
+
+    const res = await makeApp().request('/webhook', cmd('/stop', 999), env);
+    expect(res.status).toBe(200);
+    expect(store.get('telegram-admin-chat-id')).toBe('555');
+  });
+
+  it('/stop from the registered admin chat clears it', async () => {
+    const { env, store } = makeEnv();
+    store.set('telegram-admin-chat-id', '555');
+    stubTelegramFetch();
+
+    const res = await makeApp().request('/webhook', cmd('/stop', 555), env);
+    expect(res.status).toBe(200);
+    expect(store.has('telegram-admin-chat-id')).toBe(false);
   });
 });
