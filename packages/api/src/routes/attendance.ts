@@ -7,6 +7,7 @@ import { sendAbsenceNoticePush, type AbsenceNoticeInput } from '../services/remi
 import { getAppSettings, toSqlTime } from '../services/settings';
 import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
 import { riskBand, type RiskFactor } from '../services/risk-score';
+import { clockEffectiveDateSql } from '../lib/clock-date';
 
 export const attendanceRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -51,10 +52,18 @@ function userTypeClause(segment: UserTypeSegment, alias: string): string {
   }
 }
 
-// Today's attendance overview
+// Attendance overview for a date (default: today)
 attendanceRoutes.get('/today', async (c) => {
   if (!requireAdmin(c)) return error(c, 'FORBIDDEN', 'Admin access required', 403);
   const today = new Date().toISOString().slice(0, 10);
+  const dateParam = c.req.query('date');
+  if (dateParam !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+    return error(c, 'BAD_DATE', 'date must be YYYY-MM-DD', 400);
+  }
+  const date = dateParam ?? today;
+  // Past-date registers include deactivated users who have a clock record that
+  // day (same population rule as /records); today stays active-only.
+  const isPast = date < today;
   const segment = parseUserTypeSegment(c.req.query('user_type'));
   const settings = await getAppSettings(c.env);
   const lateAfter = toSqlTime(settings.late_threshold_time);
@@ -71,31 +80,48 @@ attendanceRoutes.get('/today', async (c) => {
     ? `AND EXISTS (SELECT 1 FROM users u WHERE u.id = cr.user_id AND ${existsClause})`
     : '';
 
+  // Clock rows are matched by their EFFECTIVE date (device_info.capturedDate ??
+  // server timestamp date) so offline replays count toward the capture day —
+  // this keeps the counts in agreement with the /records register.
+  const crDate = clockEffectiveDateSql('cr');
+
+  // Population: today (and future) = active users; past dates = active users
+  // OR anyone with a clock-in that day (deactivated staff stay on the days
+  // they actually worked), mirroring /records.
+  const populationSql = isPast
+    ? `SELECT COUNT(*) as count FROM users
+       WHERE (is_active = 1 OR EXISTS (
+         SELECT 1 FROM clock_records crp
+         WHERE crp.user_id = users.id AND crp.type = 'clock_in' AND ${clockEffectiveDateSql('crp')} = ?
+       )) ${userTypeUserSql}`
+    : `SELECT COUNT(*) as count FROM users WHERE is_active = 1 ${userTypeUserSql}`;
+
   const [totalStaff, clockedIn, clockedOut, lateArrivals, earlyDepartures] = await Promise.all([
-    c.env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE is_active = 1 ${userTypeUserSql}`)
-      .first<{ count: number }>(),
+    isPast
+      ? c.env.DB.prepare(populationSql).bind(date).first<{ count: number }>()
+      : c.env.DB.prepare(populationSql).first<{ count: number }>(),
 
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
-       WHERE cr.type = 'clock_in' AND DATE(cr.timestamp) = ? ${userTypeJoinSql}`
-    ).bind(today).first<{ count: number }>(),
+       WHERE cr.type = 'clock_in' AND ${crDate} = ? ${userTypeJoinSql}`
+    ).bind(date).first<{ count: number }>(),
 
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
-       WHERE cr.type = 'clock_out' AND DATE(cr.timestamp) = ? ${userTypeJoinSql}`
-    ).bind(today).first<{ count: number }>(),
+       WHERE cr.type = 'clock_out' AND ${crDate} = ? ${userTypeJoinSql}`
+    ).bind(date).first<{ count: number }>(),
 
     // Late = clocked in after configured late threshold
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
-       WHERE cr.type = 'clock_in' AND DATE(cr.timestamp) = ? AND TIME(cr.timestamp) > ? ${userTypeJoinSql}`
-    ).bind(today, lateAfter).first<{ count: number }>(),
+       WHERE cr.type = 'clock_in' AND ${crDate} = ? AND TIME(cr.timestamp) > ? ${userTypeJoinSql}`
+    ).bind(date, lateAfter).first<{ count: number }>(),
 
     // Early departure = clocked out before work_end_time
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
-       WHERE cr.type = 'clock_out' AND DATE(cr.timestamp) = ? AND TIME(cr.timestamp) < ? ${userTypeJoinSql}`
-    ).bind(today, endAt).first<{ count: number }>(),
+       WHERE cr.type = 'clock_out' AND ${crDate} = ? AND TIME(cr.timestamp) < ? ${userTypeJoinSql}`
+    ).bind(date, endAt).first<{ count: number }>(),
   ]);
 
   const total = totalStaff?.count ?? 0;
@@ -117,11 +143,19 @@ attendanceRoutes.get('/records', async (c) => {
   if (!requireAdmin(c)) return error(c, 'FORBIDDEN', 'Admin access required', 403);
 
   const date = c.req.query('date') ?? new Date().toISOString().slice(0, 10);
+  // Past-date registers include deactivated users who have a clock record that
+  // day; today's register keeps the active-only population exactly as before.
+  const isPast = date < new Date().toISOString().slice(0, 10);
   const directorateId = c.req.query('directorate_id');
   const segment = parseUserTypeSegment(c.req.query('user_type'));
   const settings = await getAppSettings(c.env);
   const lateAfter = toSqlTime(settings.late_threshold_time);
   const endAt = toSqlTime(settings.work_end_time);
+
+  // Match clock rows by their EFFECTIVE date (device_info.capturedDate ??
+  // server timestamp date) so offline replays are attributed to the capture day.
+  const ciDate = clockEffectiveDateSql('ci');
+  const coDate = clockEffectiveDateSql('co');
 
   let sql = `SELECT u.id as user_id, u.name, u.staff_id, u.role, u.user_type,
                     d.abbreviation as directorate_abbr,
@@ -142,9 +176,9 @@ attendanceRoutes.get('/records', async (c) => {
                     u.current_streak
              FROM users u
              LEFT JOIN directorates d ON u.directorate_id = d.id
-             LEFT JOIN clock_records ci ON ci.user_id = u.id AND ci.type = 'clock_in' AND DATE(ci.timestamp) = ?
-             LEFT JOIN clock_records co ON co.user_id = u.id AND co.type = 'clock_out' AND DATE(co.timestamp) = ?
-             WHERE u.is_active = 1`;
+             LEFT JOIN clock_records ci ON ci.user_id = u.id AND ci.type = 'clock_in' AND ${ciDate} = ?
+             LEFT JOIN clock_records co ON co.user_id = u.id AND co.type = 'clock_out' AND ${coDate} = ?
+             WHERE ${isPast ? '(u.is_active = 1 OR ci.id IS NOT NULL)' : 'u.is_active = 1'}`;
   const params: unknown[] = [lateAfter, endAt, date, date];
 
   const recordsClause = userTypeClause(segment, 'u');

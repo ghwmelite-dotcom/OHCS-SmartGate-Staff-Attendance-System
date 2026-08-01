@@ -6,7 +6,9 @@ import { success, error } from '../lib/response';
 import { sendLateClockAlert } from '../services/reminders';
 import { getAppSettings, hhmmToMinutes } from '../services/settings';
 import { verifyClockWebAuthnAssertion, verifyClockPin } from '../services/clock-reauth';
-import { devLog } from '../lib/log';
+import { devLog, devError } from '../lib/log';
+import { alertAdminError } from '../lib/error-alert';
+import { parseCapturedDate, clockEffectiveDateSql } from '../lib/clock-date';
 import { recordAudit, auditActorFromContext } from '../services/audit';
 import { rateLimit } from '../lib/rate-limit';
 import { resolveOverride } from '../services/override';
@@ -170,7 +172,10 @@ const clockSchema = z.object({
   presence_override_pin: z.string().min(4).max(12).optional(),
   // Persistent client device id (IndexedDB-stored UUID; hashed server-side, no PII).
   device_id: z.string().uuid().optional(),
-  captured_at: z.string().max(40).optional(), // client clock, untrusted — log/diagnostics only
+  // Client capture time (offline-queue replays). Validated server-side
+  // ([now-48h, now+5min], else ignored); the capture date is persisted as
+  // device_info.capturedDate and drives the effective attendance date.
+  captured_at: z.string().max(40).optional(),
 });
 
 clockRoutes.post('/prompt', async (c) => {
@@ -477,21 +482,30 @@ clockRoutes.post('/', async (c) => {
     );
   }
 
-  // Check if already clocked in/out today
-  const today = new Date().toISOString().slice(0, 10);
+  // Effective attendance date: the validated client capture date (offline
+  // replay) ?? server today. A next-day replay of yesterday's clock is checked
+  // against yesterday — no false duplicate, no wrong-day attribution. For a
+  // normal online clock (no/invalid captured_at) this is exactly server today.
+  const capturedDate = parseCapturedDate(body.captured_at);
+  const effectiveDate = capturedDate ?? new Date().toISOString().slice(0, 10);
+  const effDate = clockEffectiveDateSql('clock_records');
+
+  // Check if already clocked in/out on the effective date. Rows are matched by
+  // their own effective date (capturedDate ?? timestamp date) so a replayed
+  // duplicate is caught against the day it was captured.
   const existing = await c.env.DB.prepare(
-    `SELECT id FROM clock_records WHERE user_id = ? AND type = ? AND DATE(timestamp) = ?`
-  ).bind(session.userId, type, today).first();
+    `SELECT id FROM clock_records WHERE user_id = ? AND type = ? AND ${effDate} = ?`
+  ).bind(session.userId, type, effectiveDate).first();
 
   if (existing) {
     return error(c, 'ALREADY_CLOCKED', `You have already clocked ${type === 'clock_in' ? 'in' : 'out'} today.`, 400);
   }
 
-  // If clocking out, must have clocked in first
+  // If clocking out, must have clocked in first (same effective date)
   if (type === 'clock_out') {
     const clockedIn = await c.env.DB.prepare(
-      `SELECT id FROM clock_records WHERE user_id = ? AND type = 'clock_in' AND DATE(timestamp) = ?`
-    ).bind(session.userId, today).first();
+      `SELECT id FROM clock_records WHERE user_id = ? AND type = 'clock_in' AND ${effDate} = ?`
+    ).bind(session.userId, effectiveDate).first();
     if (!clockedIn) {
       return error(c, 'NOT_CLOCKED_IN', 'You must clock in before clocking out.', 400);
     }
@@ -576,8 +590,8 @@ clockRoutes.post('/', async (c) => {
       `INSERT INTO clock_records
         (id, user_id, type, latitude, longitude, within_geofence, idempotency_key,
          reauth_method, liveness_challenge, liveness_decision, liveness_signature,
-         presence_method, presence_token_window, risk_score, risk_factors)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         presence_method, presence_token_window, risk_score, risk_factors, device_info)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       id,
       session.userId,
@@ -594,6 +608,9 @@ clockRoutes.post('/', async (c) => {
       presenceWindow,
       riskScore,
       riskFactors ? JSON.stringify(riskFactors) : null,
+      // device_info was never written before this; it is JSON only when a
+      // validated capture date exists, NULL otherwise. No other reader exists.
+      capturedDate ? JSON.stringify({ capturedDate }) : null,
     ).run();
   } catch (e) {
     // Idempotency-key race: a concurrent clock request with the same
@@ -629,41 +646,59 @@ clockRoutes.post('/', async (c) => {
     devLog(c.env, `[CLOCK_RISK] ${id} score=${riskScore} band=${riskBand(riskScore)} factors=${riskFactors.map((f) => `${f.name}:${f.condition}:${f.weight > 0 ? '+' : ''}${f.weight}`).join(', ')}`);
   }
 
+  // Post-insert steps are BEST-EFFORT: the clock row is already durably
+  // persisted, so a failure here (R2, KV, streak) must never surface as a 5xx —
+  // the client would retry and hit ALREADY_CLOCKED, or worse, the offline
+  // queue would retry a request that actually succeeded. Log + alert instead.
+  // The INSERT itself and everything before it stays strict.
+  const bestEffort = async (label: string, fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+    } catch (e) {
+      devError(c.env, `[CLOCK_POST_INSERT] ${label} failed for clock record ${id}`, e);
+      await alertAdminError(c.env, `clock:post-insert:${label}`, e);
+    }
+  };
+
   // Write the canonical (sharpest) frame to R2. Persisted for both passes AND
   // manual_review so HR has an image to adjudicate. Liveness is verified inline
   // (no AI, no background defer), so the decision and frame are already known.
   if (canonicalFrame && livenessDecision) {
-    const r2Key = `photos/clock/${id}.jpg`;
-    await c.env.STORAGE.put(r2Key, canonicalFrame, { httpMetadata: { contentType: 'image/jpeg' } });
-    await c.env.DB.prepare('UPDATE clock_records SET photo_url = ? WHERE id = ?')
-      .bind(`/api/photos/clock/${id}`, id).run();
+    await bestEffort('photo', async () => {
+      const r2Key = `photos/clock/${id}.jpg`;
+      await c.env.STORAGE.put(r2Key, canonicalFrame, { httpMetadata: { contentType: 'image/jpeg' } });
+      await c.env.DB.prepare('UPDATE clock_records SET photo_url = ? WHERE id = ?')
+        .bind(`/api/photos/clock/${id}`, id).run();
+    });
   }
 
   // Consume the prompt — single-use enforced by KV.delete after a successful insert.
   if (promptId) {
-    await c.env.KV.delete(promptKey(promptId));
+    await bestEffort('prompt-consume', () => c.env.KV.delete(promptKey(promptId)));
   }
 
   // Update streak on clock-in
   if (type === 'clock_in') {
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    const yesterdayRecord = await c.env.DB.prepare(
-      `SELECT id FROM clock_records WHERE user_id = ? AND type = 'clock_in' AND DATE(timestamp) = ?`
-    ).bind(session.userId, yesterday).first();
+    await bestEffort('streak', async () => {
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const yesterdayRecord = await c.env.DB.prepare(
+        `SELECT id FROM clock_records WHERE user_id = ? AND type = 'clock_in' AND DATE(timestamp) = ?`
+      ).bind(session.userId, yesterday).first();
 
-    if (yesterdayRecord) {
-      // Consecutive day — increment streak
-      await c.env.DB.prepare(
-        `UPDATE users SET current_streak = current_streak + 1,
-         longest_streak = MAX(longest_streak, current_streak + 1) WHERE id = ?`
-      ).bind(session.userId).run();
-    } else {
-      // Streak broken — reset to 1
-      await c.env.DB.prepare(
-        `UPDATE users SET current_streak = 1,
-         longest_streak = MAX(longest_streak, 1) WHERE id = ?`
-      ).bind(session.userId).run();
-    }
+      if (yesterdayRecord) {
+        // Consecutive day — increment streak
+        await c.env.DB.prepare(
+          `UPDATE users SET current_streak = current_streak + 1,
+           longest_streak = MAX(longest_streak, current_streak + 1) WHERE id = ?`
+        ).bind(session.userId).run();
+      } else {
+        // Streak broken — reset to 1
+        await c.env.DB.prepare(
+          `UPDATE users SET current_streak = 1,
+           longest_streak = MAX(longest_streak, 1) WHERE id = ?`
+        ).bind(session.userId).run();
+      }
+    });
   }
 
   // Late-clock alert: fires for clock_in past the configured late threshold (Ghana time = UTC+0).
