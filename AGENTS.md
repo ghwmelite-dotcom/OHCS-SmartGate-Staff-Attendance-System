@@ -116,6 +116,13 @@ relevant conventions; the user says "work the loop" to activate it.
   migration files with `wrangler d1 execute smartgate-db --local --file=…`.
 - **CI smoke check** curls the workers.dev host (bot protection 403s the branded
   domain from CI). `/api/kiosk/status` is the payload-shape canary.
+- **`wrangler kv key list` lies on this KV namespace.** `smartgate-kv` has
+  `supports_url_encoding: true` and wrangler's list (bare or `--prefix`)
+  returns `[]` for a namespace full of keys — writes via wrangler appear, the
+  Worker's don't. Diagnosed a "missing" Telegram link for an hour over this
+  (2026-08-01). Use the REST API instead:
+  `curl -H "Authorization: Bearer $OAUTH" "https://api.cloudflare.com/client/v4/accounts/f4f236a6…/storage/kv/namespaces/95f4d6f1…/keys?prefix=<p>"`
+  (OAuth token in `%APPDATA%/xdg.config/.wrangler/config/default.toml`).
 - **Playwright visual verification** is a root devDependency; drive the system
   Chrome via `channel: 'chrome'` (no browser binaries installed). Serve
   `packages/web/dist` statically and mock `/api/*` routes (auth shape:

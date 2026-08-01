@@ -296,7 +296,7 @@ describe('telegramAttendanceWebhook — dedicated attendance bot', () => {
     const res = await makeApp().request('/att-webhook', attUpdate('/start bogus', 'sec'), env);
     expect(res.status).toBe(200);
     expect(sentUrl(fetchMock)).toBe('https://api.telegram.org/botatt-tok/sendMessage');
-    expect(sentText(fetchMock)).toContain('OHCS SmartGate Bot');
+    expect(sentText(fetchMock)).toContain('Attendance Alerts');
     expect([...store.keys()].filter((k) => k.startsWith('telegram-user:'))).toHaveLength(0);
   });
 

@@ -111,7 +111,7 @@ export async function telegramAttendanceWebhook(c: Context<{ Bindings: Env }>) {
       return c.json({ ok: true });
     }
     // No token, or unknown/expired → harmless greeting (no error leak).
-    await sendGreeting(c, chatId, token);
+    await sendGreeting(c, chatId, token, 'attendance');
   }
   // Every other command/update is a no-op here — main-bot territory.
   return c.json({ ok: true });
@@ -255,19 +255,23 @@ export async function handleUserLinkStart(c: Ctx, chatId: number, args: string, 
 }
 
 // Harmless greeting — the fall-through for /start without a (valid) token.
-// Shared by both webhooks so an unknown token never leaks an error.
-export async function sendGreeting(c: Ctx, chatId: number, token: string): Promise<void> {
-  await sendTelegramMessage({
-    chatId: String(chatId),
-    text: [
-      `\u{1F1EC}\u{1F1ED} <b>OHCS SmartGate Bot</b>`,
-      '',
-      `I send visitor-arrival alerts and daily attendance summaries.`,
-      '',
-      `Send /help to see everything I can do, or /link &lt;StaffID&gt; to start receiving alerts.`,
-    ].join('\n'),
-    token,
-  });
+// Shared by both webhooks so an unknown token never leaks an error; the
+// attendance bot gets its own copy so it doesn't introduce itself as SmartGate.
+export async function sendGreeting(c: Ctx, chatId: number, token: string, kind: 'smartgate' | 'attendance' = 'smartgate'): Promise<void> {
+  const text = kind === 'attendance'
+    ? [
+        `⏰ <b>Attendance Alerts</b>`,
+        '',
+        `I send your clock-in and clock-out reminders. Link your staff account from the attendance app to get started.`,
+      ].join('\n')
+    : [
+        `\u{1F1EC}\u{1F1ED} <b>OHCS SmartGate Bot</b>`,
+        '',
+        `I send visitor-arrival alerts and daily attendance summaries.`,
+        '',
+        `Send /help to see everything I can do, or /link &lt;StaffID&gt; to start receiving alerts.`,
+      ].join('\n');
+  await sendTelegramMessage({ chatId: String(chatId), text, token });
 }
 
 async function handleHelp(c: Ctx, chatId: number): Promise<void> {
