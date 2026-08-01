@@ -460,13 +460,15 @@ export async function sendTypedNotification(env: Env, opts: {
       const chatId = await env.KV.get(`telegram-user:${opts.userId}`);
       if (chatId) {
         const ent = await env.DB.prepare(
-          `SELECT d.abbreviation AS abbr FROM users u
+          `SELECT u.name AS name, d.abbreviation AS abbr FROM users u
              LEFT JOIN directorates d ON d.id = u.directorate_id
             WHERE u.id = ?`
-        ).bind(opts.userId).first<{ abbr: string | null }>();
+        ).bind(opts.userId).first<{ name: string | null; abbr: string | null }>();
         const label = `${ent?.abbr ?? 'OHCS'} Attendance`;
         const base = env.STAFF_APP_URL ?? DEFAULT_STAFF_APP_URL;
+        const firstName = ent?.name?.trim().split(/\s+/)[0] || null;
         const text = [
+          ...(firstName ? [`Hi <b>${escapeHtml(firstName)}</b> 👋`, ''] : []),
           `<b>${escapeHtml(opts.title)}</b>`,
           '',
           escapeHtml(opts.body),

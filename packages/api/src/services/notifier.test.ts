@@ -20,7 +20,7 @@ function makeEnv(kvStore: Map<string, string> = new Map()) {
       prepare: (sql: string) => ({
         bind: () => ({
           run: async () => ({}),
-          first: async () => (sql.includes('directorates') ? { abbr: 'FIN' } : null),
+          first: async () => (sql.includes('directorates') ? { abbr: 'FIN', name: 'Kwame Mensah' } : null),
           all: async () => ({ results: [] }),
         }),
       }),
@@ -58,6 +58,23 @@ describe('sendTypedNotification — telegram delivery arm', () => {
     expect(arg.text).toContain('You have not clocked in.');
     expect(arg.text).toContain('https://staff-attendance.ohcsghana.org/');
     expect(arg.text).toContain('FIN Attendance');
+    expect(arg.text).toContain('Hi <b>Kwame</b>');
+  });
+
+  it('omits the greeting line when the user has no name', async () => {
+    const env = makeEnv(new Map([['telegram-user:u1', 'chat-123']]));
+    // name-less user row
+    (env.DB as { prepare: unknown }).prepare = (sql: string) => ({
+      bind: () => ({
+        run: async () => ({}),
+        first: async () => (sql.includes('directorates') ? { abbr: null, name: null } : null),
+        all: async () => ({ results: [] }),
+      }),
+    });
+    await sendTypedNotification(env, { ...base, type: 'clock_reminder' });
+    const arg = sendTelegramMessageMock.mock.calls[0][0] as { text: string };
+    expect(arg.text).not.toContain('Hi <b>');
+    expect(arg.text).toContain('OHCS Attendance');
   });
 
   it('does NOT send Telegram for visitor_arrival (already sent via its own path)', async () => {
