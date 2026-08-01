@@ -452,8 +452,10 @@ export async function sendTypedNotification(env: Env, opts: {
 
   // Best-effort Telegram arm (spec §6.1) — staff clock reminders only, so
   // nudges reach officers with the PWA closed even without push permission.
-  // Never throws into the caller.
-  if (TELEGRAM_WHITELIST.has(opts.type) && env.TELEGRAM_BOT_TOKEN) {
+  // Sends via the dedicated attendance bot once its token secret is set;
+  // falls back to the main bot until then. Never throws into the caller.
+  const attendanceToken = env.TELEGRAM_ATTENDANCE_BOT_TOKEN || env.TELEGRAM_BOT_TOKEN;
+  if (TELEGRAM_WHITELIST.has(opts.type) && attendanceToken) {
     try {
       const chatId = await env.KV.get(`telegram-user:${opts.userId}`);
       if (chatId) {
@@ -473,7 +475,7 @@ export async function sendTypedNotification(env: Env, opts: {
           '',
           `— ${escapeHtml(label)}`,
         ].join('\n');
-        const ok = await sendTelegramMessage({ chatId, text, token: env.TELEGRAM_BOT_TOKEN });
+        const ok = await sendTelegramMessage({ chatId, text, token: attendanceToken });
         await recordNotifyOutcome(env, 'telegram', ok);
       }
     } catch (err) {

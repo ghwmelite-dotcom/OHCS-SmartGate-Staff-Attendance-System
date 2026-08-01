@@ -6,6 +6,12 @@ export interface Env {
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_BOT_USERNAME: string;
   TELEGRAM_WEBHOOK_SECRET?: string;
+  // Dedicated attendance bot (@RSIMDAttendanceAlertsBot) — staff clock
+  // reminders + telegram-user-link deep-links. Until these are set every
+  // consumer falls back to the main bot vars above.
+  TELEGRAM_ATTENDANCE_BOT_TOKEN?: string;
+  TELEGRAM_ATTENDANCE_BOT_USERNAME?: string;
+  TELEGRAM_ATTENDANCE_WEBHOOK_SECRET?: string;
   ENVIRONMENT: string;
   VAPID_PUBLIC_X: string;
   VAPID_PUBLIC_Y: string;

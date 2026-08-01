@@ -379,3 +379,28 @@ Add the API calls to the staff app's `packages/staff/src/lib/` (mirror
 **No cron changes. No web-push removal.** Link state is KV; the only new
 persisted config is the `reminder_directorate_ids` app_setting (a settings
 key/seed, not a table migration).
+
+---
+
+## Addendum (2026-08-01, post-ship) — dedicated attendance bot
+
+Product decision changed after initial ship: clock reminders + staff linking
+moved off `@ohcs_smartgate_bot` onto a **dedicated bot
+`@RSIMDAttendanceAlertsBot`** ("RSIMD Attendance Alerts"). When the system goes
+operational OHCS-wide, the bot is simply renamed in BotFather ("OHCS Attendance
+Alerts") — token, username, and code are unaffected by a display-name change.
+
+- Env: `TELEGRAM_ATTENDANCE_BOT_TOKEN` + `TELEGRAM_ATTENDANCE_WEBHOOK_SECRET`
+  (Worker secrets), `TELEGRAM_ATTENDANCE_BOT_USERNAME` (wrangler var).
+  Fallback chain everywhere: attendance value `||` main-bot value, so the
+  system keeps working before the secrets are set.
+- Reminder delivery (`notifier.ts`) and the link-token URL
+  (`notifications-telegram.ts`) resolve through that chain.
+- Second webhook `POST /api/telegram/webhook-attendance` handles ONLY
+  `/start <telegram-user-link token>` (via the extracted `handleUserLinkStart`
+  helper) + greeting fall-through; officer-link, `/link`, callbacks and all
+  visitor-alert traffic stay on the main webhook/bot untouched.
+- KV link store unchanged (`telegram-user-link:*`, `telegram-user:*`).
+- A broadcast **channel was considered and rejected**: reminders are per-user
+  DMs so the ladder auto-stops per person on compliance; a channel can't do
+  that.

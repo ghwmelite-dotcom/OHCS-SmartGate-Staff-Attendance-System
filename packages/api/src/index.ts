@@ -7,7 +7,7 @@ import { visitRoutes } from './routes/visits';
 import { officerRoutes } from './routes/officers';
 import { directorateRoutes } from './routes/directorates';
 import { notificationRoutes } from './routes/notifications';
-import { telegramWebhook, telegramLinkRoute } from './routes/telegram';
+import { telegramWebhook, telegramAttendanceWebhook, telegramLinkRoute } from './routes/telegram';
 import { badgeRoutes, serveBadgePage } from './routes/badges';
 import { kioskRoutes } from './routes/kiosk';
 import { presenceRoutes } from './routes/presence';
@@ -89,6 +89,8 @@ app.route('/api/kiosk', kioskRoutes);
 app.route('/api/presence', presenceRoutes);
 app.route('/api/appointments/public', appointmentsPublicRoutes);
 app.post('/api/telegram/webhook', telegramWebhook);
+// Dedicated attendance bot (@RSIMDAttendanceAlertsBot) — staff linking only.
+app.post('/api/telegram/webhook-attendance', telegramAttendanceWebhook);
 
 // Protected routes
 app.use('/api/*', authMiddleware);

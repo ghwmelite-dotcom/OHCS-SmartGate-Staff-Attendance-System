@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Hono } from 'hono';
 import { notificationsTelegramRoutes } from './notifications-telegram';
-import { telegramWebhook } from './telegram';
+import { telegramWebhook, telegramAttendanceWebhook } from './telegram';
 import type { Env, SessionData } from '../types';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -64,12 +64,20 @@ function kv(store: Map<string, string>) {
   };
 }
 
-function makeEnv(opts: { username?: string | null } = {}) {
+function makeEnv(opts: {
+  username?: string | null;
+  attendanceUsername?: string | null;
+  attendanceToken?: string;
+  attendanceSecret?: string;
+} = {}) {
   const store = new Map<string, string>();
   const db = newDb();
   const env = {
     TELEGRAM_BOT_TOKEN: 't',
     TELEGRAM_BOT_USERNAME: opts.username === undefined ? 'ohcsbot' : opts.username,
+    TELEGRAM_ATTENDANCE_BOT_TOKEN: opts.attendanceToken,
+    TELEGRAM_ATTENDANCE_BOT_USERNAME: opts.attendanceUsername ?? undefined,
+    TELEGRAM_ATTENDANCE_WEBHOOK_SECRET: opts.attendanceSecret,
     ENVIRONMENT: 'test',
     KV: kv(store),
     DB: d1(db),
@@ -84,6 +92,7 @@ function makeApp(session: SessionData = baseSession) {
   app.use('/t/*', async (c, next) => { c.set('session', session); await next(); });
   app.route('/t', notificationsTelegramRoutes);
   app.post('/webhook', telegramWebhook);
+  app.post('/att-webhook', telegramAttendanceWebhook);
   return app;
 }
 
@@ -183,6 +192,132 @@ describe('telegramWebhook /start with a user link token', () => {
     const res = await makeApp().request('/webhook', startUpdate('/start bogus-token'), env);
     expect(res.status).toBe(200);
     expect(sentText(fetchMock)).toContain('OHCS SmartGate Bot');
+    expect([...store.keys()].filter((k) => k.startsWith('telegram-user:'))).toHaveLength(0);
+  });
+});
+
+/* ---------- link-token attendance username ---------- */
+
+describe('POST /notifications/telegram/link-token — attendance bot username', () => {
+  it('builds the deep link with the attendance bot username when configured', async () => {
+    const { env, store } = makeEnv({ attendanceUsername: 'RSIMDAttendanceAlertsBot' });
+    const res = await makeApp().request('/t/link-token', { method: 'POST' }, env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: { url: string } };
+    expect(body.data.url).toMatch(/^https:\/\/t\.me\/RSIMDAttendanceAlertsBot\?start=[0-9a-f]{32}$/);
+    const token = body.data.url.split('start=')[1]!;
+    expect(store.get(`telegram-user-link:${token}`)).toBe('u1');
+  });
+
+  it('falls back to the main bot username when the attendance username is unset', async () => {
+    const { env } = makeEnv();
+    const res = await makeApp().request('/t/link-token', { method: 'POST' }, env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: { url: string } };
+    expect(body.data.url).toMatch(/^https:\/\/t\.me\/ohcsbot\?start=[0-9a-f]{32}$/);
+  });
+
+  it('resolves the 503 guard on the attendance username even when the main one is missing', async () => {
+    const { env } = makeEnv({ username: null, attendanceUsername: 'RSIMDAttendanceAlertsBot' });
+    const res = await makeApp().request('/t/link-token', { method: 'POST' }, env);
+    expect(res.status).toBe(200);
+  });
+
+  it('503s when neither username is configured', async () => {
+    const { env } = makeEnv({ username: null });
+    const res = await makeApp().request('/t/link-token', { method: 'POST' }, env);
+    expect(res.status).toBe(503);
+    const body = await res.json() as { error: { code: string } };
+    expect(body.error.code).toBe('BOT_NOT_CONFIGURED');
+  });
+});
+
+/* ---------- dedicated attendance-bot webhook ---------- */
+
+describe('telegramAttendanceWebhook — dedicated attendance bot', () => {
+  const attUpdate = (text: string, secret?: string) => ({
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(secret ? { 'x-telegram-bot-api-secret-token': secret } : {}),
+    },
+    body: JSON.stringify({ message: { chat: { id: 777 }, text } }),
+  });
+
+  function sentUrl(fetchMock: ReturnType<typeof vi.fn>, call = 0): string {
+    return String(fetchMock.mock.calls[call]![0]);
+  }
+
+  it('links a telegram-user-link token, consumes it, and confirms via the ATTENDANCE token', async () => {
+    const { env, store, db } = makeEnv({ attendanceToken: 'att-tok', attendanceSecret: 'sec' });
+    store.set('telegram-user-link:tok9', 'u1');
+    db.prepare("INSERT INTO users (id, name, email) VALUES ('u1', 'Ama Serwaa', 'ama@ohcs.gov.gh')").run();
+    const fetchMock = stubTelegramFetch();
+
+    const res = await makeApp().request('/att-webhook', attUpdate('/start tok9', 'sec'), env);
+    expect(res.status).toBe(200);
+    expect(store.get('telegram-user:u1')).toBe('777');
+    expect(store.has('telegram-user-link:tok9')).toBe(false);
+    expect(fetchMock).toHaveBeenCalled();
+    expect(sentUrl(fetchMock)).toBe('https://api.telegram.org/botatt-tok/sendMessage');
+    expect(sentText(fetchMock)).toContain('Connected!');
+  });
+
+  it('sends via the main token until the attendance token secret is set', async () => {
+    const { env, store, db } = makeEnv({ attendanceSecret: 'sec' });
+    store.set('telegram-user-link:tok9', 'u1');
+    db.prepare("INSERT INTO users (id, name, email) VALUES ('u1', 'Ama Serwaa', 'ama@ohcs.gov.gh')").run();
+    const fetchMock = stubTelegramFetch();
+
+    const res = await makeApp().request('/att-webhook', attUpdate('/start tok9', 'sec'), env);
+    expect(res.status).toBe(200);
+    expect(store.get('telegram-user:u1')).toBe('777');
+    expect(sentUrl(fetchMock)).toBe('https://api.telegram.org/bott/sendMessage');
+  });
+
+  it('401s when the webhook secret header is missing or wrong', async () => {
+    const { env, store } = makeEnv({ attendanceToken: 'att-tok', attendanceSecret: 'sec' });
+    store.set('telegram-user-link:tok9', 'u1');
+    const fetchMock = stubTelegramFetch();
+
+    for (const secret of [undefined, 'wrong']) {
+      const res = await makeApp().request('/att-webhook', attUpdate('/start tok9', secret), env);
+      expect(res.status).toBe(401);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(store.has('telegram-user-link:tok9')).toBe(true);
+    expect([...store.keys()].filter((k) => k.startsWith('telegram-user:'))).toHaveLength(0);
+  });
+
+  it('greets via the attendance token on a bogus token, with no KV writes', async () => {
+    const { env, store } = makeEnv({ attendanceToken: 'att-tok', attendanceSecret: 'sec' });
+    const fetchMock = stubTelegramFetch();
+
+    const res = await makeApp().request('/att-webhook', attUpdate('/start bogus', 'sec'), env);
+    expect(res.status).toBe(200);
+    expect(sentUrl(fetchMock)).toBe('https://api.telegram.org/botatt-tok/sendMessage');
+    expect(sentText(fetchMock)).toContain('OHCS SmartGate Bot');
+    expect([...store.keys()].filter((k) => k.startsWith('telegram-user:'))).toHaveLength(0);
+  });
+
+  it('does NOT handle officer-link tokens, /link, or other commands', async () => {
+    const { env, store, db } = makeEnv({ attendanceToken: 'att-tok', attendanceSecret: 'sec' });
+    store.set('officer-link:off1', 'o1');
+    db.prepare("INSERT INTO officers (id, name, email) VALUES ('o1', 'Ama Serwaa', 'ama@ohcs.gov.gh')").run();
+    const fetchMock = stubTelegramFetch();
+
+    // officer-link deep-link token: NOT consumed by the attendance webhook.
+    const r1 = await makeApp().request('/att-webhook', attUpdate('/start off1', 'sec'), env);
+    expect(r1.status).toBe(200);
+    expect(store.get('officer-link:off1')).toBe('o1'); // untouched — main bot consumes it
+    const officer = db.prepare("SELECT telegram_chat_id AS cid FROM officers WHERE id = 'o1'").get() as { cid: string | null };
+    expect(officer.cid).toBeNull();
+
+    // Other commands are ignored entirely (no fetch beyond the greeting above).
+    const callsBefore = fetchMock.mock.calls.length;
+    const r2 = await makeApp().request('/att-webhook', attUpdate('/link 1334685', 'sec'), env);
+    expect(r2.status).toBe(200);
+    expect(fetchMock.mock.calls.length).toBe(callsBefore);
     expect([...store.keys()].filter((k) => k.startsWith('telegram-user:'))).toHaveLength(0);
   });
 });

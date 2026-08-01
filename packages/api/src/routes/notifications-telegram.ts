@@ -9,13 +9,16 @@ export const notificationsTelegramRoutes = new Hono<{ Bindings: Env; Variables: 
 // and records telegram-user:<userId> → chatId. Token TTL: 1 hour.
 notificationsTelegramRoutes.post('/link-token', async (c) => {
   const session = c.get('session');
-  // Guard: until the real bot @username is configured, a deep link would be malformed.
-  if (!c.env.TELEGRAM_BOT_USERNAME || c.env.TELEGRAM_BOT_USERNAME === 'REPLACE_WITH_BOT_USERNAME') {
-    return error(c, 'BOT_NOT_CONFIGURED', 'Telegram bot username is not configured yet. Set TELEGRAM_BOT_USERNAME before generating deep links.', 503);
+  // Staff linking lives on the dedicated attendance bot; until its username is
+  // configured the main bot's is used (shared KV link store keeps both working).
+  const username = c.env.TELEGRAM_ATTENDANCE_BOT_USERNAME || c.env.TELEGRAM_BOT_USERNAME;
+  // Guard: until a real bot @username is configured, a deep link would be malformed.
+  if (!username || username === 'REPLACE_WITH_BOT_USERNAME') {
+    return error(c, 'BOT_NOT_CONFIGURED', 'Telegram bot username is not configured yet. Set TELEGRAM_ATTENDANCE_BOT_USERNAME (or TELEGRAM_BOT_USERNAME) before generating deep links.', 503);
   }
   const token = crypto.randomUUID().replace(/-/g, '');
   await c.env.KV.put(`telegram-user-link:${token}`, session.userId, { expirationTtl: 3600 });
-  return success(c, { url: `https://t.me/${c.env.TELEGRAM_BOT_USERNAME}?start=${token}` });
+  return success(c, { url: `https://t.me/${username}?start=${token}` });
 });
 
 // Whether the caller has a Telegram chat linked, plus their org-entity

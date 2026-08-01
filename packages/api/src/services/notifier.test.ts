@@ -71,4 +71,22 @@ describe('sendTypedNotification — telegram delivery arm', () => {
     await expect(sendTypedNotification(env, { ...base, type: 'clock_out_reminder' })).resolves.toBeUndefined();
     expect(sendTelegramMessageMock).not.toHaveBeenCalled();
   });
+
+  it('sends via the attendance bot token when TELEGRAM_ATTENDANCE_BOT_TOKEN is set', async () => {
+    const env = makeEnv(new Map([['telegram-user:u1', 'chat-123']]));
+    env.TELEGRAM_ATTENDANCE_BOT_TOKEN = 'att-tok';
+    await sendTypedNotification(env, { ...base, type: 'clock_reminder' });
+    expect(sendTelegramMessageMock).toHaveBeenCalledTimes(1);
+    const arg = sendTelegramMessageMock.mock.calls[0][0] as { chatId: string; token: string };
+    expect(arg.chatId).toBe('chat-123');
+    expect(arg.token).toBe('att-tok');
+  });
+
+  it('falls back to the main bot token when the attendance token is unset', async () => {
+    const env = makeEnv(new Map([['telegram-user:u1', 'chat-123']]));
+    await sendTypedNotification(env, { ...base, type: 'clock_out_reminder' });
+    expect(sendTelegramMessageMock).toHaveBeenCalledTimes(1);
+    const arg = sendTelegramMessageMock.mock.calls[0][0] as { token: string };
+    expect(arg.token).toBe('t');
+  });
 });
