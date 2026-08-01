@@ -12,6 +12,7 @@ import { PresenceScanner } from '@/components/PresenceScanner';
 import { WebAuthnNudgeBanner } from '@/components/WebAuthnNudgeBanner';
 import { PushNudgeBanner } from '@/components/PushNudgeBanner';
 import { TelegramConnectBanner } from '@/components/TelegramConnectBanner';
+import { QueuedFailuresBanner } from '@/components/QueuedFailuresBanner';
 import { LivenessCapture } from '@/lib/liveness/LivenessCapture';
 import type { FrameBurst } from '@/lib/liveness/types';
 import { api, fetchClockPrompt, submitClock as apiSubmitClock, type ClockPrompt } from '@/lib/api';
@@ -687,7 +688,7 @@ export function ClockPage() {
 
           {/* IDLE — show big buttons */}
           {phase === 'idle' && (
-            <><div className="w-full mb-4 space-y-3"><TelegramConnectBanner /><PushNudgeBanner /></div>
+            <><div className="w-full mb-4 space-y-3"><QueuedFailuresBanner /><TelegramConnectBanner /><PushNudgeBanner /></div>
             <div className="space-y-4 w-full">
               {canClockIn && (
                 <MagneticButton

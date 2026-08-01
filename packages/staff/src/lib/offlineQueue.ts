@@ -5,13 +5,21 @@ const DB_VERSION = 1;
 const STORES = ['clock-queue'] as const;
 export type QueueTag = typeof STORES[number];
 
-interface QueueRecord {
+export interface QueueRecord {
   id: string;
   endpoint: string;
   method: string;
   body: string;
   headers: Record<string, string>;
   createdAt: number;
+  // Replay state, written by the service worker (public/sw.js). IndexedDB
+  // object stores are schemaless, so these ride on the record shape — no DB
+  // version bump, and records queued before this shipped simply lack them
+  // (treated as attempts=0 / status='pending').
+  attempts?: number;
+  status?: 'pending' | 'failed';
+  failReason?: string;
+  failedAt?: number;
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -43,6 +51,40 @@ export async function queueCount(tag: QueueTag): Promise<number> {
     const req = tx.objectStore(tag).count();
     req.onsuccess = () => { db.close(); resolve(req.result); };
     req.onerror = () => { db.close(); reject(req.error); };
+  });
+}
+
+// Terminally-failed replay entries, oldest first — the SW marks these instead
+// of deleting them so the user is told their clock event never landed.
+export async function listFailed(tag: QueueTag): Promise<QueueRecord[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(tag, 'readonly');
+    const req = tx.objectStore(tag).getAll();
+    req.onsuccess = () => {
+      db.close();
+      const failed = (req.result as QueueRecord[]).filter((r) => r.status === 'failed');
+      failed.sort((a, b) => (a.failedAt ?? 0) - (b.failedAt ?? 0));
+      resolve(failed);
+    };
+    req.onerror = () => { db.close(); reject(req.error); };
+  });
+}
+
+// Dismiss — deletes ONLY failed entries; pending ones are never touched.
+export async function clearFailed(tag: QueueTag): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(tag, 'readwrite');
+    const store = tx.objectStore(tag);
+    const req = store.getAll();
+    req.onsuccess = () => {
+      for (const r of req.result as QueueRecord[]) {
+        if (r.status === 'failed') store.delete(r.id);
+      }
+    };
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
 

@@ -80,44 +80,131 @@ function deleteRecord(db, store, id) {
   });
 }
 
+function putRecord(db, store, rec) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    tx.objectStore(store).put(rec);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// --- Replay-outcome classification -----------------------------------------
+// VERBATIM copy of src/lib/replayOutcome.ts (this file is a plain script and
+// cannot import). Keep the two in sync; the TS copy carries the unit tests.
+const MAX_REPLAY_ATTEMPTS = 10;
+
+const FAIL_REASONS = {
+  PROMPT_NOT_FOUND: 'Clock session expired',
+  PROMPT_EXPIRED: 'Clock session expired',
+  REAUTH_REQUIRED: 'Sign-in verification expired',
+  REAUTH_FAILED: 'Sign-in verification failed',
+  PRESENCE_REQUIRED: 'Presence scan missing at replay',
+  OUTSIDE_GEOFENCE: 'Outside office zone at replay',
+  GPS_TOO_IMPRECISE: 'GPS signal too weak at replay',
+};
+
+function classifyReplayOutcome(res, attempts, ageMs) {
+  if (ageMs > MAX_AGE_MS) {
+    return { action: 'failed', reason: 'Queued for over 24 hours' };
+  }
+  const retryOrCap = () =>
+    attempts + 1 >= MAX_REPLAY_ATTEMPTS
+      ? { action: 'failed', reason: `Server unreachable after ${MAX_REPLAY_ATTEMPTS} tries` }
+      : { action: 'retry' };
+
+  if (!res || res.networkError) return retryOrCap();
+  const { status, errorCode } = res;
+  if (status >= 200 && status < 300) return { action: 'delivered' };
+  if (errorCode === 'ALREADY_CLOCKED') return { action: 'delivered' };
+  if (status === 429 || status >= 500) return retryOrCap();
+  if (status >= 400 && status < 500) {
+    return { action: 'failed', reason: FAIL_REASONS[errorCode] || 'Rejected by the server at replay' };
+  }
+  return retryOrCap();
+}
+
+// Failed entries are retained for user dismissal but never replayed again.
+// Missing status (records queued before this shipped) = pending.
+function isReplayPending(rec) {
+  return rec.status !== 'failed';
+}
+// --- end verbatim copy ------------------------------------------------------
+
 async function drainStore(storeName) {
   const db = await openQueueDb();
   const records = await readAll(db, storeName);
-  let synced = 0, failed = 0;
+  let synced = 0, failed = 0, firstFailReason = null;
   for (const rec of records) {
-    if (Date.now() - rec.createdAt > MAX_AGE_MS) {
-      await deleteRecord(db, storeName, rec.id);
-      failed++;
-      continue;
-    }
-    try {
-      const res = await fetch(rec.endpoint, { method: rec.method, headers: rec.headers, body: rec.body, credentials: 'include' });
-      if (res.ok || (res.status >= 400 && res.status < 500)) {
-        await deleteRecord(db, storeName, rec.id);
-        if (res.ok) synced++; else failed++;
-      } else {
-        break;
+    if (!isReplayPending(rec)) continue;
+    const attempts = rec.attempts || 0;
+    const ageMs = Date.now() - rec.createdAt;
+
+    let fetchResult = null;
+    if (ageMs <= MAX_AGE_MS) {
+      try {
+        const res = await fetch(rec.endpoint, { method: rec.method, headers: rec.headers, body: rec.body, credentials: 'include' });
+        fetchResult = { status: res.status, errorCode: null };
+        if (!res.ok) {
+          // Parse the error envelope ({error:{code}}) — ALREADY_CLOCKED is a
+          // delivered record, not a failure.
+          const body = await res.json().catch(() => null);
+          fetchResult.errorCode = body && body.error && body.error.code ? body.error.code : null;
+        }
+      } catch {
+        fetchResult = { networkError: true };
       }
-    } catch {
+    }
+
+    const outcome = classifyReplayOutcome(fetchResult, attempts, ageMs);
+    if (outcome.action === 'delivered') {
+      await deleteRecord(db, storeName, rec.id);
+      synced++;
+    } else if (outcome.action === 'retry') {
+      await putRecord(db, storeName, { ...rec, attempts: attempts + 1 });
+      // Transient failure — back off until the next sync/online flush instead
+      // of hammering a struggling server with the rest of the queue.
       break;
+    } else {
+      // Terminal failure — MARK the entry (never silently delete); the clock
+      // page surfaces it until the user dismisses.
+      await putRecord(db, storeName, {
+        ...rec,
+        attempts: attempts + 1,
+        status: 'failed',
+        failReason: outcome.reason,
+        failedAt: Date.now(),
+      });
+      failed++;
+      if (!firstFailReason) firstFailReason = outcome.reason;
     }
   }
   db.close();
-  return { synced, failed };
+  return { synced, failed, firstFailReason };
+}
+
+async function notifyClients({ synced, failed, firstFailReason }) {
+  const clientsList = await self.clients.matchAll({ type: 'window' });
+  for (const c of clientsList) {
+    c.postMessage({ type: 'queue-drained', synced, failed });
+    if (failed > 0) c.postMessage({ type: 'queue-failed', failed, reason: firstFailReason });
+  }
 }
 
 async function drainAll() {
-  let synced = 0, failed = 0;
+  let synced = 0, failed = 0, firstFailReason = null;
   for (const s of QUEUE_STORES) {
     const r = await drainStore(s);
     synced += r.synced; failed += r.failed;
+    if (!firstFailReason) firstFailReason = r.firstFailReason;
   }
-  const clientsList = await self.clients.matchAll({ type: 'window' });
-  for (const c of clientsList) c.postMessage({ type: 'queue-drained', synced, failed });
+  await notifyClients({ synced, failed, firstFailReason });
 }
 
 self.addEventListener('sync', (event) => {
-  if (QUEUE_STORES.includes(event.tag)) event.waitUntil(drainStore(event.tag));
+  if (QUEUE_STORES.includes(event.tag)) {
+    event.waitUntil(drainStore(event.tag).then(notifyClients));
+  }
 });
 
 self.addEventListener('message', (event) => {
