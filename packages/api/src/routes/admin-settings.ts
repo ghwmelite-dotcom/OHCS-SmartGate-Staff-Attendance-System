@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error, notFound } from '../lib/response';
+import { hashPin } from '../services/auth';
 import { invalidateSettingsCache, getAppSettings, REMINDER_DIRECTORATE_IDS_KV_KEY, type AppSettings } from '../services/settings';
 import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
 
@@ -71,10 +72,12 @@ adminSettingsRoutes.put('/', zValidator('json', settingsSchema), async (c) => {
   // other audited field.
   const beforeSettings = await getAppSettings(c.env);
   const before = { ...beforeRow, reminder_directorate_ids: beforeSettings.reminder_directorate_ids };
-  // Write-only PIN: omitted = keep current; '' = clear (NULL); digits = set.
+  // Write-only PIN: omitted = keep current (already hashed); '' = clear (NULL);
+  // digits = set, stored as a PBKDF2 hash — never the cleartext. Legacy
+  // cleartext values in the wild are upgraded lazily by resolveOverride.
   const overridePin = body.reception_override_pin === undefined
     ? ((beforeRow?.reception_override_pin as string | null) ?? null)
-    : (body.reception_override_pin || null);
+    : (body.reception_override_pin ? await hashPin(body.reception_override_pin) : null);
   // Enforce flags are optional in the payload — keep the current value when omitted.
   const reauthEnforce = body.clockin_reauth_enforce ?? (beforeRow?.clockin_reauth_enforce ?? 0);
   const livenessEnforce = body.clockin_passive_liveness_enforce ?? (beforeRow?.clockin_passive_liveness_enforce ?? 0);

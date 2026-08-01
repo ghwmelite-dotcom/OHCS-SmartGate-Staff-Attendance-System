@@ -6,11 +6,7 @@ import { success, error, created, notFound } from '../lib/response';
 import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
 import { hashPin } from '../services/auth';
 import { sendWelcomeEmail } from '../services/email';
-
-function defaultPinFromStaffId(staffId: string): string {
-  const digits = staffId.replace(/\D/g, '');
-  return digits.length >= 4 ? digits.slice(-4) : digits.padStart(4, '0');
-}
+import { generateInitialPin } from './admin-nss';
 
 export const adminDirectorateRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
@@ -261,11 +257,12 @@ adminDirectorateRoutes.post('/officers', zValidator('json', officerCreateSchema)
   ).bind(id, body.name, body.title || null, body.directorate_id, body.email || null, body.phone || null, body.office_number || null, overridePinHash, normalizedStaffId).run();
 
   // Auto-provision Staff Attendance account when staff_id is given
+  let provisionedInitialPin: string | null = null;
   if (normalizedStaffId) {
     const existingUser = await c.env.DB.prepare('SELECT id FROM users WHERE staff_id = ?')
       .bind(normalizedStaffId).first();
     if (!existingUser) {
-      const pin = defaultPinFromStaffId(normalizedStaffId);
+      const pin = generateInitialPin();
       const pinHash = await hashPin(pin);
       const userId = crypto.randomUUID().replace(/-/g, '');
       const userEmail = body.email || `${normalizedStaffId.toLowerCase()}@ohcs.internal`;
@@ -275,6 +272,7 @@ adminDirectorateRoutes.post('/officers', zValidator('json', officerCreateSchema)
           `INSERT INTO users (id, name, email, staff_id, pin_hash, role, directorate_id, phone)
            VALUES (?, ?, ?, ?, ?, 'staff', ?, ?)`
         ).bind(userId, body.name, userEmail, normalizedStaffId, pinHash, body.directorate_id, body.phone || null).run();
+        provisionedInitialPin = pin;
         if (body.email) {
           c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
             userId, name: body.name, email: body.email, role: 'staff',
@@ -295,7 +293,9 @@ adminDirectorateRoutes.post('/officers', zValidator('json', officerCreateSchema)
     action: 'officer.create', entityType: 'officer', entityId: id,
     summary: `Created officer ${body.name}${body.title ? ` (${body.title})` : ''}${normalizedStaffId ? ` · staff_id=${normalizedStaffId}` : ''}`,
   });
-  return created(c, row);
+  // initial_pin is surfaced once so the superadmin can distribute it (the PIN is
+  // random — no longer derivable from the staff ID); null when no account was provisioned.
+  return created(c, { ...(row as Record<string, unknown>), initial_pin: provisionedInitialPin });
 });
 
 const officerUpdateSchema = officerCreateSchema.partial().extend({

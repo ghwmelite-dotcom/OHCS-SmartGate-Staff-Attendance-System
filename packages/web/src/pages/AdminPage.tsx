@@ -13,6 +13,8 @@ import { AttendanceTab } from '@/components/admin/AttendanceTab';
 import { NssTab } from '@/components/admin/NssTab';
 import { AuditLogTab } from '@/components/admin/AuditLogTab';
 import { AppointmentsTab } from '@/components/admin/AppointmentsTab';
+import { CredentialSummary, type PinRecord } from '@/components/admin/CredentialSummary';
+import { PinResultModal } from '@/components/admin/PinResultModal';
 import {
   Users,
   UserPlus,
@@ -232,7 +234,7 @@ function UsersTab() {
 
   const provisionMutation = useMutation({
     mutationFn: () =>
-      api.post<{ provisioned: number; skipped: number; skipped_details: string[] }>(
+      api.post<{ provisioned: number; skipped: number; skipped_details: string[]; pins?: PinRecord[] }>(
         '/users/provision-from-officers', {}
       ),
     onSuccess: (res) => {
@@ -244,6 +246,8 @@ function UsersTab() {
           toast.success('All officers with staff IDs already have accounts');
         }
         if (d.skipped > 0) toast.error(`${d.skipped} skipped — check Bulk Import tab`);
+        // Random initial PINs are one-time visible — surface the credential summary.
+        setProvisionPins(d.pins && d.pins.length > 0 ? d.pins : null);
       }
       queryClient.invalidateQueries({ queryKey: ['users'] });
       refetchUnprovisioned();
@@ -259,11 +263,17 @@ function UsersTab() {
   });
 
   const [pendingResetId, setPendingResetId] = useState<string | null>(null);
+  const [provisionPins, setProvisionPins] = useState<PinRecord[] | null>(null);
+  const [resetPinResult, setResetPinResult] = useState<{ name: string; identifier: string | null; pin: string } | null>(null);
 
   const resetPinMutation = useMutation({
-    mutationFn: (userId: string) => api.post(`/users/${userId}/reset-pin`, {}),
-    onSuccess: (_, userId) => {
-      toast.success('PIN reset to default — staff will be prompted to change it on next login');
+    mutationFn: (user: UserRecord) => api.post<{ message: string; pin: string }>(`/users/${user.id}/reset-pin`, {}),
+    onSuccess: (res, user) => {
+      toast.success('PIN reset');
+      // The new PIN is random and one-time visible — show it to the admin now.
+      if (res.data?.pin) {
+        setResetPinResult({ name: user.name, identifier: user.staff_id, pin: res.data.pin });
+      }
       setPendingResetId(null);
       queryClient.invalidateQueries({ queryKey: ['users'] });
     },
@@ -344,6 +354,21 @@ function UsersTab() {
             queryClient.invalidateQueries({ queryKey: ['users'] });
           }}
         />
+      )}
+
+      {/* PIN result modal — shown once after a reset (the new PIN is not retrievable later) */}
+      {resetPinResult && (
+        <PinResultModal
+          name={resetPinResult.name}
+          identifier={resetPinResult.identifier}
+          pin={resetPinResult.pin}
+          onClose={() => setResetPinResult(null)}
+        />
+      )}
+
+      {/* Credential summary — shown once after provisioning (PINs are not retrievable later) */}
+      {provisionPins && (
+        <CredentialSummary type="officers" pins={provisionPins} />
       )}
 
       {/* Search */}
@@ -480,7 +505,7 @@ function UsersTab() {
                             pendingResetId === user.id ? (
                               <div className="flex items-center gap-1">
                                 <button
-                                  onClick={() => resetPinMutation.mutate(user.id)}
+                                  onClick={() => resetPinMutation.mutate(user)}
                                   disabled={resetPinMutation.isPending}
                                   className="h-7 px-2 text-[11px] font-bold bg-secondary text-white rounded-lg disabled:opacity-50"
                                 >
@@ -497,7 +522,7 @@ function UsersTab() {
                               <button
                                 onClick={() => setPendingResetId(user.id)}
                                 className="h-8 w-8 rounded-lg flex items-center justify-center text-muted hover:text-accent-warm hover:bg-accent/10 transition-all"
-                                title="Reset PIN to default"
+                                title="Reset PIN (new random initial PIN)"
                               >
                                 <KeyRound className="h-4 w-4" />
                               </button>

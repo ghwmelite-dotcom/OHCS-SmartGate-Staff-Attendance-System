@@ -6,6 +6,7 @@ import { success, error, created, notFound } from '../lib/response';
 import { hashPin, bumpSessionEpoch } from '../services/auth';
 import { sendWelcomeEmail } from '../services/email';
 import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
+import { generateInitialPin } from './admin-nss';
 
 const AUDITED_USER_FIELDS = ['name', 'email', 'staff_id', 'role', 'display_role', 'grade', 'directorate_id', 'is_active', 'phone'];
 
@@ -241,11 +242,13 @@ userRoutes.post('/provision-from-officers', async (c) => {
   const rows = officers.results ?? [];
   let provisioned = 0;
   const skippedRows: string[] = [];
+  // Random initial PINs are surfaced once so the superadmin can distribute them
+  // (they are no longer derivable from the staff ID).
+  const pins: Array<{ name: string; email: string | null; identifier: string; initial_pin: string }> = [];
 
   for (const officer of rows) {
     const staffId = officer.staff_id.toUpperCase();
-    const digits = staffId.replace(/\D/g, '');
-    const pin = digits.length >= 4 ? digits.slice(-4) : digits.padStart(4, '0');
+    const pin = generateInitialPin();
     const pinHash = await hashPin(pin);
     const userId = crypto.randomUUID().replace(/-/g, '');
     const userEmail = officer.email || `${staffId.toLowerCase()}@ohcs.internal`;
@@ -267,6 +270,7 @@ userRoutes.post('/provision-from-officers', async (c) => {
         identifierLabel: 'Staff ID', identifierValue: staffId, pin,
       }));
     }
+    pins.push({ name: officer.name, email: officer.email, identifier: staffId, initial_pin: pin });
     provisioned++;
   }
 
@@ -275,11 +279,12 @@ userRoutes.post('/provision-from-officers', async (c) => {
     summary: `Provisioned ${provisioned} Staff Attendance accounts from officer roster${skippedRows.length ? `; ${skippedRows.length} skipped` : ''}`,
   });
 
-  return success(c, { provisioned, skipped: skippedRows.length, skipped_details: skippedRows });
+  return success(c, { provisioned, skipped: skippedRows.length, skipped_details: skippedRows, pins });
 });
 
-// Reset a user's PIN to the last 4 digits of their staff ID and clear pin_acknowledged
-// so they're prompted to set a new PIN immediately on next login.
+// Reset a user's PIN to a new random 6-digit initial PIN and clear pin_acknowledged
+// so they're forced to set a new PIN immediately on next login. The new PIN is
+// returned once so the superadmin can distribute it (it is not derivable).
 userRoutes.post('/:id/reset-pin', async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
 
@@ -291,8 +296,7 @@ userRoutes.post('/:id/reset-pin', async (c) => {
   if (!user) return notFound(c, 'User');
   if (!user.staff_id) return error(c, 'NO_STAFF_ID', 'Cannot reset PIN: user has no staff ID', 400);
 
-  const digits = user.staff_id.replace(/\D/g, '');
-  const pin = digits.length >= 4 ? digits.slice(-4) : digits.padStart(4, '0');
+  const pin = generateInitialPin();
   const pinHash = await hashPin(pin);
 
   await c.env.DB.prepare(
@@ -303,10 +307,10 @@ userRoutes.post('/:id/reset-pin', async (c) => {
 
   await recordAudit(c.env, auditActorFromContext(c), {
     action: 'user.pin_reset', entityType: 'user', entityId: id,
-    summary: `Reset PIN for ${user.name} (${user.email}) to default (last 4 digits of staff ID)`,
+    summary: `Reset PIN for ${user.name} (${user.email}) to a new random initial PIN`,
   });
 
-  return success(c, { message: 'PIN reset to default. User will be prompted to change it on next login.' });
+  return success(c, { message: 'PIN reset to a new random initial PIN. User will be required to change it on next login.', pin });
 });
 
 // Delete (deactivate) user

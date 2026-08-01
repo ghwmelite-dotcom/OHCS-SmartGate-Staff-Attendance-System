@@ -1,6 +1,6 @@
 import type { Env } from '../types';
-import { verifyPin, timingSafeEqualStrings } from './auth';
-import { getAppSettings } from './settings';
+import { verifyPin, hashPin, timingSafeEqualStrings } from './auth';
+import { getAppSettings, invalidateSettingsCache } from './settings';
 
 export interface OverrideResult {
   ok: boolean;
@@ -37,11 +37,24 @@ export async function resolveOverride(env: Env, suppliedPin: string): Promise<Ov
     // override_pin_hash column not present yet — fall through to the shared PIN.
   }
 
-  // 2) Shared fallback PIN (plaintext in app_settings) — anonymous.
+  // 2) Shared fallback PIN (app_settings) — anonymous. Stored as a PBKDF2 hash
+  // for new writes; legacy plaintext values still verify (timing-safe) and are
+  // re-hashed in place on first successful use (lazy upgrade, same pattern as
+  // user PINs).
   const settings = await getAppSettings(env);
   const shared = settings.reception_override_pin;
-  if (shared && timingSafeEqualStrings(pin, shared)) {
-    return { ok: true, officerId: null, label: 'reception (shared PIN)' };
+  if (shared) {
+    if (shared.startsWith('pbkdf2$')) {
+      if (await verifyPin(pin, shared)) {
+        return { ok: true, officerId: null, label: 'reception (shared PIN)' };
+      }
+    } else if (timingSafeEqualStrings(pin, shared)) {
+      const upgraded = await hashPin(pin);
+      await env.DB.prepare('UPDATE app_settings SET reception_override_pin = ? WHERE id = 1')
+        .bind(upgraded).run();
+      await invalidateSettingsCache(env);
+      return { ok: true, officerId: null, label: 'reception (shared PIN)' };
+    }
   }
 
   return NO_MATCH;

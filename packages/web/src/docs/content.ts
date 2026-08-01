@@ -138,13 +138,13 @@ export const DOC_SECTIONS: DocSection[] = [
         ],
       },
       {
-        name: 'Default PIN convention',
+        name: 'Initial PIN convention',
         status: 'live',
-        summary: 'New and reset PINs are the last 4 digits of the staff ID, zero-left-padded when the ID has fewer than 4 digits.',
+        summary: 'New and reset PINs are random 6-digit values, shown once to the admin at provisioning / reset — never derived from the staff ID.',
         details: [
-          'Staff ID "123" → PIN 0123 · "OHCS-45" → 0045',
-          'Welcome email carries the actual PIN — staff never guess the padding',
-          'First login forces a PIN change (pin_acknowledged flag)',
+          'Provision, officer create, bulk import and reset-pin all return the PIN for one-time display / CSV download',
+          'Welcome email carries the PIN when the account has an email address',
+          'Until the PIN is changed, the API blocks every route except change-pin / me / logout (403 PIN_RESET_REQUIRED)',
         ],
       },
       {

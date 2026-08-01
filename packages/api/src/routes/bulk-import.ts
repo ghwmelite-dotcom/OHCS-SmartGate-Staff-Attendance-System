@@ -9,11 +9,6 @@ import { sendWelcomeEmail } from '../services/email';
 import { generateInitialPin, isValidIsoDate } from './admin-nss';
 import { nextInternCode } from '../services/intern-code';
 
-function defaultPinFromStaffId(staffId: string): string {
-  const digits = staffId.replace(/\D/g, '');
-  return digits.length >= 4 ? digits.slice(-4) : digits.padStart(4, '0');
-}
-
 export const bulkImportRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
 function requireSuperadmin(c: { get: (key: 'session') => SessionData }) {
@@ -178,6 +173,9 @@ bulkImportRoutes.post('/officers', async (c) => {
   let imported = 0;
   let skipped = 0;
   const errors: Array<{ row: number; message: string }> = [];
+  // Random initial PINs for auto-provisioned Staff Attendance accounts, surfaced
+  // once so the superadmin can distribute them (not derivable from the staff ID).
+  const pins: Array<{ row: number; name: string; email: string | null; identifier: string; initial_pin: string }> = [];
 
   for (let i = 0; i < body.rows.length; i++) {
     const parsed = officerRowSchema.safeParse(body.rows[i]);
@@ -225,7 +223,7 @@ bulkImportRoutes.post('/officers', async (c) => {
       ).bind(normalizedStaffId).first();
 
       if (!existingUser) {
-        const pin = defaultPinFromStaffId(normalizedStaffId);
+        const pin = generateInitialPin();
         const pinHash = await hashPin(pin);
         const userId = crypto.randomUUID().replace(/-/g, '');
         const userEmail = email || `${normalizedStaffId.toLowerCase()}@ohcs.internal`;
@@ -238,6 +236,8 @@ bulkImportRoutes.post('/officers', async (c) => {
             `INSERT INTO users (id, name, email, staff_id, pin_hash, role, directorate_id)
              VALUES (?, ?, ?, ?, ?, 'staff', ?)`
           ).bind(userId, name, userEmail, normalizedStaffId, pinHash, dir.id).run();
+
+          pins.push({ row: i + 1, name, email: email || null, identifier: normalizedStaffId, initial_pin: pin });
 
           if (email) {
             c.executionCtx.waitUntil(sendWelcomeEmail(c.env, {
@@ -261,7 +261,7 @@ bulkImportRoutes.post('/officers', async (c) => {
     action: 'officers.bulk_import', entityType: 'officer', entityId: null,
     summary: `Bulk import (officers): ${imported} imported, ${skipped} skipped`,
   });
-  return success(c, { imported, skipped, errors });
+  return success(c, { imported, skipped, errors, pins });
 });
 
 // Bulk import NSS service personnel.

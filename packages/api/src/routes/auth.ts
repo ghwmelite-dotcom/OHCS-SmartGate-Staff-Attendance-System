@@ -3,7 +3,8 @@ import { zValidator } from '@hono/zod-validator';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import type { Env, SessionData } from '../types';
 import { LoginSchema, VerifyOtpSchema } from '../lib/validation';
-import { createOtp, verifyOtp, verifyPin, hashPin, needsRehash, createSession, deleteSession, getSession, readSessionId, getUserAuthState, bumpSessionEpoch, getPinLock, recordPinFailure, clearPinLock, sessionCookieOptions, sessionCookieDeleteOptions } from '../services/auth';
+import { createOtp, verifyOtp, verifyPin, hashPin, needsRehash, createSession, deleteSession, readSessionId, getUserAuthState, bumpSessionEpoch, getPinLock, recordPinFailure, clearPinLock, sessionCookieOptions, sessionCookieDeleteOptions } from '../services/auth';
+import { requireLiveSession } from '../middleware/auth';
 import { success, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
 import { recordAudit } from '../services/audit';
@@ -196,10 +197,10 @@ const profileUpdateSchema = z
   );
 
 authRoutes.patch('/profile', zValidator('json', profileUpdateSchema), async (c) => {
-  const sessionId = readSessionId(c);
-  if (!sessionId) return error(c, 'UNAUTHORIZED', 'Not authenticated', 401);
-  const session = await getSession(sessionId, c.env);
-  if (!session) return error(c, 'UNAUTHORIZED', 'Session expired', 401);
+  const auth = await requireLiveSession(c);
+  if (auth instanceof Response) return auth;
+  const session = auth.session;
+  const sessionId = readSessionId(c)!; // non-null: requireLiveSession already resolved it
 
   const body = c.req.valid('json');
   const userId = session.userId;
@@ -299,10 +300,12 @@ const changePinSchema = z.object({
 });
 
 authRoutes.post('/change-pin', zValidator('json', changePinSchema), async (c) => {
-  const sessionId = readSessionId(c);
-  if (!sessionId) return error(c, 'UNAUTHORIZED', 'Not authenticated', 401);
-  const session = await getSession(sessionId, c.env);
-  if (!session) return error(c, 'UNAUTHORIZED', 'Session expired', 401);
+  // Re-validate against the live user BEFORE anything else — the epoch bump
+  // below happens only after this check, so a revoked session can never re-mint.
+  const auth = await requireLiveSession(c);
+  if (auth instanceof Response) return auth;
+  const session = auth.session;
+  const sessionId = readSessionId(c)!;
 
   const { current_pin, new_pin } = c.req.valid('json');
 
@@ -330,14 +333,9 @@ authRoutes.post('/change-pin', zValidator('json', changePinSchema), async (c) =>
 });
 
 authRoutes.get('/me', async (c) => {
-  const sessionId = readSessionId(c);
-  if (!sessionId) {
-    return error(c, 'UNAUTHORIZED', 'Not authenticated', 401);
-  }
-  const session = await getSession(sessionId, c.env);
-  if (!session) {
-    return error(c, 'UNAUTHORIZED', 'Session expired', 401);
-  }
+  const auth = await requireLiveSession(c);
+  if (auth instanceof Response) return auth;
+  const session = auth.session;
 
   // Read name/email/role fresh from DB so edits made in the admin portal
   // propagate without requiring the user to log out and back in.

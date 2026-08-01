@@ -167,7 +167,7 @@ export async function createSession(
 // authMiddleware re-checks the user on each request (is the account still active,
 // is the session epoch current, what's the current role). Cached per-isolate for
 // AUTH_STATE_TTL_MS so it adds negligible DB load; staleness is bounded by the TTL.
-export interface UserAuthState { is_active: number; role: string; session_epoch: number }
+export interface UserAuthState { is_active: number; role: string; session_epoch: number; pin_acknowledged: number }
 
 const AUTH_STATE_TTL_MS = 30_000;
 const authStateMemo = new Map<string, { state: UserAuthState | null; ts: number }>();
@@ -188,16 +188,18 @@ export async function getUserAuthState(env: Env, userId: string): Promise<UserAu
   let row: UserAuthState | null = null;
   try {
     row = await env.DB.prepare(
-      'SELECT is_active, role, session_epoch FROM users WHERE id = ?'
+      'SELECT is_active, role, session_epoch, pin_acknowledged FROM users WHERE id = ?'
     ).bind(userId).first<UserAuthState>();
   } catch (err) {
-    // Deploy-safety: tolerate ONLY the missing session_epoch column (pre-migration).
-    // Any other error propagates so a transient DB blip can't masquerade as
-    // "user gone" (which would delete the session) or silently disable epoch checks.
+    // Deploy-safety: tolerate ONLY a missing column (pre-migration session_epoch
+    // or pin_acknowledged). Any other error propagates so a transient DB blip
+    // can't masquerade as "user gone" (which would delete the session) or
+    // silently disable epoch checks. pin_acknowledged fails OPEN (1) here so the
+    // forced-reset gate stays off until the migration has landed.
     if (!isMissingColumnError(err)) throw err;
     const fallback = await env.DB.prepare('SELECT is_active, role FROM users WHERE id = ?')
       .bind(userId).first<{ is_active: number; role: string }>();
-    row = fallback ? { is_active: fallback.is_active, role: fallback.role, session_epoch: 0 } : null;
+    row = fallback ? { is_active: fallback.is_active, role: fallback.role, session_epoch: 0, pin_acknowledged: 1 } : null;
   }
   authStateMemo.set(userId, { state: row, ts: now });
   return row;

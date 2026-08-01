@@ -8,6 +8,7 @@ import { downloadCSV } from '@/lib/csv';
 import { generateNssReportPdf, type NssReportRow, type NssReportSummary } from '@/lib/pdf';
 import { NssRegistrationModal } from './NssRegistrationModal';
 import { NssDetailModal } from './NssDetailModal';
+import { PinResultModal } from './PinResultModal';
 import {
   GraduationCap, Users, CheckCircle2, AlertTriangle, CalendarClock,
   Search, X, MoreVertical, Eye, Pencil, KeyRound, Power, AlertCircle, Loader2,
@@ -590,7 +591,7 @@ export function NssTab() {
       {resetPinResult && (
         <PinResultModal
           name={resetPinResult.user.name}
-          nssNumber={resetPinResult.user.nss_number}
+          identifier={resetPinResult.user.nss_number}
           pin={resetPinResult.pin}
           onClose={() => setResetPinResult(null)}
         />
@@ -809,62 +810,6 @@ function ConfirmDialog({
               )}
             >
               {confirmLabel}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PinResultModal({ name, nssNumber, pin, onClose }: {
-  name: string; nssNumber: string | null; pin: string; onClose: () => void;
-}) {
-  function copy(text: string) {
-    navigator.clipboard?.writeText(text).then(
-      () => toast.success('Copied to clipboard'),
-      () => toast.error('Copy failed — select and copy manually'),
-    );
-  }
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 animate-fade-in" onClick={onClose}>
-      <div className="bg-surface rounded-2xl shadow-2xl border border-success/30 w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="h-[2px]" style={{ background: 'linear-gradient(90deg, #2E7D5B, #5BA77B 50%, #2E7D5B)' }} />
-        <div className="p-6 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center">
-              <CheckCircle2 className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <p className="text-[15px] font-bold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
-                {name}
-              </p>
-              <p className="text-[12px] font-mono text-muted">{nssNumber ?? '—'}</p>
-            </div>
-          </div>
-          <div className="rounded-xl bg-background border border-border p-4">
-            <p className="text-[11px] font-semibold text-muted uppercase tracking-wide mb-2">
-              New initial PIN — shown once
-            </p>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[28px] font-mono font-bold tracking-[0.4em] text-primary">{pin}</span>
-              <button
-                onClick={() => copy(pin)}
-                className="inline-flex items-center gap-1.5 h-9 px-3 text-[12px] font-semibold rounded-lg bg-primary/10 text-primary hover:bg-primary/15 transition-all"
-              >
-                Copy
-              </button>
-            </div>
-          </div>
-          <p className="text-[12px] text-muted">
-            Hand this PIN to the personnel privately. They will be prompted to set a new one on first sign-in.
-          </p>
-          <div className="flex justify-end pt-2">
-            <button
-              onClick={onClose}
-              className="h-10 px-5 text-[13px] font-semibold bg-primary text-white rounded-xl hover:bg-primary-light transition-all shadow-sm"
-            >
-              I&apos;ve recorded this
             </button>
           </div>
         </div>
