@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Env } from '../types';
 import { success, created, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
+import { escapeHtml } from '../lib/html';
 import { sendTelegramMessage } from '../services/telegram';
 
 export const appointmentsPublicRoutes = new Hono<{ Bindings: Env }>();
@@ -280,6 +281,9 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
 
     const notifTitle = `New appointment request`;
     const notifBody = `${body.visitor_name} requests a meeting with ${config.officer_name} on ${body.appointment_date} at ${body.time_slot}`;
+    // Telegram sends with parse_mode HTML — escape user-controlled values at
+    // this boundary; the in-app notification keeps the raw text (React escapes).
+    const notifBodyTg = `${escapeHtml(body.visitor_name)} requests a meeting with ${escapeHtml(config.officer_name)} on ${escapeHtml(body.appointment_date)} at ${escapeHtml(body.time_slot)}`;
 
     for (const approver of approvers.results ?? []) {
       try {
@@ -292,7 +296,7 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
         if (approver.telegram_chat_id) {
           await sendTelegramMessage({
             chatId: approver.telegram_chat_id,
-            text: `📋 New Appointment Request\n${notifBody}`,
+            text: `📋 New Appointment Request\n${notifBodyTg}`,
             token: c.env.TELEGRAM_BOT_TOKEN,
           }).catch(() => {});
         }
@@ -383,13 +387,14 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
 
   const arrivalTitle = `Appointment arrived`;
   const arrivalBody = `${appointment.visitor_name} has arrived for their appointment with ${appointment.officer_name} at ${appointment.time_slot}`;
+  const arrivalBodyTg = `${escapeHtml(appointment.visitor_name)} has arrived for their appointment with ${escapeHtml(appointment.officer_name)} at ${escapeHtml(appointment.time_slot)}`;
 
   // 5a. Telegram: notify the officer directly
   if (appointment.officer_telegram_chat_id) {
     try {
       await sendTelegramMessage({
         chatId: appointment.officer_telegram_chat_id,
-        text: `🏢 Visitor Arrived\n${appointment.visitor_name} is here for your ${appointment.time_slot} appointment`,
+        text: `🏢 Visitor Arrived\n${escapeHtml(appointment.visitor_name)} is here for your ${escapeHtml(appointment.time_slot)} appointment`,
         token: c.env.TELEGRAM_BOT_TOKEN,
       });
     } catch { /* non-fatal */ }
@@ -415,7 +420,7 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
         if (approver.telegram_chat_id) {
           await sendTelegramMessage({
             chatId: approver.telegram_chat_id,
-            text: `🏢 Visitor Arrived\n${arrivalBody}`,
+            text: `🏢 Visitor Arrived\n${arrivalBodyTg}`,
             token: c.env.TELEGRAM_BOT_TOKEN,
           }).catch(() => {});
         }

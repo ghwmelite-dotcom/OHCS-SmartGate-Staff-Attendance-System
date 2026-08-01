@@ -513,7 +513,7 @@ async function createInAppNotification(
   env: Env,
   customBody?: string
 ): Promise<void> {
-  const title = `Visitor: ${escapeHtml(data.first_name)} ${escapeHtml(data.last_name)}`;
+  const title = `Visitor: ${data.first_name} ${data.last_name}`;
   const body = customBody ?? `${data.organisation ? `From ${data.organisation} \u2014 ` : ''}${data.purpose_raw || 'No purpose stated'}`;
   const url = data.visit_id ? `/visit/${data.visit_id}` : '/';
   await sendTypedNotification(env, {

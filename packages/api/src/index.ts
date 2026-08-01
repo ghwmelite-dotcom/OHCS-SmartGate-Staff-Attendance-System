@@ -107,7 +107,7 @@ app.get('/api/photos/clock/:id', async (c) => {
   if (!object) return c.json({ data: null, error: { code: 'NOT_FOUND', message: 'Photo not found' } }, 404);
   const headers = new Headers();
   headers.set('Content-Type', 'image/jpeg');
-  headers.set('Cache-Control', 'public, max-age=3600');
+  headers.set('Cache-Control', 'private, max-age=3600');
   return new Response(object.body, { headers });
 });
 app.route('/api/visitors', visitorRoutes);

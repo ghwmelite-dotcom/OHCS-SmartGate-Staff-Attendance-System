@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { downloadCSV } from '@/lib/csv';
+import { downloadCSV, formatCsvCell } from '@/lib/csv';
 import { cn, formatTime } from '@/lib/utils';
 import {
   Star, Download, MessageSquareText, AlertTriangle, Percent, Clock,
@@ -106,7 +106,7 @@ export function FeedbackPage() {
       r.source,
       r.badge_code ?? '',
     ]);
-    const csv = [headers, ...body].map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n');
+    const csv = [headers, ...body].map((row) => row.map(formatCsvCell).join(',')).join('\n');
     downloadCSV(csv, `visitor-feedback-${from || 'all'}-to-${to || 'all'}.csv`);
   }
 

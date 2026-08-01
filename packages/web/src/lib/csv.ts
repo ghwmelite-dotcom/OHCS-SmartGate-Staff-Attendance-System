@@ -12,6 +12,15 @@ interface VisitRow {
   directorate_abbr: string | null;
 }
 
+// RFC4180 quoting + Excel formula-injection guard: cells whose first
+// character is =, +, -, @, tab or CR execute as formulas when opened in a
+// spreadsheet, so prefix them with a single quote; embedded double quotes
+// are doubled. Used by every CSV export (visit report, feedback, etc.).
+export function formatCsvCell(cell: string): string {
+  const guarded = /^[=+\-@\t\r]/.test(cell) ? `'${cell}` : cell;
+  return `"${guarded.replace(/"/g, '""')}"`;
+}
+
 export function generateCSV(visits: VisitRow[]): string {
   const headers = [
     'Date', 'Visitor Name', 'Organisation', 'Host Officer', 'Directorate',
@@ -33,7 +42,7 @@ export function generateCSV(visits: VisitRow[]): string {
   ]);
 
   const csvContent = [headers, ...rows]
-    .map(row => row.map(cell => `"${cell}"`).join(','))
+    .map(row => row.map(formatCsvCell).join(','))
     .join('\n');
 
   return csvContent;
