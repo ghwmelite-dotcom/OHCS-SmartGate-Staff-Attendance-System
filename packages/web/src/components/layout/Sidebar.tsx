@@ -55,6 +55,7 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
   const isAdmin = user?.role === 'admin';
   const canSeeAdmin = isSuperadmin || isAdmin;
   const canSeeAppointments = hasRoleAccess(user?.role, MODULE_ROLES.appointments, user?.directorate_abbr);
+  const canSeeFeedback = hasRoleAccess(user?.role, MODULE_ROLES.feedback, user?.directorate_abbr);
   const { isCollapsed, toggleCollapse } = useSidebarStore();
 
   const collapsed = forceExpanded ? false : isCollapsed;
@@ -129,8 +130,8 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
           <NavItem key={item.to} {...item} collapsed={collapsed} />
         ))}
 
-        {/* Feedback — Client Service tier (reception parity) */}
-        {canSeeAppointments && FEEDBACK_NAV.map((item) => (
+        {/* Feedback — Client Service tier (reception parity), gated separately from Appointments */}
+        {canSeeFeedback && FEEDBACK_NAV.map((item) => (
           <NavItem key={item.to} {...item} collapsed={collapsed} />
         ))}
 

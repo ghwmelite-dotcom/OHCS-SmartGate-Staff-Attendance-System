@@ -58,13 +58,18 @@ export function BottomNav() {
   const logout = useAuthStore((s) => s.logout);
   const isSuperadmin = user?.role === 'superadmin';
   const canSeeAppointments = hasRoleAccess(user?.role, MODULE_ROLES.appointments, user?.directorate_abbr);
+  const canSeeFeedback = hasRoleAccess(user?.role, MODULE_ROLES.feedback, user?.directorate_abbr);
   const visible = (items: NavDef[]) => items.filter((i) => !i.gate || hasRoleAccess(user?.role, i.gate, user?.directorate_abbr));
   // Directors and CD/HoS land on the Overview — relabel the home tab (see Sidebar).
   const homeItem: NavDef = isOversightUser(user?.role, user?.display_role)
     ? { to: '/', icon: Home, label: 'Overview' }
     : MAIN_ITEMS[0]!;
   const mainItems = visible([homeItem, ...MAIN_ITEMS.slice(1)]);
-  const moreItems = visible(canSeeAppointments ? [APPOINTMENTS_ITEM, FEEDBACK_ITEM, ...MORE_ITEMS] : MORE_ITEMS);
+  const moreItems = visible([
+    ...(canSeeAppointments ? [APPOINTMENTS_ITEM] : []),
+    ...(canSeeFeedback ? [FEEDBACK_ITEM] : []),
+    ...MORE_ITEMS,
+  ]);
 
   // Check if current route is in the "more" section
   const moreRoutes = [...moreItems, ...ADMIN_ITEMS].map(i => i.to);

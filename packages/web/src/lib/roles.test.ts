@@ -106,6 +106,16 @@ describe('MODULE_ROLES.appointments', () => {
   });
 });
 
+describe('MODULE_ROLES.feedback', () => {
+  it('mirrors the API SURVEY_ROLES gate: reception-tier only (RCU parity grants it)', () => {
+    expect(MODULE_ROLES.feedback).toEqual(['superadmin', 'admin', 'receptionist']);
+    expect(hasRoleAccess('receptionist', MODULE_ROLES.feedback)).toBe(true);
+    expect(hasRoleAccess('director', MODULE_ROLES.feedback)).toBe(false);
+    expect(hasRoleAccess('staff', MODULE_ROLES.feedback)).toBe(false);
+    expect(hasRoleAccess('it', MODULE_ROLES.feedback)).toBe(false);
+  });
+});
+
 describe('RCU reception parity (client mirror of the server require-role rule)', () => {
   it('exposes the documented abbreviation constant', () => {
     expect(RCU_DIRECTORATE_ABBR).toBe('RCU');
@@ -115,6 +125,7 @@ describe('RCU reception parity (client mirror of the server require-role rule)',
     expect(hasRoleAccess('staff', MODULE_ROLES.visits, 'RCU')).toBe(true);
     expect(hasRoleAccess('staff', MODULE_ROLES.visitorRegistration, 'RCU')).toBe(true);
     expect(hasRoleAccess('staff', MODULE_ROLES.reports, 'RCU')).toBe(true);
+    expect(hasRoleAccess('staff', MODULE_ROLES.feedback, 'RCU')).toBe(true);
     expect(hasRoleAccess('staff', MODULE_ROLES.appointments, 'RCU')).toBe(false);
   });
 
