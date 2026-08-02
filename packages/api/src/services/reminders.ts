@@ -1,5 +1,7 @@
 import type { Env } from '../types';
 import { sendTypedNotification } from './notifier';
+import { sendTelegramMessage } from './telegram';
+import { escapeHtml } from '../lib/html';
 import { devLog, devError } from '../lib/log';
 import { getAppSettings, hhmmToMinutes } from './settings';
 import { getOfficeStatus } from './office-hours';
@@ -86,7 +88,10 @@ export function buildClockOutMessage(slot: number, firstName: string): NudgeMess
 }
 
 /** Shared audience predicates: active, activated (pin_acknowledged), has an
- *  identifier, and not covered by an absence notice today. Parameters: date. */
+ *  identifier, and not covered by an absence notice today. Absence spans are
+ *  EXCLUSIVE of the return date (first day back at work) so nudges resume the
+ *  morning the person is expected back — aligned with GET /absence-notice/today.
+ *  Parameters: date (twice). */
 const AUDIENCE_SQL = `
   FROM users u
   WHERE u.is_active = 1
@@ -95,12 +100,14 @@ const AUDIENCE_SQL = `
     AND NOT EXISTS (
       SELECT 1 FROM absence_notices a
       WHERE a.user_id = u.id
-        AND ? BETWEEN a.notice_date AND COALESCE(a.expected_return_date, a.notice_date)
+        AND ? >= a.notice_date
+        AND ? < COALESCE(a.expected_return_date, DATE(a.notice_date, '+1 day'))
     )`;
 
 /** Morning audience: eligible users with NO clock_in today. Binds: date, date,
- *  then one bind per directorate id when an allowlist is given (appended last
- *  so the existing date binds keep their order). */
+ *  date (two for the absence span, one for the clock check), then one bind per
+ *  directorate id when an allowlist is given (appended last so the existing
+ *  date binds keep their order). */
 export function buildClockInNudgeQuery(directorateIds: string[] = []): string {
   const dirFilter = directorateIds.length
     ? ` AND u.directorate_id IN (${directorateIds.map(() => '?').join(',')})`
@@ -113,7 +120,8 @@ export function buildClockInNudgeQuery(directorateIds: string[] = []): string {
 }
 
 /** Evening audience: eligible users WITH a clock_in and NO clock_out today.
- *  Binds: date, date, date, then one bind per directorate id (appended last). */
+ *  Binds: date, date, date, date (two for the absence span, one each for the
+ *  clock checks), then one bind per directorate id (appended last). */
 export function buildClockOutNudgeQuery(directorateIds: string[] = []): string {
   const dirFilter = directorateIds.length
     ? ` AND u.directorate_id IN (${directorateIds.map(() => '?').join(',')})`
@@ -188,7 +196,7 @@ export async function sendClockReminders(env: Env, now: Date = new Date()): Prom
   const dirIds = parseDirectorateIds(settings.reminder_directorate_ids);
 
   const rows = await env.DB.prepare(buildClockInNudgeQuery(dirIds))
-    .bind(date, date, ...dirIds)
+    .bind(date, date, date, ...dirIds)
     .all<NudgeTarget & { current_streak: number }>();
 
   const sent = await sendSlotNudges(env, rows.results ?? [], 'in', date, slot, (u) =>
@@ -219,7 +227,7 @@ export async function sendClockOutReminders(env: Env, now: Date = new Date()): P
   const date = now.toISOString().slice(0, 10);
   const dirIds = parseDirectorateIds(settings.reminder_directorate_ids);
   const rows = await env.DB.prepare(buildClockOutNudgeQuery(dirIds))
-    .bind(date, date, date, ...dirIds)
+    .bind(date, date, date, date, ...dirIds)
     .all<NudgeTarget>();
 
   const sent = await sendSlotNudges(env, rows.results ?? [], 'out', date, slot, (u) =>
@@ -312,13 +320,16 @@ const REASON_LABELS: Record<AbsenceNoticeInput['reason'], string> = {
   sick: 'Sick',
   family_emergency: 'Family emergency',
   transport: 'Transport',
-  other: 'Absent',
+  other: 'Other',
 };
 
 /**
  * Fired from POST /attendance/absence-notice.
- * Notifies directorate directors + superadmins that a staff member has
- * reported an absence for today (and possibly beyond).
+ * Routes the notice to the head of the staff member's org entity, falling back
+ * to director-role users of the entity, then superadmins (fallback only — never
+ * cc'd). An unreachable head (no linked user account AND no Telegram link)
+ * falls through rather than swallowing the notice; the submitter is excluded
+ * at every step. Spec: 2026-08-02-absence-notice-premium-design §5.
  */
 export async function sendAbsenceNoticePush(env: Env, notice: AbsenceNoticeInput): Promise<void> {
   const user = await env.DB.prepare(
@@ -326,37 +337,96 @@ export async function sendAbsenceNoticePush(env: Env, notice: AbsenceNoticeInput
   ).bind(notice.user_id).first<{ name: string; directorate_id: string | null }>();
   if (!user) return;
 
-  const recipients = await env.DB.prepare(
-    `SELECT id FROM users
-     WHERE is_active = 1 AND id != ?
-       AND (
-         (role = 'director' AND directorate_id = ?)
-         OR role = 'superadmin'
-       )`
-  ).bind(notice.user_id, user.directorate_id ?? '').all<{ id: string }>();
-
   const label = REASON_LABELS[notice.reason];
-  const body = notice.note ? `${label} — ${notice.note}` : label;
+  const bodyParts = [notice.note ? `${label} — ${notice.note}` : label];
 
   let title: string;
   if (notice.expected_return_date) {
     const rd = new Date(notice.expected_return_date + 'T00:00:00Z');
     const dateFmt = rd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
     title = `${user.name} out until ${dateFmt}`;
+    bodyParts.push(`Expected back ${dateFmt}`);
   } else {
     title = `${user.name} won't be in today`;
   }
+  const body = bodyParts.join('. ');
 
-  await Promise.all(
-    (recipients.results ?? []).map((r) =>
-      sendTypedNotification(env, {
-        userId: r.id,
-        type: 'absence_notice',
-        title,
-        body,
-        url: '/attendance',
-      }).catch((err) => devError(env, '[reminders] absence_notice failed', err)),
-    ),
-  );
-  devLog(env, `[reminders] absence_notice for ${user.name} sent to ${recipients.results?.length ?? 0} recipients`);
+  const notify = (userId: string) =>
+    sendTypedNotification(env, {
+      userId,
+      type: 'absence_notice',
+      title,
+      body,
+      url: '/attendance',
+    }).catch((err) => devError(env, '[reminders] absence_notice failed', err));
+
+  if (user.directorate_id) {
+    // Step 1 — head of the org entity (directorates.head_officer_id).
+    const head = await env.DB.prepare(
+      `SELECT o.id, o.name, o.email, o.staff_id, o.telegram_chat_id
+       FROM directorates d JOIN officers o ON o.id = d.head_officer_id
+       WHERE d.id = ?`
+    ).bind(user.directorate_id).first<{
+      id: string; name: string; email: string | null; staff_id: string | null; telegram_chat_id: string | null;
+    }>();
+
+    if (head) {
+      // Linked user: staff_id first, then email, then exact-name (the
+      // findUserByOfficer pattern) — never the submitter's own account.
+      let linked: { id: string } | null = null;
+      if (head.staff_id) {
+        linked = await env.DB.prepare('SELECT id FROM users WHERE staff_id = ? AND is_active = 1 AND id != ?')
+          .bind(head.staff_id, notice.user_id).first<{ id: string }>();
+      }
+      if (!linked && head.email) {
+        linked = await env.DB.prepare('SELECT id FROM users WHERE email = ? AND is_active = 1 AND id != ?')
+          .bind(head.email, notice.user_id).first<{ id: string }>();
+      }
+      if (!linked) {
+        linked = await env.DB.prepare('SELECT id FROM users WHERE name = ? AND is_active = 1 AND id != ?')
+          .bind(head.name, notice.user_id).first<{ id: string }>();
+      }
+
+      if (linked || head.telegram_chat_id) {
+        if (linked) await notify(linked.id);
+        // Best-effort Telegram to the officer's linked chat (main bot — heads
+        // are officers who already receive arrival alerts there).
+        if (head.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
+          try {
+            const text = [
+              `\u{1F6AB} <b>${escapeHtml(title)}</b>`,
+              '',
+              escapeHtml(body),
+            ].join('\n');
+            await sendTelegramMessage({ chatId: head.telegram_chat_id, text, token: env.TELEGRAM_BOT_TOKEN });
+          } catch (err) {
+            devError(env, '[reminders] absence_notice head telegram failed', err);
+          }
+        }
+        devLog(env, `[reminders] absence_notice for ${user.name} sent to head officer ${head.id}`);
+        return;
+      }
+      // Unreachable head — fall through so the notice is not swallowed.
+    }
+
+    // Step 2 — director-role users of the entity.
+    const directors = await env.DB.prepare(
+      `SELECT id FROM users
+       WHERE is_active = 1 AND id != ? AND role = 'director' AND directorate_id = ?`
+    ).bind(notice.user_id, user.directorate_id).all<{ id: string }>();
+
+    if ((directors.results ?? []).length > 0) {
+      await Promise.all((directors.results ?? []).map((r) => notify(r.id)));
+      devLog(env, `[reminders] absence_notice for ${user.name} sent to ${directors.results?.length ?? 0} directors`);
+      return;
+    }
+  }
+
+  // Step 3 — superadmins (also the route for users without a directorate).
+  const supers = await env.DB.prepare(
+    `SELECT id FROM users WHERE is_active = 1 AND id != ? AND role = 'superadmin'`
+  ).bind(notice.user_id).all<{ id: string }>();
+
+  await Promise.all((supers.results ?? []).map((r) => notify(r.id)));
+  devLog(env, `[reminders] absence_notice for ${user.name} sent to ${supers.results?.length ?? 0} superadmins`);
 }

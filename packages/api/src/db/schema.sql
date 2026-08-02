@@ -99,10 +99,13 @@ CREATE TABLE IF NOT EXISTS officers (
     -- Host availability status (added by migration-officers-availability.sql)
     availability_status TEXT,
     availability_updated_at TEXT,
+    -- Staff Attendance account link (added by migration-officer-staff-id.sql)
+    staff_id         TEXT,
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_officers_directorate ON officers(directorate_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_officers_staff_id ON officers(staff_id) WHERE staff_id IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- Visitors, visit categories, visits

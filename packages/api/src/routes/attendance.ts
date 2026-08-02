@@ -480,11 +480,17 @@ attendanceRoutes.post('/leave/:id/reject', async (c) => {
   return success(c, { message: 'Leave rejected' });
 });
 
+// Premium refinement (spec 2026-08-02-absence-notice-premium-design): note and
+// expected_return_date are BOTH required — a notice without a "why" and a
+// "first day back" is noise to the head receiving it.
 const absenceNoticeSchema = z.object({
   reason: z.enum(['sick', 'family_emergency', 'transport', 'other']),
-  note: z.string().max(200).optional(),
-  expected_return_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  note: z.string().trim().min(2).max(200),
+  expected_return_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
+
+// Longer absences belong to the leave-requests workflow.
+const ABSENCE_MAX_RETURN_DAYS = 30;
 
 attendanceRoutes.post('/absence-notice', zValidator('json', absenceNoticeSchema), async (c) => {
   const session = c.get('session');
@@ -492,29 +498,76 @@ attendanceRoutes.post('/absence-notice', zValidator('json', absenceNoticeSchema)
   const today = new Date().toISOString().slice(0, 10);
 
   // expected_return_date is the day they're BACK at work (exclusive — they are not absent on that day),
-  // so it must be strictly after today.
-  if (body.expected_return_date && body.expected_return_date <= today) {
+  // so it must be strictly after today, and no further out than ABSENCE_MAX_RETURN_DAYS.
+  if (body.expected_return_date <= today) {
     return error(c, 'INVALID_DATE', 'Expected return date must be after today', 400);
   }
+  const maxReturn = new Date(Date.now() + ABSENCE_MAX_RETURN_DAYS * 86400_000).toISOString().slice(0, 10);
+  if (body.expected_return_date > maxReturn) {
+    return error(c, 'INVALID_DATE', `Expected return date must be within ${ABSENCE_MAX_RETURN_DAYS} days — use a leave request for longer absences`, 400);
+  }
 
-  const id = crypto.randomUUID().replace(/-/g, '');
-  await c.env.DB.prepare(
-    `INSERT INTO absence_notices (id, user_id, reason, note, notice_date, expected_return_date)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(id, session.userId, body.reason, body.note ?? null, today, body.expected_return_date ?? null).run();
+  // One active notice per user per day (upsert, no migration): a same-day
+  // re-submit updates the existing row instead of inserting a duplicate.
+  const existing = await c.env.DB.prepare(
+    'SELECT id FROM absence_notices WHERE user_id = ? AND notice_date = ?'
+  ).bind(session.userId, today).first<{ id: string }>();
+
+  const id = existing?.id ?? crypto.randomUUID().replace(/-/g, '');
+  if (existing) {
+    await c.env.DB.prepare(
+      'UPDATE absence_notices SET reason = ?, note = ?, expected_return_date = ? WHERE id = ?'
+    ).bind(body.reason, body.note, body.expected_return_date, id).run();
+  } else {
+    await c.env.DB.prepare(
+      `INSERT INTO absence_notices (id, user_id, reason, note, notice_date, expected_return_date)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(id, session.userId, body.reason, body.note, today, body.expected_return_date).run();
+  }
 
   const notice: AbsenceNoticeInput = {
     id,
     user_id: session.userId,
     reason: body.reason,
-    note: body.note ?? null,
+    note: body.note,
     notice_date: today,
-    expected_return_date: body.expected_return_date ?? null,
+    expected_return_date: body.expected_return_date,
   };
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: existing ? 'absence.update' : 'absence.submit',
+    entityType: 'absence_notice',
+    entityId: id,
+    summary: existing
+      ? `Updated absence notice: ${body.reason}, back ${body.expected_return_date}`
+      : `Reported absence: ${body.reason}, back ${body.expected_return_date}`,
+  });
 
   c.executionCtx.waitUntil(sendAbsenceNoticePush(c.env, notice));
 
   return success(c, notice);
+});
+
+// Retract a same-day notice (premium refinement). Same-day only by construction:
+// it deletes the caller's row for today and 404s when there is none.
+attendanceRoutes.delete('/absence-notice/today', async (c) => {
+  const session = c.get('session');
+  const today = new Date().toISOString().slice(0, 10);
+
+  const existing = await c.env.DB.prepare(
+    'SELECT id FROM absence_notices WHERE user_id = ? AND notice_date = ?'
+  ).bind(session.userId, today).first<{ id: string }>();
+  if (!existing) return error(c, 'NOT_FOUND', 'No absence notice for today', 404);
+
+  await c.env.DB.prepare('DELETE FROM absence_notices WHERE id = ?').bind(existing.id).run();
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'absence.retract',
+    entityType: 'absence_notice',
+    entityId: existing.id,
+    summary: 'Withdrew absence notice',
+  });
+
+  return success(c, { deleted: true });
 });
 
 attendanceRoutes.get('/absence-notice/today', async (c) => {

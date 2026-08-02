@@ -126,6 +126,9 @@ const ALLOWLIST = new Set<string>([
   // Read YOUR OWN active absence notice — query scoped to session.userId.
   // No role token in the handler; legitimately self-scoped.
   'attendance.ts GET /absence-notice/today',
+  // Retract YOUR OWN same-day absence notice — delete scoped to
+  // user_id = session.userId AND notice_date = today; legitimately self-scoped.
+  'attendance.ts DELETE /absence-notice/today',
   // Set YOUR OWN host availability — resolves the caller's officer row via
   // session email→name and updates only that row. Officers can hold any role
   // (incl. plain staff), so a role gate would break legitimate self-service;

@@ -126,26 +126,30 @@ function seedUsers(db: SqliteDb) {
   ins.run('u4', 'Yaw Inactive', 0, 1, '896242', null, null, 0, 'dir_rsimd');
   // u5 no identifier — excluded
   ins.run('u5', 'Akos NoId', 1, 1, null, null, null, 0, 'dir_rsimd');
-  // u6 absence notice covering today — excluded
+  // u6 absence notice covering today (back tomorrow) — excluded
   ins.run('u6', 'Kweku Away', 1, 1, '896243', null, null, 0, 'dir_rsimd');
   // u7 clocked in AND out — excluded from evening
   ins.run('u7', 'Abena Done', 1, 1, '896244', null, null, 5, 'dir_rsimd');
+  // u8 absence notice ENDS today (first day back) — NOT excluded: the return
+  // date is exclusive, so nudges resume the morning they're expected back.
+  ins.run('u8', 'Back Today', 1, 1, '896247', null, null, 0, 'dir_rsimd');
 
   const clock = db.prepare('INSERT INTO clock_records (user_id, type, timestamp) VALUES (?, ?, ?)');
   clock.run('u2', 'clock_in', `${DAY}T08:05:00.000Z`);
   clock.run('u7', 'clock_in', `${DAY}T08:01:00.000Z`);
   clock.run('u7', 'clock_out', `${DAY}T17:10:00.000Z`);
 
-  db.prepare('INSERT INTO absence_notices (user_id, notice_date, expected_return_date) VALUES (?, ?, ?)')
-    .run('u6', DAY, DAY);
+  const notice = db.prepare('INSERT INTO absence_notices (user_id, notice_date, expected_return_date) VALUES (?, ?, ?)');
+  notice.run('u6', DAY, '2026-07-28'); // out until Wednesday → suppressed today
+  notice.run('u8', '2026-07-26', DAY); // back TODAY → nudges resume
 }
 
 describe('buildClockInNudgeQuery', () => {
   it('targets only activated, active, identified users with no clock-in and no absence notice', () => {
     const db = newDb();
     seedUsers(db);
-    const rows = db.prepare(buildClockInNudgeQuery()).all(DAY, DAY) as Array<{ id: string }>;
-    expect(rows.map((r) => r.id)).toEqual(['u1']);
+    const rows = db.prepare(buildClockInNudgeQuery()).all(DAY, DAY, DAY) as Array<{ id: string }>;
+    expect(rows.map((r) => r.id).sort()).toEqual(['u1', 'u8']);
   });
 
   it('excludes a user as soon as they clock in (compliance stops the ladder)', () => {
@@ -153,8 +157,19 @@ describe('buildClockInNudgeQuery', () => {
     seedUsers(db);
     db.prepare('INSERT INTO clock_records (user_id, type, timestamp) VALUES (?, ?, ?)')
       .run('u1', 'clock_in', `${DAY}T09:12:00.000Z`);
-    const rows = db.prepare(buildClockInNudgeQuery()).all(DAY, DAY);
-    expect(rows).toHaveLength(0);
+    const rows = db.prepare(buildClockInNudgeQuery()).all(DAY, DAY, DAY) as Array<{ id: string }>;
+    expect(rows.map((r) => r.id)).toEqual(['u8']);
+  });
+
+  it('suppresses a user whose notice is still active, resumes them on the return date itself', () => {
+    const db = newDb();
+    seedUsers(db);
+    // u6 is out until 2026-07-28: suppressed on DAY (the 27th)…
+    const suppressed = db.prepare(buildClockInNudgeQuery()).all(DAY, DAY, DAY) as Array<{ id: string }>;
+    expect(suppressed.map((r) => r.id)).not.toContain('u6');
+    // …but back in the audience ON the return date (exclusive upper bound).
+    const back = db.prepare(buildClockInNudgeQuery()).all('2026-07-28', '2026-07-28', '2026-07-28') as Array<{ id: string }>;
+    expect(back.map((r) => r.id)).toContain('u6');
   });
 });
 
@@ -162,7 +177,7 @@ describe('buildClockOutNudgeQuery', () => {
   it('targets users clocked in but not out', () => {
     const db = newDb();
     seedUsers(db);
-    const rows = db.prepare(buildClockOutNudgeQuery()).all(DAY, DAY, DAY) as Array<{ id: string }>;
+    const rows = db.prepare(buildClockOutNudgeQuery()).all(DAY, DAY, DAY, DAY) as Array<{ id: string }>;
     expect(rows.map((r) => r.id)).toEqual(['u2']);
   });
 
@@ -171,7 +186,7 @@ describe('buildClockOutNudgeQuery', () => {
     seedUsers(db);
     db.prepare('INSERT INTO clock_records (user_id, type, timestamp) VALUES (?, ?, ?)')
       .run('u2', 'clock_out', `${DAY}T17:05:00.000Z`);
-    const rows = db.prepare(buildClockOutNudgeQuery()).all(DAY, DAY, DAY);
+    const rows = db.prepare(buildClockOutNudgeQuery()).all(DAY, DAY, DAY, DAY);
     expect(rows).toHaveLength(0);
   });
 });
@@ -196,8 +211,8 @@ describe('directorate allowlist', () => {
     seedUsers(db);
     seedOtherDirectorateUsers(db);
     const rows = db.prepare(buildClockInNudgeQuery(['dir_rsimd']))
-      .all(DAY, DAY, 'dir_rsimd') as Array<{ id: string }>;
-    expect(rows.map((r) => r.id)).toEqual(['u1']);
+      .all(DAY, DAY, DAY, 'dir_rsimd') as Array<{ id: string }>;
+    expect(rows.map((r) => r.id).sort()).toEqual(['u1', 'u8']);
   });
 
   it('clock-in audience is unfiltered when the allowlist is empty', () => {
@@ -205,8 +220,8 @@ describe('directorate allowlist', () => {
     seedUsers(db);
     seedOtherDirectorateUsers(db);
     const rows = db.prepare(buildClockInNudgeQuery([]))
-      .all(DAY, DAY) as Array<{ id: string }>;
-    expect(rows.map((r) => r.id).sort()).toEqual(['u1', 'u9']);
+      .all(DAY, DAY, DAY) as Array<{ id: string }>;
+    expect(rows.map((r) => r.id).sort()).toEqual(['u1', 'u8', 'u9']);
   });
 
   it('clock-out audience includes RSIMD and excludes other directorates when allowlisted', () => {
@@ -214,7 +229,7 @@ describe('directorate allowlist', () => {
     seedUsers(db);
     seedOtherDirectorateUsers(db);
     const rows = db.prepare(buildClockOutNudgeQuery(['dir_rsimd']))
-      .all(DAY, DAY, DAY, 'dir_rsimd') as Array<{ id: string }>;
+      .all(DAY, DAY, DAY, DAY, 'dir_rsimd') as Array<{ id: string }>;
     expect(rows.map((r) => r.id)).toEqual(['u2']);
   });
 
@@ -223,7 +238,7 @@ describe('directorate allowlist', () => {
     seedUsers(db);
     seedOtherDirectorateUsers(db);
     const rows = db.prepare(buildClockOutNudgeQuery())
-      .all(DAY, DAY, DAY) as Array<{ id: string }>;
+      .all(DAY, DAY, DAY, DAY) as Array<{ id: string }>;
     expect(rows.map((r) => r.id).sort()).toEqual(['u10', 'u2']);
   });
 });

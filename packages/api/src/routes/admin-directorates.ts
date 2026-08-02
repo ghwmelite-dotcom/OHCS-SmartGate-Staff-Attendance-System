@@ -44,8 +44,13 @@ const createSchema = z.object({
 // impossible to reactivate from the dashboard.
 adminDirectorateRoutes.get('/', async (c) => {
   if (!requireSuperadmin(c)) return error(c, 'FORBIDDEN', 'Superadmin access required', 403);
+  // head_name joins the head officer so the admin UI can label the Head dropdown
+  // without a second lookup (head_officer_id itself rides on d.*).
   const rows = await c.env.DB.prepare(
-    'SELECT * FROM directorates ORDER BY is_active DESC, abbreviation'
+    `SELECT d.*, o.name AS head_name
+     FROM directorates d
+     LEFT JOIN officers o ON o.id = d.head_officer_id
+     ORDER BY d.is_active DESC, d.abbreviation`
   ).all<Record<string, unknown>>();
   return success(c, (rows.results ?? []).map(withEffectiveType));
 });
@@ -99,6 +104,7 @@ adminDirectorateRoutes.post('/', zValidator('json', createSchema), async (c) => 
 const updateSchema = createSchema.partial().extend({
   is_active: z.number().min(0).max(1).optional(),
   reception_officer_id: z.string().nullable().optional(),
+  head_officer_id: z.string().nullable().optional(),
 });
 
 adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) => {
@@ -145,6 +151,23 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
     values.push(recId);
   }
 
+  // Head of the org entity (absence-notice routing target). Must be an officer
+  // OF THIS entity; null clears.
+  if (body.head_officer_id !== undefined) {
+    const headId = body.head_officer_id || null;
+    if (headId !== null) {
+      const officer = await c.env.DB.prepare(
+        'SELECT directorate_id FROM officers WHERE id = ?'
+      ).bind(headId).first<{ directorate_id: string }>();
+      if (!officer) return error(c, 'INVALID_OFFICER', 'Officer not found', 400);
+      if (officer.directorate_id !== id) {
+        return error(c, 'INVALID_OFFICER', 'Head officer must belong to this entity', 400);
+      }
+    }
+    fields.push('head_officer_id = ?');
+    values.push(headId);
+  }
+
   if (fields.length > 0) {
     values.push(id);
     try {
@@ -159,7 +182,7 @@ adminDirectorateRoutes.put('/:id', zValidator('json', updateSchema), async (c) =
   }
 
   const row = await c.env.DB.prepare('SELECT * FROM directorates WHERE id = ?').bind(id).first<Record<string, unknown>>();
-  const changes = diffRecords(existing, row, ['name', 'abbreviation', 'type', 'org_type', 'rooms', 'floor', 'wing', 'is_active', 'reception_officer_id']);
+  const changes = diffRecords(existing, row, ['name', 'abbreviation', 'type', 'org_type', 'rooms', 'floor', 'wing', 'is_active', 'reception_officer_id', 'head_officer_id']);
   if (Object.keys(changes).length > 0) {
     const onlyPrimary = Object.keys(changes).length === 1 && !!changes.reception_officer_id;
     await recordAudit(c.env, auditActorFromContext(c), {
