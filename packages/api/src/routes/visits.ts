@@ -29,7 +29,7 @@ const listSchema = z.object({
   directorate_id: z.string().optional(),
   badge_code: z.string().optional(),
   q: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
+  limit: z.coerce.number().int().min(1).max(500).default(50),
   cursor: z.string().optional(),
 });
 
