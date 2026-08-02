@@ -12,6 +12,8 @@
  *   - requireSuperadmin(      — local boolean helpers (users.ts, bulk-import.ts,
  *                               admin-directorates.ts)
  *   - requireAdmin(           — local boolean helper (attendance.ts)
+ *   - requireOversight(       — local boolean helper (attendance.ts read-only
+ *                               oversight endpoints: admin tier + scoped director)
  *   - session.role            — inline comparison (admin-settings.ts,
  *                               admin-eval-assistant.ts, visitors.ts DELETE)
  *
@@ -55,6 +57,7 @@ const GUARD_PATTERNS = [
   /requireRole\s*\(/,
   /requireSuperadmin\s*\(/,
   /requireAdmin\s*\(/,
+  /requireOversight\s*\(/,
   /session\.role\b/,
 ];
 

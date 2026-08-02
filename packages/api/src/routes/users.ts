@@ -67,7 +67,7 @@ const createUserSchema = z.object({
   pin: z.string().length(4).regex(/^\d{4}$/, 'PIN must be 4 digits'),
   role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']),
   // Display-tier role label — rides on `role` (client_service ⇒ role='admin').
-  display_role: z.enum(['client_service']).nullish(),
+  display_role: z.enum(['client_service', 'chief_director', 'head_of_service']).nullish(),
   grade: z.string().max(100).optional().or(z.literal('')),
   phone: z.string().max(20).optional().or(z.literal('')),
   directorate_code: z.string().max(20).optional().or(z.literal('')),
@@ -133,7 +133,7 @@ const updateUserSchema = z.object({
   pin: z.string().length(4).regex(/^\d{4}$/).optional(),
   role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']).optional(),
   // NULL clears the display label (falls back to the plain role label).
-  display_role: z.enum(['client_service']).nullable().optional(),
+  display_role: z.enum(['client_service', 'chief_director', 'head_of_service']).nullable().optional(),
   grade: z.string().max(100).optional().or(z.literal('')),
   phone: z.string().max(20).optional().or(z.literal('')),
   directorate_code: z.string().max(20).optional().or(z.literal('')),

@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
-import { MODULE_ROLES, hasRoleAccess } from '@/lib/roles';
+import { MODULE_ROLES, hasRoleAccess, isOversightUser } from '@/lib/roles';
 import {
   LayoutDashboard,
+  Home,
   ClipboardCheck,
   Users,
   BarChart3,
@@ -58,7 +59,11 @@ export function BottomNav() {
   const isSuperadmin = user?.role === 'superadmin';
   const canSeeAppointments = ['receptionist', 'admin', 'superadmin'].includes(user?.role ?? '');
   const visible = (items: NavDef[]) => items.filter((i) => !i.gate || hasRoleAccess(user?.role, i.gate));
-  const mainItems = visible(MAIN_ITEMS);
+  // Directors and CD/HoS land on the Overview — relabel the home tab (see Sidebar).
+  const homeItem: NavDef = isOversightUser(user?.role, user?.display_role)
+    ? { to: '/', icon: Home, label: 'Overview' }
+    : MAIN_ITEMS[0]!;
+  const mainItems = visible([homeItem, ...MAIN_ITEMS.slice(1)]);
   const moreItems = visible(canSeeAppointments ? [APPOINTMENTS_ITEM, FEEDBACK_ITEM, ...MORE_ITEMS] : MORE_ITEMS);
 
   // Check if current route is in the "more" section

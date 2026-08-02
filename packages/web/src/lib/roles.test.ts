@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { roleLabel, MODULE_ROLES, hasRoleAccess } from './roles';
+import { roleLabel, roleBadge, MODULE_ROLES, hasRoleAccess, OVERSIGHT_DISPLAY_ROLES, isOversightUser } from './roles';
 
 describe('roleLabel', () => {
   it('maps the six access roles to their labels', () => {
@@ -15,6 +15,11 @@ describe('roleLabel', () => {
     expect(roleLabel('admin', 'client_service')).toBe('Client Service');
   });
 
+  it('maps the oversight display roles (CD / HoS over director)', () => {
+    expect(roleLabel('director', 'chief_director')).toBe('Chief Director');
+    expect(roleLabel('director', 'head_of_service')).toBe('Head of Service');
+  });
+
   it('falls back to the role label when display_role is null/empty', () => {
     expect(roleLabel('admin', null)).toBe('Admin');
     expect(roleLabel('admin', '')).toBe('Admin');
@@ -24,6 +29,37 @@ describe('roleLabel', () => {
     expect(roleLabel('something_new')).toBe('something_new');
     expect(roleLabel(null)).toBe('');
     expect(roleLabel(undefined)).toBe('');
+  });
+});
+
+describe('roleBadge', () => {
+  it('CD and HoS badges are distinct from each other and from Client Service', () => {
+    const cs = roleBadge('receptionist', 'client_service');
+    const cd = roleBadge('director', 'chief_director');
+    const hos = roleBadge('director', 'head_of_service');
+    expect(cs).not.toBe(cd);
+    expect(cd).not.toBe(hos);
+    expect(cs).not.toBe(hos);
+  });
+
+  it('falls back to a neutral badge for unknown roles', () => {
+    expect(roleBadge('something_new')).toBe('bg-foreground/5 text-muted');
+    expect(roleBadge(null)).toBe('bg-foreground/5 text-muted');
+  });
+});
+
+describe('OVERSIGHT_DISPLAY_ROLES / isOversightUser', () => {
+  it('contains exactly the two oversight display roles', () => {
+    expect(OVERSIGHT_DISPLAY_ROLES).toEqual(['chief_director', 'head_of_service']);
+  });
+
+  it('directors and CD/HoS get the oversight home; others do not', () => {
+    expect(isOversightUser('director', null)).toBe(true);
+    expect(isOversightUser('director', 'chief_director')).toBe(true);
+    expect(isOversightUser('director', 'head_of_service')).toBe(true);
+    expect(isOversightUser('admin', null)).toBe(false);
+    expect(isOversightUser('receptionist', 'client_service')).toBe(false);
+    expect(isOversightUser(null, null)).toBe(false);
   });
 });
 

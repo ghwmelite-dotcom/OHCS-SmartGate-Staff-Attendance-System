@@ -8,12 +8,37 @@ import { getAppSettings, toSqlTime } from '../services/settings';
 import { recordAudit, auditActorFromContext, diffRecords } from '../services/audit';
 import { riskBand, type RiskFactor } from '../services/risk-score';
 import { clockEffectiveDateSql } from '../lib/clock-date';
+import { resolveDirectorateScope, DIRECTORATE_SCOPE_NONE } from '../lib/directorate-scope';
 
 export const attendanceRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
 
 function requireAdmin(c: { get: (key: 'session') => SessionData }) {
   const role = c.get('session').role;
   return role === 'superadmin' || role === 'admin';
+}
+
+// Read-only oversight gate for /today, /records, /by-directorate: the admin
+// tier plus directors (scoped to their directorate; CD/HoS pass org-wide via
+// the scope resolver's display_role handling).
+function requireOversight(c: { get: (key: 'session') => SessionData }) {
+  const role = c.get('session').role;
+  return role === 'superadmin' || role === 'admin' || role === 'director';
+}
+
+type AppContext = Context<{ Bindings: Env; Variables: { session: SessionData } }>;
+
+/**
+ * Resolve the caller's directorate scope for the oversight endpoints.
+ * Returns a directorate id (forced filter — overrides any client-passed
+ * directorate_id), null when unscoped (admin tier / CD / HoS), or a 403
+ * Response when a director has no linked directorate (fail-closed, NOT zeros).
+ */
+async function oversightScope(c: AppContext): Promise<string | null | Response> {
+  const scope = await resolveDirectorateScope(c);
+  if (scope === DIRECTORATE_SCOPE_NONE) {
+    return error(c, 'FORBIDDEN', 'Director account has no linked directorate', 403);
+  }
+  return scope;
 }
 
 type UserTypeSegment = 'staff' | 'nss' | 'intern' | 'all';
@@ -54,7 +79,10 @@ function userTypeClause(segment: UserTypeSegment, alias: string): string {
 
 // Attendance overview for a date (default: today)
 attendanceRoutes.get('/today', async (c) => {
-  if (!requireAdmin(c)) return error(c, 'FORBIDDEN', 'Admin access required', 403);
+  if (!requireOversight(c)) return error(c, 'FORBIDDEN', 'Admin or director access required', 403);
+  const scoped = await oversightScope(c);
+  if (scoped instanceof Response) return scoped;
+  const scope = scoped; // directorate id (forced) | null (unscoped)
   const today = new Date().toISOString().slice(0, 10);
   const dateParam = c.req.query('date');
   if (dateParam !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
@@ -80,6 +108,15 @@ attendanceRoutes.get('/today', async (c) => {
     ? `AND EXISTS (SELECT 1 FROM users u WHERE u.id = cr.user_id AND ${existsClause})`
     : '';
 
+  // Director scoping: population and every clock count are forced to the
+  // caller's directorate (resolved server-side; client params can't widen it).
+  const populationScopeSql = scope ? 'AND users.directorate_id = ?' : '';
+  const clockScopeSql = scope
+    ? 'AND EXISTS (SELECT 1 FROM users su WHERE su.id = cr.user_id AND su.directorate_id = ?)'
+    : '';
+  // Scope params bind LAST (the scope clauses are appended after all others).
+  const withScope = (params: unknown[]) => (scope ? [...params, scope] : params);
+
   // Clock rows are matched by their EFFECTIVE date (device_info.capturedDate ??
   // server timestamp date) so offline replays count toward the capture day —
   // this keeps the counts in agreement with the /records register.
@@ -93,35 +130,35 @@ attendanceRoutes.get('/today', async (c) => {
        WHERE (is_active = 1 OR EXISTS (
          SELECT 1 FROM clock_records crp
          WHERE crp.user_id = users.id AND crp.type = 'clock_in' AND ${clockEffectiveDateSql('crp')} = ?
-       )) ${userTypeUserSql}`
-    : `SELECT COUNT(*) as count FROM users WHERE is_active = 1 ${userTypeUserSql}`;
+       )) ${userTypeUserSql} ${populationScopeSql}`
+    : `SELECT COUNT(*) as count FROM users WHERE is_active = 1 ${userTypeUserSql} ${populationScopeSql}`;
 
   const [totalStaff, clockedIn, clockedOut, lateArrivals, earlyDepartures] = await Promise.all([
     isPast
-      ? c.env.DB.prepare(populationSql).bind(date).first<{ count: number }>()
-      : c.env.DB.prepare(populationSql).first<{ count: number }>(),
+      ? c.env.DB.prepare(populationSql).bind(...withScope([date])).first<{ count: number }>()
+      : c.env.DB.prepare(populationSql).bind(...withScope([])).first<{ count: number }>(),
 
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
-       WHERE cr.type = 'clock_in' AND ${crDate} = ? ${userTypeJoinSql}`
-    ).bind(date).first<{ count: number }>(),
+       WHERE cr.type = 'clock_in' AND ${crDate} = ? ${userTypeJoinSql} ${clockScopeSql}`
+    ).bind(...withScope([date])).first<{ count: number }>(),
 
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
-       WHERE cr.type = 'clock_out' AND ${crDate} = ? ${userTypeJoinSql}`
-    ).bind(date).first<{ count: number }>(),
+       WHERE cr.type = 'clock_out' AND ${crDate} = ? ${userTypeJoinSql} ${clockScopeSql}`
+    ).bind(...withScope([date])).first<{ count: number }>(),
 
     // Late = clocked in after configured late threshold
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
-       WHERE cr.type = 'clock_in' AND ${crDate} = ? AND TIME(cr.timestamp) > ? ${userTypeJoinSql}`
-    ).bind(date, lateAfter).first<{ count: number }>(),
+       WHERE cr.type = 'clock_in' AND ${crDate} = ? AND TIME(cr.timestamp) > ? ${userTypeJoinSql} ${clockScopeSql}`
+    ).bind(...withScope([date, lateAfter])).first<{ count: number }>(),
 
     // Early departure = clocked out before work_end_time
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
-       WHERE cr.type = 'clock_out' AND ${crDate} = ? AND TIME(cr.timestamp) < ? ${userTypeJoinSql}`
-    ).bind(date, endAt).first<{ count: number }>(),
+       WHERE cr.type = 'clock_out' AND ${crDate} = ? AND TIME(cr.timestamp) < ? ${userTypeJoinSql} ${clockScopeSql}`
+    ).bind(...withScope([date, endAt])).first<{ count: number }>(),
   ]);
 
   const total = totalStaff?.count ?? 0;
@@ -140,13 +177,16 @@ attendanceRoutes.get('/today', async (c) => {
 
 // Today's detailed records
 attendanceRoutes.get('/records', async (c) => {
-  if (!requireAdmin(c)) return error(c, 'FORBIDDEN', 'Admin access required', 403);
+  if (!requireOversight(c)) return error(c, 'FORBIDDEN', 'Admin or director access required', 403);
+  const scoped = await oversightScope(c);
+  if (scoped instanceof Response) return scoped;
 
   const date = c.req.query('date') ?? new Date().toISOString().slice(0, 10);
   // Past-date registers include deactivated users who have a clock record that
   // day; today's register keeps the active-only population exactly as before.
   const isPast = date < new Date().toISOString().slice(0, 10);
-  const directorateId = c.req.query('directorate_id');
+  // A director's resolved scope overrides any client-passed directorate_id.
+  const directorateId = scoped ?? c.req.query('directorate_id');
   const segment = parseUserTypeSegment(c.req.query('user_type'));
   const settings = await getAppSettings(c.env);
   const lateAfter = toSqlTime(settings.late_threshold_time);
@@ -171,6 +211,7 @@ attendanceRoutes.get('/records', async (c) => {
                     ci.risk_factors as risk_factors,
                     ci.risk_disposition as risk_disposition,
                     ci.id as clock_in_id,
+                    a.reason as absence_reason, a.note as absence_note,
                     CASE WHEN TIME(ci.timestamp) > ? THEN 1 ELSE 0 END as is_late,
                     CASE WHEN co.timestamp IS NOT NULL AND TIME(co.timestamp) < ? THEN 1 ELSE 0 END as is_early_departure,
                     u.current_streak
@@ -178,8 +219,10 @@ attendanceRoutes.get('/records', async (c) => {
              LEFT JOIN directorates d ON u.directorate_id = d.id
              LEFT JOIN clock_records ci ON ci.user_id = u.id AND ci.type = 'clock_in' AND ${ciDate} = ?
              LEFT JOIN clock_records co ON co.user_id = u.id AND co.type = 'clock_out' AND ${coDate} = ?
+             LEFT JOIN absence_notices a ON a.user_id = u.id
+               AND a.notice_date <= ? AND ? < COALESCE(a.expected_return_date, DATE(a.notice_date, '+1 day'))
              WHERE ${isPast ? '(u.is_active = 1 OR ci.id IS NOT NULL)' : 'u.is_active = 1'}`;
-  const params: unknown[] = [lateAfter, endAt, date, date];
+  const params: unknown[] = [lateAfter, endAt, date, date, date, date];
 
   const recordsClause = userTypeClause(segment, 'u');
   if (recordsClause) {
@@ -294,7 +337,9 @@ attendanceRoutes.post('/records/:clockId/risk-disposition', zValidator('json', r
 
 // Directorate breakdown
 attendanceRoutes.get('/by-directorate', async (c) => {
-  if (!requireAdmin(c)) return error(c, 'FORBIDDEN', 'Admin access required', 403);
+  if (!requireOversight(c)) return error(c, 'FORBIDDEN', 'Admin or director access required', 403);
+  const scoped = await oversightScope(c);
+  if (scoped instanceof Response) return scoped;
 
   const date = c.req.query('date') ?? new Date().toISOString().slice(0, 10);
   const segment = parseUserTypeSegment(c.req.query('user_type'));
@@ -307,6 +352,9 @@ attendanceRoutes.get('/by-directorate', async (c) => {
   const userTypeJoin = byDirClause ? `AND ${byDirClause}` : '';
   const params: unknown[] = [lateAfter];
   params.push(date);
+  // A scoped director's breakdown collapses to their own entity's card.
+  const scopeWhere = scoped ? ' AND d.id = ?' : '';
+  if (scoped) params.push(scoped);
 
   // Clock rows match by their EFFECTIVE date (device_info.capturedDate ??
   // server timestamp date) — same attribution rule as /records and /today.
@@ -318,7 +366,7 @@ attendanceRoutes.get('/by-directorate', async (c) => {
      FROM directorates d
      LEFT JOIN users u ON u.directorate_id = d.id AND u.is_active = 1 ${userTypeJoin}
      LEFT JOIN clock_records ci ON ci.user_id = u.id AND ci.type = 'clock_in' AND ${clockEffectiveDateSql('ci')} = ?
-     WHERE d.is_active = 1
+     WHERE d.is_active = 1${scopeWhere}
      GROUP BY d.id
      ORDER BY d.abbreviation`
   ).bind(...params).all();

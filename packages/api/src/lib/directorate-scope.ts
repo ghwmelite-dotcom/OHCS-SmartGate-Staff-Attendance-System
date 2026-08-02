@@ -17,6 +17,11 @@ import type { Env, SessionData } from '../types';
  *     the caller is a director WITHOUT a linked directorate — this fails CLOSED
  *     (deny-all) instead of leaking all directorates' data;
  *   - null otherwise (non-director; no scoping — honour the caller filter).
+ *
+ * Oversight display roles: 'chief_director' / 'head_of_service' are
+ * display_role overlays on role='director' accounts (the Client Service
+ * precedent) and resolve org-wide (null) — checked BEFORE the sentinel path,
+ * so an acting-CD whose directorate_id is still linked also sees org-wide.
  */
 
 // Real directorate ids are 32 hex chars; this can never collide, so any filter
@@ -28,9 +33,12 @@ export async function resolveDirectorateScope(
 ): Promise<string | null> {
   const session = c.get('session');
   if (session.role !== 'director') return null;
-  const row = await c.env.DB.prepare('SELECT directorate_id FROM users WHERE id = ?')
+  const row = await c.env.DB.prepare('SELECT directorate_id, display_role FROM users WHERE id = ?')
     .bind(session.userId)
-    .first<{ directorate_id: string | null }>();
+    .first<{ directorate_id: string | null; display_role: string | null }>();
+  // Oversight display roles (CD / HoS) → org-wide, before the sentinel path
+  // and regardless of a still-linked directorate_id (acting-CD case).
+  if (row?.display_role === 'chief_director' || row?.display_role === 'head_of_service') return null;
   // Director with no directorate → deny-all sentinel (NOT null/no-scope).
   return row?.directorate_id ?? DIRECTORATE_SCOPE_NONE;
 }

@@ -1,9 +1,9 @@
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, ClipboardCheck, Users, ScrollText, BarChart3, FileText, Settings, LogOut, ChevronsLeft, ChevronsRight, UserCircle, Calendar, Star, BookMarked } from 'lucide-react';
+import { LayoutDashboard, Home, ClipboardCheck, Users, ScrollText, BarChart3, FileText, Settings, LogOut, ChevronsLeft, ChevronsRight, UserCircle, Calendar, Star, BookMarked } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import { useSidebarStore } from '@/stores/sidebar';
-import { MODULE_ROLES, hasRoleAccess } from '@/lib/roles';
+import { MODULE_ROLES, hasRoleAccess, isOversightUser } from '@/lib/roles';
 
 // `gate` mirrors the API requireRole list for the module — a role without
 // access never sees the item (the API would 403 the page's queries anyway).
@@ -59,6 +59,13 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
 
   const collapsed = forceExpanded ? false : isCollapsed;
 
+  // Directors and CD/HoS land on the read-only Overview, not the reception
+  // Dashboard — relabel the home item to match (spec 2026-08-02-oversight-roles).
+  const oversight = isOversightUser(user?.role, user?.display_role);
+  const navItems = oversight
+    ? NAV_ITEMS.map((item) => (item.to === '/' ? { ...item, icon: Home, label: 'Overview' } : item))
+    : NAV_ITEMS;
+
   return (
     <aside
       className={cn(
@@ -113,7 +120,7 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
 
       {/* Navigation — scrolls when items exceed available height; footer stays pinned */}
       <nav className={cn('sidebar-nav-scroll flex-1 min-h-0 overflow-y-auto overflow-x-hidden py-2 space-y-1 relative', collapsed ? 'px-2' : 'px-3')}>
-        {NAV_ITEMS.filter((item) => !item.gate || hasRoleAccess(user?.role, item.gate)).map((item) => (
+        {navItems.filter((item) => !item.gate || hasRoleAccess(user?.role, item.gate)).map((item) => (
           <NavItem key={item.to} {...item} collapsed={collapsed} />
         ))}
 

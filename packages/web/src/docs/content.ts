@@ -442,6 +442,16 @@ export const DOC_SECTIONS: DocSection[] = [
         ],
       },
       {
+        name: 'Oversight roles — Chief Director & Head of Service',
+        status: 'live',
+        summary: 'display_role overlays on a director-base account give CD/HoS an org-wide read-only overview (identical visibility — hierarchy lives in authority, not data access). Directors get a scoped overview of their own directorate/unit. Acting appointments: flip display_role for oversight roles (audited), a real role change for acting-as-director.',
+        details: [
+          'Scope resolver treats chief_director/head_of_service as org-wide; plain directors without an entity still fail closed',
+          'Attendance endpoints (/today, /records, /by-directorate) opened to directors (force-scoped) and CD/HoS (org-wide); /records rows carry absence reason/note',
+          'Portal home becomes an Overview page for these roles (present/absent/late/noticed + active visits; CD/HoS get the by-directorate grid); assign via Admin → Users display_role',
+        ],
+      },
+      {
         name: 'Provisioning',
         status: 'live',
         summary: 'Accounts are created individually, batch-provisioned from the officer roster, or bulk-imported by CSV. Welcome emails carry the temporary PIN.',

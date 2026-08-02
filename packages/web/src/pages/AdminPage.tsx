@@ -46,8 +46,11 @@ interface UserRecord {
 const ROLES = [
   { value: 'superadmin', label: 'Super Admin', color: 'bg-secondary/10 text-secondary' },
   { value: 'admin', label: 'Admin', color: 'bg-accent/15 text-accent-warm' },
-  // Display-tier pseudo-role: stored as role='receptionist' + display_role='client_service'.
+  // Display-tier pseudo-roles: stored as a base access role + display_role.
+  // client_service ⇒ receptionist parity; CD/HoS ⇒ director with org-wide oversight.
   { value: 'client_service', label: 'Client Service', color: 'bg-service/10 text-service' },
+  { value: 'chief_director', label: 'Chief Director', color: 'bg-accent/15 text-accent-warm' },
+  { value: 'head_of_service', label: 'Head of Service', color: 'bg-primary/10 text-primary' },
   { value: 'receptionist', label: 'Receptionist', color: 'bg-primary/10 text-primary' },
   { value: 'it', label: 'IT Support', color: 'bg-info/10 text-info' },
   { value: 'director', label: 'Director', color: 'bg-accent/10 text-accent-warm' },
@@ -73,7 +76,7 @@ const createUserSchema = z.object({
   email: z.string().email('Invalid email').max(255),
   staff_id: z.string().min(1, 'Staff ID is required').max(20),
   pin: z.string().length(4, 'PIN must be 4 digits').regex(/^\d{4}$/, 'PIN must be 4 digits'),
-  role: z.enum(['superadmin', 'admin', 'client_service', 'receptionist', 'it', 'director', 'staff']),
+  role: z.enum(['superadmin', 'admin', 'client_service', 'chief_director', 'head_of_service', 'receptionist', 'it', 'director', 'staff']),
   grade: z.string().max(100).optional(),
   phone: z.string().max(20).optional(),
   directorate_code: z.string().max(20).optional(),
@@ -84,7 +87,7 @@ const editUserSchema = z.object({
   name: z.string().min(1).max(100),
   email: z.string().email().max(255),
   staff_id: z.string().min(1).max(20),
-  role: z.enum(['superadmin', 'admin', 'client_service', 'receptionist', 'it', 'director', 'staff']),
+  role: z.enum(['superadmin', 'admin', 'client_service', 'chief_director', 'head_of_service', 'receptionist', 'it', 'director', 'staff']),
   grade: z.string().max(100).optional(),
   phone: z.string().max(20).optional(),
   directorate_code: z.string().max(20).optional(),
@@ -92,13 +95,22 @@ const editUserSchema = z.object({
 });
 type EditUserForm = z.infer<typeof editUserSchema>;
 
-// The display-tier pseudo-role maps to its access role at the API boundary:
-// client_service ⇒ role='receptionist' + display_role='client_service'; any
+// Display-tier pseudo-roles map to their access role at the API boundary:
+// client_service ⇒ role='receptionist' + display_role='client_service';
+// chief_director/head_of_service ⇒ role='director' + the matching display_role
+// (org-wide oversight, spec 2026-08-02-oversight-roles-cd-hos-design). Any
 // other selection clears the display label (NULL).
+const DISPLAY_ROLE_MAP: Record<string, { role: string; display_role: string }> = {
+  client_service: { role: 'receptionist', display_role: 'client_service' },
+  chief_director: { role: 'director', display_role: 'chief_director' },
+  head_of_service: { role: 'director', display_role: 'head_of_service' },
+};
+
 function toUserPayload<T extends { role: string }>(data: T) {
   const { role, ...rest } = data;
-  return role === 'client_service'
-    ? { ...rest, role: 'receptionist', display_role: 'client_service' }
+  const mapped = DISPLAY_ROLE_MAP[role];
+  return mapped
+    ? { ...rest, ...mapped }
     : { ...rest, role, display_role: null };
 }
 

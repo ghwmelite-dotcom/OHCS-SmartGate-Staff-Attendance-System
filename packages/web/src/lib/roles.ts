@@ -1,5 +1,6 @@
 // Display-tier role labels. `display_role` rides on top of the access role
-// ('client_service' ⇒ role='receptionist' under the hood — reception parity)
+// ('client_service' ⇒ role='receptionist' under the hood — reception parity;
+// 'chief_director'/'head_of_service' ⇒ role='director' — org-wide oversight)
 // and only re-labels the UI; access checks always use `role`.
 export const ROLE_LABELS: Record<string, string> = {
   superadmin: 'Super Admin',
@@ -9,7 +10,31 @@ export const ROLE_LABELS: Record<string, string> = {
   director: 'Director',
   staff: 'Staff',
   client_service: 'Client Service',
+  chief_director: 'Chief Director',
+  head_of_service: 'Head of Service',
 };
+
+// Badge classes per display/access role — Client Service violet, CD gold,
+// HoS emerald (distinct from each other and from the access-role colors).
+export const ROLE_BADGES: Record<string, string> = {
+  client_service: 'bg-service/10 text-service',
+  chief_director: 'bg-accent/15 text-accent-warm',
+  head_of_service: 'bg-primary/10 text-primary',
+};
+
+export function roleBadge(role: string | null | undefined, displayRole?: string | null): string {
+  const key = displayRole || role || '';
+  return ROLE_BADGES[key] ?? 'bg-foreground/5 text-muted';
+}
+
+// Oversight display roles (spec 2026-08-02-oversight-roles-cd-hos-design):
+// users with either display_role get the org-wide Overview home instead of
+// the reception Dashboard. Base access role stays 'director'.
+export const OVERSIGHT_DISPLAY_ROLES = ['chief_director', 'head_of_service'] as const;
+
+export function isOversightUser(role: string | null | undefined, displayRole?: string | null): boolean {
+  return role === 'director' || (displayRole != null && (OVERSIGHT_DISPLAY_ROLES as readonly string[]).includes(displayRole));
+}
 
 export function roleLabel(role: string | null | undefined, displayRole?: string | null): string {
   const key = displayRole || role || '';

@@ -67,7 +67,7 @@ function newDb(): SqliteDb {
     CREATE TABLE users (
       id TEXT PRIMARY KEY, name TEXT, staff_id TEXT, role TEXT DEFAULT 'staff',
       user_type TEXT DEFAULT 'staff', is_active INTEGER NOT NULL DEFAULT 1,
-      directorate_id TEXT, current_streak INTEGER NOT NULL DEFAULT 0,
+      directorate_id TEXT, display_role TEXT, current_streak INTEGER NOT NULL DEFAULT 0,
       longest_streak INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE clock_records (
@@ -76,6 +76,11 @@ function newDb(): SqliteDb {
       reauth_method TEXT, liveness_decision TEXT, liveness_signature TEXT,
       presence_method TEXT, presence_token_window TEXT, risk_score INTEGER,
       risk_factors TEXT, risk_disposition TEXT
+    );
+    CREATE TABLE absence_notices (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, reason TEXT NOT NULL,
+      note TEXT, notice_date TEXT NOT NULL, expected_return_date TEXT,
+      created_at TEXT
     );
   `);
   return db;
@@ -128,6 +133,11 @@ function seed(db: SqliteDb) {
   insClock.run('ci-u6', 'u6', 'clock_in', `${PAST}T08:40:00.000Z`, 'not json');
   insClock.run('ci-u7', 'u7', 'clock_in', '2026-08-03T07:55:00.000Z', JSON.stringify({ capturedDate: PAST }));
   insClock.run('ci-u8', 'u8', 'clock_in', '2026-08-03T08:00:00.000Z', null);
+
+  // u1 has an absence notice covering fake-today (2026-08-03), back tomorrow.
+  db.prepare(
+    'INSERT INTO absence_notices (id, user_id, reason, note, notice_date, expected_return_date) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run('an1', 'u1', 'sick', 'Clinic visit', '2026-08-03', '2026-08-04');
 }
 
 function makeEnv() {
@@ -152,9 +162,9 @@ function makeEnv() {
 
 const admin: SessionData = { userId: 'admin1', email: 'admin@ohcs.gov.gh', role: 'admin', name: 'Admin' };
 
-function makeApp() {
+function makeApp(session: SessionData = admin) {
   const app = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
-  app.use('/a/*', async (c, next) => { c.set('session', admin); await next(); });
+  app.use('/a/*', async (c, next) => { c.set('session', session); await next(); });
   app.route('/a', attendanceRoutes);
   return app;
 }
@@ -217,6 +227,19 @@ describe('GET /attendance/records — past-date population', () => {
     expect(ids).not.toContain('u4');
     const clockedIds = rows.filter((r) => r.clock_in_time !== null).map((r) => r.user_id);
     expect(clockedIds).toEqual(['u8']); // u7's replayed record belongs to PAST
+  });
+
+  it('rows carry absence_reason/absence_note for users with an active notice that day', async () => {
+    const { env } = makeEnv();
+    const rows = await getRecords(env, '?date=2026-08-03') as Array<RecordRow & { absence_reason: string | null; absence_note: string | null }>;
+    const u1 = rows.find((r) => r.user_id === 'u1');
+    expect(u1?.absence_reason).toBe('sick');
+    expect(u1?.absence_note).toBe('Clinic visit');
+    // users without a notice read null, and a notice does not leak onto other dates
+    const u2 = rows.find((r) => r.user_id === 'u2');
+    expect(u2?.absence_reason).toBeNull();
+    const pastRows = await getRecords(env, `?date=${PAST}`) as Array<RecordRow & { absence_reason: string | null }>;
+    expect(pastRows.find((r) => r.user_id === 'u1')?.absence_reason).toBeNull();
   });
 });
 
@@ -290,5 +313,119 @@ describe('GET /attendance/user/:userId/monthly — effective-date attribution', 
     expect(res2.status).toBe(200);
     const body2 = await res2.json() as MonthlyBody;
     expect(Object.keys(body2.data.daily_records)).toEqual([]);
+  });
+});
+
+/* ---------- oversight scoping (plan 2026-08-02-oversight-roles-cd-hos, Task 2) ---------- */
+
+/**
+ * Oversight fixture (applied on top of seed() only in these tests):
+ *   dir2 'F&A' second directorate
+ *   director1   role=director, dir1                        → scoped to dir1
+ *   directorNoEnt role=director, no entity                 → fail-closed 403
+ *   actingCd    role=director, dir1, chief_director        → org-wide
+ *   hosUser     role=director, no entity, head_of_service  → org-wide
+ *   staffDir2   staff in dir2, clocked in TODAY
+ * Totals with this fixture (today, active): org-wide 11 users / 2 clocked in;
+ * dir1: 8 users / 1 clocked in (u8).
+ */
+function seedOversight(db: SqliteDb) {
+  db.prepare("INSERT INTO directorates (id, name, abbreviation) VALUES ('dir2', 'Finance', 'F&A')").run();
+  const insUser = db.prepare(
+    'INSERT INTO users (id, name, staff_id, role, is_active, directorate_id, display_role) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  );
+  insUser.run('director1', 'Director One', null, 'director', 1, 'dir1', null);
+  insUser.run('directorNoEnt', 'Director NoEntity', null, 'director', 1, null, null);
+  insUser.run('actingCd', 'Acting CD', null, 'director', 1, 'dir1', 'chief_director');
+  insUser.run('hosUser', 'Head Of Service', null, 'director', 1, null, 'head_of_service');
+  insUser.run('staffDir2', 'Staff Dir Two', 'S9', 'staff', 1, 'dir2', null);
+  const insClock = db.prepare(
+    'INSERT INTO clock_records (id, user_id, type, timestamp, device_info) VALUES (?, ?, ?, ?, ?)',
+  );
+  insClock.run('ci-staffDir2', 'staffDir2', 'clock_in', '2026-08-03T08:10:00.000Z', null);
+}
+
+const director: SessionData = { userId: 'director1', email: 'd1@ohcs.gov.gh', role: 'director', name: 'Director One' };
+const directorNoEntity: SessionData = { userId: 'directorNoEnt', email: 'dn@ohcs.gov.gh', role: 'director', name: 'Director NoEntity' };
+const actingCd: SessionData = { userId: 'actingCd', email: 'cd@ohcs.gov.gh', role: 'director', name: 'Acting CD' };
+const staffSession: SessionData = { userId: 'u1', email: 's1@ohcs.gov.gh', role: 'staff', name: 'Active NoClock' };
+
+function makeOversightEnv() {
+  const { env, db } = makeEnv();
+  seedOversight(db);
+  return env;
+}
+
+describe('oversight scoping — /records, /today, /by-directorate', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(NOW)); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('director /records returns only their entity — and beats a client-passed directorate_id', async () => {
+    const env = makeOversightEnv();
+    const res = await makeApp(director).request('/a/records?directorate_id=dir2', {}, env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: RecordRow[] };
+    const ids = body.data.map((r) => r.user_id).sort();
+    // dir1 active: base 6 + director1 + actingCd — no dir2 rows despite the param.
+    expect(ids).toEqual(['actingCd', 'director1', 'u1', 'u2', 'u5', 'u6', 'u7', 'u8']);
+  });
+
+  it('director without an entity gets 403 on all three endpoints (fail-closed, not zeros)', async () => {
+    const env = makeOversightEnv();
+    for (const path of ['/a/records', '/a/today', '/a/by-directorate']) {
+      const res = await makeApp(directorNoEntity).request(path, {}, env);
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it('CD/HoS (display_role) get full org-wide data', async () => {
+    const env = makeOversightEnv();
+
+    const recRes = await makeApp(actingCd).request('/a/records', {}, env);
+    expect(recRes.status).toBe(200);
+    const recBody = await recRes.json() as { data: RecordRow[] };
+    expect(recBody.data.map((r) => r.user_id)).toContain('staffDir2'); // dir2 row visible
+    expect(recBody.data.length).toBe(11);
+
+    const todayRes = await makeApp(actingCd).request('/a/today', {}, env);
+    expect(todayRes.status).toBe(200);
+    const todayBody = await todayRes.json() as { data: TodayStats };
+    expect(todayBody.data.total_staff).toBe(11);
+    expect(todayBody.data.clocked_in).toBe(2); // u8 (dir1) + staffDir2 (dir2)
+  });
+
+  it('staff role keeps 403 on all three endpoints', async () => {
+    const env = makeOversightEnv();
+    for (const path of ['/a/records', '/a/today', '/a/by-directorate']) {
+      const res = await makeApp(staffSession).request(path, {}, env);
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it('director /today counts are forced to their entity', async () => {
+    const env = makeOversightEnv();
+    const res = await makeApp(director).request('/a/today', {}, env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: TodayStats };
+    expect(body.data.total_staff).toBe(8); // dir1 actives only
+    expect(body.data.clocked_in).toBe(1);  // u8 only — staffDir2's clock-in excluded
+  });
+
+  it('director /by-directorate collapses to their own entity card; CD sees both', async () => {
+    const env = makeOversightEnv();
+
+    const dirRes = await makeApp(director).request('/a/by-directorate', {}, env);
+    expect(dirRes.status).toBe(200);
+    const dirBody = await dirRes.json() as { data: Array<{ abbreviation: string; total_staff: number; present: number }> };
+    expect(dirBody.data.length).toBe(1);
+    expect(dirBody.data[0]!.abbreviation).toBe('RSIMD');
+    expect(dirBody.data[0]!.total_staff).toBe(8);
+    expect(dirBody.data[0]!.present).toBe(1);
+
+    const cdRes = await makeApp(actingCd).request('/a/by-directorate', {}, env);
+    expect(cdRes.status).toBe(200);
+    const cdBody = await cdRes.json() as { data: Array<{ abbreviation: string; present: number }> };
+    expect(cdBody.data.length).toBe(2);
+    expect(cdBody.data.find((d) => d.abbreviation === 'F&A')?.present).toBe(1);
   });
 });

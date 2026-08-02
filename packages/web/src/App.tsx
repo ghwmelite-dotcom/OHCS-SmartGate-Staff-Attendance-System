@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { OverviewPage } from './pages/OverviewPage';
 import { CheckInPage } from './pages/CheckInPage';
 import { VisitorsPage } from './pages/VisitorsPage';
 import { VisitorDetailPage } from './pages/VisitorDetailPage';
@@ -21,6 +22,7 @@ import { ReportsPage } from './pages/ReportsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { AppLayout } from './components/layout/AppLayout';
 import { useAuthStore } from './stores/auth';
+import { isOversightUser } from './lib/roles';
 import { OfflineBanner } from './components/OfflineBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -32,6 +34,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
+}
+
+// Role-aware home: directors and CD/HoS get the read-only oversight Overview;
+// everyone else keeps the reception Dashboard (spec 2026-08-02-oversight-roles).
+function HomePage() {
+  const user = useAuthStore((s) => s.user);
+  return isOversightUser(user?.role, user?.display_role) ? <OverviewPage /> : <DashboardPage />;
 }
 
 export function App() {
@@ -164,7 +173,7 @@ export function App() {
           <Route path="/presence-display" element={<PresenceDisplayPage />} />
           <Route path="/book" element={<BookingPage />} />
           <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-            <Route index element={<DashboardPage />} />
+            <Route index element={<HomePage />} />
             <Route path="check-in" element={<CheckInPage />} />
             <Route path="visitors" element={<VisitorsPage />} />
             <Route path="visitors/:id" element={<VisitorDetailPage />} />
