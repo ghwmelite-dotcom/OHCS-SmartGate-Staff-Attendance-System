@@ -1,6 +1,7 @@
 import type { Env } from '../types';
 import { sendTelegramMessage } from './telegram';
 import { getAppSettings, toSqlTime } from './settings';
+import { getOfficeStatus } from './office-hours';
 
 type SummaryType = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -25,6 +26,12 @@ export async function sendDailySummary(env: Env): Promise<void> {
   const type = determineSummaryType();
 
   if (type === 'daily') {
+    // Self-suppress on closed days — the cron schedule is the primary gate,
+    // but a wrong weekday expression (or a manual trigger) must never spam a
+    // weekend "0% present" report. Periodic reports (weekly/monthly/yearly)
+    // intentionally fire regardless of the day they land on.
+    const office = await getOfficeStatus(env);
+    if (office.reason === 'weekend' || office.reason === 'holiday') return;
     await sendDailyReport(env);
   } else {
     await sendPeriodicReport(type, env);

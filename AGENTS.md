@@ -116,6 +116,14 @@ relevant conventions; the user says "work the loop" to activate it.
   migration files with `wrangler d1 execute smartgate-db --local --file=…`.
 - **CI smoke check** curls the workers.dev host (bot protection 403s the branded
   domain from CI). `/api/kiosk/status` is the payload-shape canary.
+- **Cloudflare cron weekdays are Quartz-style: 1=SUN, 2=MON … 6=FRI, 7=SAT** —
+  NOT the Unix `0=SUN`. `1-5` means Sunday–Thursday. Every weekday cron here is
+  `2-6`; the weekly summary is `0 16 * * 6` (Friday). The `scheduled()` switch
+  case labels in `index.ts` must match `wrangler.toml` strings byte-for-byte —
+  change them together (2026-08-02 incident: Sunday daily summary + silently
+  uncovered Fridays + weekly summary firing as a Thursday daily). Code-level
+  guards (`getOfficeStatus`) are the second line — keep them in every
+  day-gated job.
 - **`wrangler kv key list` lies on this KV namespace.** `smartgate-kv` has
   `supports_url_encoding: true` and wrangler's list (bare or `--prefix`)
   returns `[]` for a namespace full of keys — writes via wrangler appear, the

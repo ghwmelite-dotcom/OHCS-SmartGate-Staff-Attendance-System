@@ -164,8 +164,8 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil((async () => {
       switch (event.cron) {
-        case '*/15 8-10 * * 1-5':
-        case '0 11 * * 1-5':
+        case '*/15 8-10 * * 2-6':
+        case '0 11 * * 2-6':
           try {
             await sendClockReminders(env);
           } catch (err) {
@@ -173,7 +173,7 @@ export default {
             await alertAdminError(env, 'cron:clock-reminders', err);
           }
           break;
-        case '*/15 15-17 * * 1-5':
+        case '*/15 15-17 * * 2-6':
           try {
             await sendClockOutReminders(env);
           } catch (err) {
@@ -190,8 +190,8 @@ export default {
             await alertAdminError(env, 'cron:monthly-summary', err);
           }
           break;
-        case '0 9 * * 1-5':
-        case '0 16 * * 5':
+        case '0 9 * * 2-6':
+        case '0 16 * * 6':
         case '0 9 1 1 *':
           try {
             await sendDailySummaryFn(env);
@@ -208,7 +208,7 @@ export default {
             await alertAdminError(env, 'cron:nss-eos', err);
           }
           break;
-        case '15 17 * * 1-5':
+        case '15 17 * * 2-6':
           try {
             await runCheckoutSweep(env);
           } catch (err) {
@@ -216,7 +216,7 @@ export default {
             await alertAdminError(env, 'cron:checkout-sweep', err);
           }
           break;
-        case '*/15 8-17 * * 1-5':
+        case '*/15 8-17 * * 2-6':
           try {
             await runSlaEscalation(env);
           } catch (err) {
