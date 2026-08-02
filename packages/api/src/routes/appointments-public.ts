@@ -115,6 +115,9 @@ export function splitVisitorName(full: string): { first: string; last: string } 
 // the reference code already proves the booking). Non-Ghana numbers fall
 // back to an exact-string match. A new visitor is created only when no row
 // matches, so repeat appointment visitors accumulate one history.
+// Race-safe: the insert carries a deterministic idempotency key per
+// appointment (idx_visitors_idem_unique); a concurrent arrival that loses
+// the insert re-reads the winner's row (mirrors check-in.ts race recovery).
 // Shared with the admin desk-completion path (appointments-admin.ts).
 export async function findOrCreateAppointmentVisitor(
   env: Env,
@@ -124,6 +127,7 @@ export async function findOrCreateAppointmentVisitor(
     visitor_email: string | null;
     organisation: string | null;
   },
+  appointmentId: string,
 ): Promise<string> {
   const stripped = `REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', '')`;
   const forms = normalizeKioskPhone(appt.visitor_phone);
@@ -136,12 +140,25 @@ export async function findOrCreateAppointmentVisitor(
       ).bind(appt.visitor_phone.trim()).first<{ id: string }>();
   if (found) return found.id;
 
+  const idempotencyKey = `appt-visitor:${appointmentId}`;
   const { first, last } = splitVisitorName(appt.visitor_name);
   const id = crypto.randomUUID().replace(/-/g, '');
-  await env.DB.prepare(
-    `INSERT INTO visitors (id, first_name, last_name, phone, email, organisation)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(id, first, last, appt.visitor_phone, appt.visitor_email ?? null, appt.organisation ?? null).run();
+  try {
+    await env.DB.prepare(
+      `INSERT INTO visitors (id, first_name, last_name, phone, email, organisation, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, first, last, appt.visitor_phone, appt.visitor_email ?? null, appt.organisation ?? null, idempotencyKey).run();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // Idempotency-key race: a concurrent arrival won the insert. Re-read and
+    // return the existing visitor.
+    if (/UNIQUE/i.test(msg) && /idempotency_key/i.test(msg)) {
+      const hit = await env.DB.prepare('SELECT id FROM visitors WHERE idempotency_key = ? LIMIT 1')
+        .bind(idempotencyKey).first<{ id: string }>();
+      if (hit) return hit.id;
+    }
+    throw e;
+  }
   return id;
 }
 
@@ -467,7 +484,7 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
   // idempotency key dedupes any raced/retried arrival at the DB level
   // (idx_visits_idem_unique) even if the status guard above is beaten.
   // check_in.ts skips AI classification because the category is pinned.
-  const visitorId = await findOrCreateAppointmentVisitor(c.env, appointment);
+  const visitorId = await findOrCreateAppointmentVisitor(c.env, appointment, appointment.id);
   const checkIn = await performCheckIn(c.env, c.executionCtx, {
     visitor_id: visitorId,
     host_officer_id: appointment.officer_id,
@@ -483,12 +500,18 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
   }
 
   // 5. Update status to completed — the appointment stays the booking record;
-  // the visits row is the arrival record.
-  await c.env.DB.prepare(
+  // the visits row is the arrival record. The flip is GUARDED on the current
+  // status so a raced second arrival (both requests passed the status check
+  // above) loses here and skips the approver fan-out — first writer wins.
+  const flip = await c.env.DB.prepare(
     `UPDATE appointments
      SET status = 'completed', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-     WHERE id = ?`
+     WHERE id = ? AND status = 'confirmed'`
   ).bind(appointment.id).run();
+
+  if ((flip.meta?.changes ?? 0) === 0) {
+    return error(c, 'APPT_ALREADY_COMPLETED', 'This appointment has already been checked in', 422);
+  }
 
   const arrivalTitle = `Appointment arrived`;
   const arrivalBody = `${appointment.visitor_name} has arrived for their appointment with ${appointment.officer_name} at ${appointment.time_slot}`;

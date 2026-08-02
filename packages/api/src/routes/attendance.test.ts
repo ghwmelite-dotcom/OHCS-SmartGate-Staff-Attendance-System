@@ -241,6 +241,21 @@ describe('GET /attendance/records — past-date population', () => {
     const pastRows = await getRecords(env, `?date=${PAST}`) as Array<RecordRow & { absence_reason: string | null }>;
     expect(pastRows.find((r) => r.user_id === 'u1')?.absence_reason).toBeNull();
   });
+
+  it('a user with two overlapping notices appears EXACTLY once, with the latest notice', async () => {
+    const { env, db } = makeEnv();
+    // u1 already has an1 (notice_date 2026-08-03 → 2026-08-04, created_at NULL).
+    // A second, later-created notice also spans 2026-08-03 — the register must
+    // not fan out into two rows, and it must show the LATEST notice's reason.
+    db.prepare(
+      'INSERT INTO absence_notices (id, user_id, reason, note, notice_date, expected_return_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run('an2', 'u1', 'transport', 'Trotro strike', '2026-08-01', '2026-08-05', '2026-08-03T09:00:00Z');
+
+    const rows = await getRecords(env, '?date=2026-08-03') as Array<RecordRow & { absence_reason: string | null }>;
+    const u1Rows = rows.filter((r) => r.user_id === 'u1');
+    expect(u1Rows).toHaveLength(1);
+    expect(u1Rows[0]!.absence_reason).toBe('transport');
+  });
 });
 
 describe('GET /attendance/today — optional ?date aligned with /records', () => {

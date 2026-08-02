@@ -333,8 +333,8 @@ const REASON_LABELS: Record<AbsenceNoticeInput['reason'], string> = {
  */
 export async function sendAbsenceNoticePush(env: Env, notice: AbsenceNoticeInput): Promise<void> {
   const user = await env.DB.prepare(
-    'SELECT name, directorate_id FROM users WHERE id = ?'
-  ).bind(notice.user_id).first<{ name: string; directorate_id: string | null }>();
+    'SELECT name, directorate_id, staff_id, email FROM users WHERE id = ?'
+  ).bind(notice.user_id).first<{ name: string; directorate_id: string | null; staff_id: string | null; email: string | null }>();
   if (!user) return;
 
   const label = REASON_LABELS[notice.reason];
@@ -383,30 +383,50 @@ export async function sendAbsenceNoticePush(env: Env, notice: AbsenceNoticeInput
           .bind(head.email, notice.user_id).first<{ id: string }>();
       }
       if (!linked) {
-        linked = await env.DB.prepare('SELECT id FROM users WHERE name = ? AND is_active = 1 AND id != ?')
-          .bind(head.name, notice.user_id).first<{ id: string }>();
+        // Exact-name fallback: only a UNIQUE match is safe — a collision
+        // (rename attack or innocent duplicate) must not misdirect the note.
+        const nameMatches = await env.DB.prepare(
+          'SELECT id FROM users WHERE name = ? AND is_active = 1 AND id != ? LIMIT 2'
+        ).bind(head.name, notice.user_id).all<{ id: string }>();
+        const rows = nameMatches.results ?? [];
+        if (rows.length === 1) linked = rows[0]!;
       }
 
-      if (linked || head.telegram_chat_id) {
-        if (linked) await notify(linked.id);
+      const sendHeadTelegram = async () => {
+        if (!head.telegram_chat_id || !env.TELEGRAM_BOT_TOKEN) return;
+        try {
+          const text = [
+            `🚫 <b>${escapeHtml(title)}</b>`,
+            '',
+            escapeHtml(body),
+          ].join('\n');
+          await sendTelegramMessage({ chatId: head.telegram_chat_id, text, token: env.TELEGRAM_BOT_TOKEN });
+        } catch (err) {
+          devError(env, '[reminders] absence_notice head telegram failed', err);
+        }
+      };
+
+      if (linked) {
+        await notify(linked.id);
         // Best-effort Telegram to the officer's linked chat (main bot — heads
         // are officers who already receive arrival alerts there).
-        if (head.telegram_chat_id && env.TELEGRAM_BOT_TOKEN) {
-          try {
-            const text = [
-              `\u{1F6AB} <b>${escapeHtml(title)}</b>`,
-              '',
-              escapeHtml(body),
-            ].join('\n');
-            await sendTelegramMessage({ chatId: head.telegram_chat_id, text, token: env.TELEGRAM_BOT_TOKEN });
-          } catch (err) {
-            devError(env, '[reminders] absence_notice head telegram failed', err);
-          }
-        }
+        await sendHeadTelegram();
         devLog(env, `[reminders] absence_notice for ${user.name} sent to head officer ${head.id}`);
         return;
       }
-      // Unreachable head — fall through so the notice is not swallowed.
+
+      // Telegram-only head (no linked user account): deliver via their officer
+      // chat — unless the head IS the submitter, in which case fall through so
+      // the notice is never swallowed (nor self-sent).
+      const headIsSubmitter =
+        (head.staff_id !== null && head.staff_id === user.staff_id) ||
+        (head.email !== null && head.email === user.email);
+      if (!headIsSubmitter && head.telegram_chat_id) {
+        await sendHeadTelegram();
+        devLog(env, `[reminders] absence_notice for ${user.name} sent to head officer ${head.id} via telegram`);
+        return;
+      }
+      // Head is the submitter or unreachable — fall through to directors.
     }
 
     // Step 2 — director-role users of the entity.

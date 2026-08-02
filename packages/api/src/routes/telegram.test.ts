@@ -352,13 +352,33 @@ describe('telegramWebhook /link — unauthenticated write removed', () => {
     expect(officer.cid).toBeNull();
   });
 
-  it('keeps the staff-ID-not-found wording for unknown IDs', async () => {
-    const { env } = makeEnv();
+  it('gives an IDENTICAL uniform reply for real and bogus staff IDs — and never reads the DB', async () => {
+    const { env, db } = makeEnv();
+    db.prepare("INSERT INTO users (id, name, email, staff_id, role) VALUES ('u1', 'Ama Serwaa', 'ama@ohcs.gov.gh', '1334685', 'staff')").run();
     const fetchMock = stubTelegramFetch();
 
-    const res = await makeApp().request('/webhook', cmd('/link 9999999'), env);
-    expect(res.status).toBe(200);
-    expect(sentText(fetchMock)).toContain('not found');
+    // Wrap the D1 shim to count queries — the handler must not look anything up.
+    let dbReads = 0;
+    const realPrepare = env.DB.prepare.bind(env.DB);
+    env.DB = {
+      ...env.DB,
+      prepare(sql: string) {
+        dbReads += 1;
+        return realPrepare(sql);
+      },
+    } as unknown as Env['DB'];
+
+    const resReal = await makeApp().request('/webhook', cmd('/link 1334685'), env);
+    const resFake = await makeApp().request('/webhook', cmd('/link NOPE'), env);
+    expect(resReal.status).toBe(200);
+    expect(resFake.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const realText = sentText(fetchMock, 0);
+    const fakeText = sentText(fetchMock, 1);
+    expect(fakeText).toBe(realText);
+    expect(realText).toContain('Linking has moved');
+    expect(realText).not.toContain('not found');
+    expect(dbReads).toBe(0);
   });
 });
 
@@ -403,6 +423,35 @@ describe('link writes carry a reverse telegram-chat: key and an audit row', () =
     expect(store.has('telegram-chat:555')).toBe(false);
     const officer = db.prepare("SELECT telegram_chat_id AS cid FROM officers WHERE id = 'o1'").get() as { cid: string | null };
     expect(officer.cid).toBeNull();
+  });
+
+  it('/unlink from the registered admin chat also stops daily summaries — and says so', async () => {
+    const { env, store, db } = makeEnv();
+    db.prepare("INSERT INTO users (id, name, email, role) VALUES ('u-admin', 'Admin Ama', 'admin@ohcs.gov.gh', 'admin')").run();
+    db.prepare("INSERT INTO officers (id, name, email, telegram_chat_id) VALUES ('o1', 'Admin Ama', 'admin@ohcs.gov.gh', '555')").run();
+    store.set('telegram-user:u-admin', '555');
+    store.set('telegram-chat:555', 'u-admin');
+    store.set('telegram-admin-chat-id', '555');
+    const fetchMock = stubTelegramFetch();
+
+    const res = await makeApp().request('/webhook', startUpdate('/unlink'), env);
+    expect(res.status).toBe(200);
+    expect(store.has('telegram-admin-chat-id')).toBe(false);
+    expect(sentText(fetchMock, 0)).toContain('summaries');
+  });
+
+  it('/unlink from a non-admin chat leaves another chat\'s summary registration intact', async () => {
+    const { env, store, db } = makeEnv();
+    db.prepare("INSERT INTO users (id, name, email, role) VALUES ('u1', 'Ama Serwaa', 'ama@ohcs.gov.gh', 'staff')").run();
+    db.prepare("INSERT INTO officers (id, name, email, telegram_chat_id) VALUES ('o1', 'Ama Serwaa', 'ama@ohcs.gov.gh', '555')").run();
+    store.set('telegram-user:u1', '555');
+    store.set('telegram-chat:555', 'u1');
+    store.set('telegram-admin-chat-id', '777'); // a DIFFERENT chat is registered
+    stubTelegramFetch();
+
+    const res = await makeApp().request('/webhook', startUpdate('/unlink'), env);
+    expect(res.status).toBe(200);
+    expect(store.get('telegram-admin-chat-id')).toBe('777');
   });
 });
 

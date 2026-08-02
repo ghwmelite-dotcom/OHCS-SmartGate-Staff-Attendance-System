@@ -219,8 +219,12 @@ attendanceRoutes.get('/records', async (c) => {
              LEFT JOIN directorates d ON u.directorate_id = d.id
              LEFT JOIN clock_records ci ON ci.user_id = u.id AND ci.type = 'clock_in' AND ${ciDate} = ?
              LEFT JOIN clock_records co ON co.user_id = u.id AND co.type = 'clock_out' AND ${coDate} = ?
-             LEFT JOIN absence_notices a ON a.user_id = u.id
-               AND a.notice_date <= ? AND ? < COALESCE(a.expected_return_date, DATE(a.notice_date, '+1 day'))
+             LEFT JOIN absence_notices a ON a.id = (
+               SELECT a2.id FROM absence_notices a2
+               WHERE a2.user_id = u.id
+                 AND a2.notice_date <= ? AND ? < COALESCE(a2.expected_return_date, DATE(a2.notice_date, '+1 day'))
+               ORDER BY a2.created_at DESC LIMIT 1
+             )
              WHERE ${isPast ? '(u.is_active = 1 OR ci.id IS NOT NULL)' : 'u.is_active = 1'}`;
   const params: unknown[] = [lateAfter, endAt, date, date, date, date];
 
@@ -555,23 +559,37 @@ attendanceRoutes.post('/absence-notice', zValidator('json', absenceNoticeSchema)
     return error(c, 'INVALID_DATE', `Expected return date must be within ${ABSENCE_MAX_RETURN_DAYS} days — use a leave request for longer absences`, 400);
   }
 
-  // One active notice per user per day (upsert, no migration): a same-day
-  // re-submit updates the existing row instead of inserting a duplicate.
-  const existing = await c.env.DB.prepare(
+  // One active notice per user per day (upsert, no migration), race-safe:
+  // UPDATE first; when no row existed, INSERT ... WHERE NOT EXISTS so two
+  // concurrent submits can't both pass a read-then-insert check; if that
+  // INSERT still made 0 changes the concurrent row landed in between — the
+  // row exists now, so UPDATE it. No un-retractable duplicates.
+  const attemptedId = crypto.randomUUID().replace(/-/g, '');
+  let created = false;
+  const upd = await c.env.DB.prepare(
+    'UPDATE absence_notices SET reason = ?, note = ?, expected_return_date = ? WHERE user_id = ? AND notice_date = ?'
+  ).bind(body.reason, body.note, body.expected_return_date, session.userId, today).run();
+  if ((upd.meta?.changes ?? 0) === 0) {
+    const ins = await c.env.DB.prepare(
+      `INSERT INTO absence_notices (id, user_id, reason, note, notice_date, expected_return_date)
+       SELECT ?, ?, ?, ?, ?, ?
+       WHERE NOT EXISTS (SELECT 1 FROM absence_notices WHERE user_id = ? AND notice_date = ?)`
+    ).bind(attemptedId, session.userId, body.reason, body.note, today, body.expected_return_date, session.userId, today).run();
+    if ((ins.meta?.changes ?? 0) > 0) {
+      created = true;
+    } else {
+      // Lost the race — the concurrent insert landed between our two statements.
+      await c.env.DB.prepare(
+        'UPDATE absence_notices SET reason = ?, note = ?, expected_return_date = ? WHERE user_id = ? AND notice_date = ?'
+      ).bind(body.reason, body.note, body.expected_return_date, session.userId, today).run();
+    }
+  }
+
+  // The surviving row's id (the winner's on a lost race) rides the response.
+  const row = await c.env.DB.prepare(
     'SELECT id FROM absence_notices WHERE user_id = ? AND notice_date = ?'
   ).bind(session.userId, today).first<{ id: string }>();
-
-  const id = existing?.id ?? crypto.randomUUID().replace(/-/g, '');
-  if (existing) {
-    await c.env.DB.prepare(
-      'UPDATE absence_notices SET reason = ?, note = ?, expected_return_date = ? WHERE id = ?'
-    ).bind(body.reason, body.note, body.expected_return_date, id).run();
-  } else {
-    await c.env.DB.prepare(
-      `INSERT INTO absence_notices (id, user_id, reason, note, notice_date, expected_return_date)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(id, session.userId, body.reason, body.note, today, body.expected_return_date).run();
-  }
+  const id = row?.id ?? attemptedId;
 
   const notice: AbsenceNoticeInput = {
     id,
@@ -583,12 +601,12 @@ attendanceRoutes.post('/absence-notice', zValidator('json', absenceNoticeSchema)
   };
 
   await recordAudit(c.env, auditActorFromContext(c), {
-    action: existing ? 'absence.update' : 'absence.submit',
+    action: created ? 'absence.submit' : 'absence.update',
     entityType: 'absence_notice',
     entityId: id,
-    summary: existing
-      ? `Updated absence notice: ${body.reason}, back ${body.expected_return_date}`
-      : `Reported absence: ${body.reason}, back ${body.expected_return_date}`,
+    summary: created
+      ? `Reported absence: ${body.reason}, back ${body.expected_return_date}`
+      : `Updated absence notice: ${body.reason}, back ${body.expected_return_date}`,
   });
 
   c.executionCtx.waitUntil(sendAbsenceNoticePush(c.env, notice));

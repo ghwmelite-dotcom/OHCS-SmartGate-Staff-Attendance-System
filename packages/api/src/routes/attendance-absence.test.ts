@@ -91,7 +91,10 @@ function d1(db: SqliteDb) {
   const stmt = (sql: string, params: unknown[]) => ({
     first: async <T = unknown>() => ((db.prepare(sql).get(...params) as T | undefined) ?? null),
     all: async <T = unknown>() => ({ results: db.prepare(sql).all(...params) as T[] }),
-    run: async () => { db.prepare(sql).run(...params); return { success: true }; },
+    run: async () => {
+      const r = db.prepare(sql).run(...params) as { changes: number | bigint };
+      return { success: true, meta: { changes: Number(r.changes) } };
+    },
   });
   return {
     prepare(sql: string) {
@@ -275,6 +278,45 @@ describe('POST /absence-notice — same-day upsert', () => {
     ).all() as Array<{ action: string }>;
     expect(actions.map((a) => a.action)).toEqual(['absence.submit', 'absence.update']);
   });
+
+  it('a raced concurrent submit can never leave two rows (atomic upsert)', async () => {
+    const { env, db } = makeEnv();
+    // Simulate the lost race: the moment the route's first absence_notices
+    // statement completes, a "concurrent winner" row lands — the old
+    // read-then-insert flow then inserted a SECOND row on top of it.
+    let injected = false;
+    const realPrepare = env.DB.prepare.bind(env.DB);
+    env.DB = {
+      prepare(sql: string) {
+        const stmt = realPrepare(sql);
+        const hook = <T>(p: Promise<T>): Promise<T> => p.then((r) => {
+          if (!injected && sql.includes('absence_notices')) {
+            injected = true;
+            db.prepare(
+              "INSERT INTO absence_notices (id, user_id, reason, note, notice_date, expected_return_date) VALUES ('winner', 'u_sub', 'sick', 'Concurrent winner', ?, ?)",
+            ).run(TODAY, BACK);
+          }
+          return r;
+        });
+        const wrap = (s: Record<string, (...a: unknown[]) => unknown>): Record<string, unknown> => ({
+          bind: (...p: unknown[]) => wrap(s.bind!(...p) as Record<string, (...a: unknown[]) => unknown>),
+          first: () => hook(Promise.resolve(s.first!())),
+          all: () => hook(Promise.resolve(s.all!())),
+          run: () => hook(Promise.resolve(s.run!())),
+        });
+        return wrap(stmt as unknown as Record<string, (...a: unknown[]) => unknown>);
+      },
+    } as unknown as Env['DB'];
+
+    const res = await postNotice(env, { reason: 'transport', note: 'Trotro strike', expected_return_date: TOMORROW });
+    expect(res.status).toBe(200);
+
+    const rows = db.prepare('SELECT id, reason, note, expected_return_date FROM absence_notices WHERE user_id = ?').all('u_sub') as Array<Record<string, string>>;
+    expect(rows).toHaveLength(1);
+    // The surviving row carries one coherent submission — the route's update wins last.
+    expect(rows[0]!.reason).toBe('transport');
+    expect(rows[0]!.expected_return_date).toBe(TOMORROW);
+  });
 });
 
 /* ---------- DELETE (retract) ---------- */
@@ -393,6 +435,52 @@ describe('sendAbsenceNoticePush — routing chain', () => {
     const rows = notifs(db);
     expect(rows.map((r) => r.user_id)).toEqual(['u_dir']);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('head-is-submitter WITH a Telegram chat does NOT self-send — falls through to the director', async () => {
+    const { env, db } = makeEnv();
+    // o_selfhead is staff-linked to the submitter (S100) AND has a Telegram chat.
+    db.prepare("UPDATE officers SET telegram_chat_id = 'chat999' WHERE id = 'o_selfhead'").run();
+    db.prepare('UPDATE directorates SET head_officer_id = ? WHERE id = ?').run('o_selfhead', 'dir1');
+    await sendAbsenceNoticePush(env, noticeFor('u_sub'));
+
+    const rows = notifs(db);
+    expect(rows.map((r) => r.user_id)).toEqual(['u_dir']);
+    // No Telegram self-send to the head's own chat, and the submitter is
+    // never a recipient on any channel.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(rows.some((r) => r.user_id === 'u_sub')).toBe(false);
+  });
+
+  it('telegram-only head (no linked user, NOT the submitter) gets the notice on Telegram', async () => {
+    const { env, db } = makeEnv();
+    db.prepare("INSERT INTO officers (id, name, directorate_id, email, staff_id, telegram_chat_id) VALUES ('o_tgonly', 'TG Only Head', 'dir1', null, null, 'chat777')").run();
+    db.prepare('UPDATE directorates SET head_officer_id = ? WHERE id = ?').run('o_tgonly', 'dir1');
+    await sendAbsenceNoticePush(env, noticeFor('u_sub'));
+
+    // Telegram delivered to the head's officer chat, and the chain is
+    // claimed — no fall-through to the director.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    const payload = JSON.parse(init.body) as { chat_id: string; text: string };
+    expect(payload.chat_id).toBe('chat777');
+    expect(payload.text).toContain('Kofi Away');
+    expect(notifs(db).some((r) => r.user_id === 'u_dir')).toBe(false);
+  });
+
+  it('a head name matching TWO active users notifies neither — falls through to the director', async () => {
+    const { env, db } = makeEnv();
+    // Head with no staff_id/email: only the exact-name leg can resolve them,
+    // but two active users share the name (rename attack / innocent collision).
+    db.prepare("INSERT INTO officers (id, name, directorate_id, email, staff_id, telegram_chat_id) VALUES ('o_dup', 'Duplicate Name', 'dir1', null, null, null)").run();
+    db.prepare("INSERT INTO users (id, name, email, staff_id, role, directorate_id) VALUES ('u_dup1', 'Duplicate Name', 'd1@ohcs.gov.gh', 'S500', 'staff', 'dir1')").run();
+    db.prepare("INSERT INTO users (id, name, email, staff_id, role, directorate_id) VALUES ('u_dup2', 'Duplicate Name', 'd2@ohcs.gov.gh', 'S501', 'staff', 'dir1')").run();
+    db.prepare('UPDATE directorates SET head_officer_id = ? WHERE id = ?').run('o_dup', 'dir1');
+    await sendAbsenceNoticePush(env, noticeFor('u_sub'));
+
+    const rows = notifs(db);
+    expect(rows.map((r) => r.user_id)).toEqual(['u_dir']);
+    expect(rows.some((r) => r.user_id === 'u_dup1' || r.user_id === 'u_dup2')).toBe(false);
   });
 
   it('no head and no director in the entity notifies superadmins only', async () => {

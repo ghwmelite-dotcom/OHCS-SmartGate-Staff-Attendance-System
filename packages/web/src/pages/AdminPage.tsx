@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -146,7 +146,6 @@ export function AdminPage() {
 
   // Admin defaults to NSS; superadmin defaults to ?tab= or 'users'.
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
   const initialTab: AdminTab = (() => {
     const fromUrl = searchParams.get('tab') as AdminTab | null;
     const allowed = tabs.map(t => t.value);
@@ -158,30 +157,27 @@ export function AdminPage() {
 
   // If the role can't see the chosen tab, snap to a permitted one
   useEffect(() => {
+    if (!isSuperadmin && !isAdmin) return; // guard below redirects — don't race it
     const allowed = tabs.map(t => t.value);
     if (!allowed.includes(activeTab)) {
       setActiveTab(allowed[0] ?? 'nss');
     }
-  }, [tabs, activeTab]);
+  }, [tabs, activeTab, isSuperadmin, isAdmin]);
 
   // Reflect tab in URL (replace, don't push, to keep history clean)
   useEffect(() => {
+    if (!isSuperadmin && !isAdmin) return;
     const params = new URLSearchParams(searchParams);
     if (params.get('tab') !== activeTab) {
       params.set('tab', activeTab);
       setSearchParams(params, { replace: true });
     }
-  }, [activeTab, searchParams, setSearchParams]);
+  }, [activeTab, searchParams, setSearchParams, isSuperadmin, isAdmin]);
 
   // Hard-block users who shouldn't be here at all (Sidebar already hides the
-  // link, but a direct URL can still reach the route).
-  useEffect(() => {
-    if (!isSuperadmin && !isAdmin) {
-      navigate('/', { replace: true });
-    }
-  }, [isSuperadmin, isAdmin, navigate]);
-
-  if (!isSuperadmin && !isAdmin) return null;
+  // link, but a direct URL can still reach the route). Render-time redirect —
+  // an effect would race the tab effects above and strand a blank page.
+  if (!isSuperadmin && !isAdmin) return <Navigate to="/" replace />;
 
   return (
     <div className="space-y-6">

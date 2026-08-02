@@ -56,8 +56,10 @@ function newDb(): SqliteDb {
       id TEXT PRIMARY KEY, first_name TEXT NOT NULL, last_name TEXT NOT NULL,
       phone TEXT, email TEXT, organisation TEXT, photo_url TEXT, flag TEXT,
       total_visits INTEGER NOT NULL DEFAULT 0, last_visit_at TEXT,
+      idempotency_key TEXT,
       created_at TEXT, updated_at TEXT
     );
+    CREATE UNIQUE INDEX idx_visitors_idem_unique ON visitors(idempotency_key) WHERE idempotency_key IS NOT NULL;
     CREATE TABLE visits (
       id TEXT PRIMARY KEY, visitor_id TEXT NOT NULL, host_officer_id TEXT,
       host_name_manual TEXT, directorate_id TEXT, purpose_raw TEXT, purpose_category TEXT,

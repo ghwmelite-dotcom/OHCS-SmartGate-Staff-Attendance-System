@@ -1,16 +1,13 @@
-import { z } from 'zod';
 import type { Context } from 'hono';
-import type { Env, SessionData } from '../types';
+import type { Env } from '../types';
 import {
-  generateLinkCode, consumeLinkCode, sendTelegramMessage, parseCommand,
+  sendTelegramMessage, parseCommand,
   answerCallbackQuery, editMessageText, editMessageCaption, parseArrivalCallback,
   ARRIVAL_ACTIONS, type ArrivalAction,
   AVAILABILITY_STATUSES, type AvailabilityStatus,
 } from '../services/telegram';
-import { auditActorFromContext, recordAudit, systemActor } from '../services/audit';
+import { recordAudit, systemActor } from '../services/audit';
 import { timingSafeEqualStrings } from '../services/auth';
-import { success, error } from '../lib/response';
-import { escapeHtml } from '../lib/html';
 
 interface ArrivalCallbackQuery {
   id: string;
@@ -60,7 +57,7 @@ export async function telegramWebhook(c: Context<{ Bindings: Env }>) {
   switch (cmd.command) {
     case 'start':  await handleStart(c, chatId, cmd.args); break;
     case 'help':   await handleHelp(c, chatId); break;
-    case 'link':   await handleLink(c, chatId, cmd.args); break;
+    case 'link':   await handleLink(c, chatId); break;
     case 'status': await handleStatus(c, chatId); break;
     case 'unlink': await handleUnlink(c, chatId); break;
     case 'admin':  await handleAdmin(c, chatId); break;
@@ -310,18 +307,9 @@ async function handleHelp(c: Ctx, chatId: number): Promise<void> {
 // proof (security audit, 2026-08-01) — removed. Linking now requires a
 // one-time token: officers via the admin dashboard (officer-link / deep-link
 // flow), staff via the attendance app for clock reminders. This handler only
-// explains that; it performs NO writes.
-async function handleLink(c: Ctx, chatId: number, args: string): Promise<void> {
-  const staffId = args.trim().toUpperCase();
-  if (!staffId) {
-    await sendTelegramMessage({ chatId: String(chatId), text: `Please include your Staff ID.\n\nExample: <code>/link 1334685</code>`, token: c.env.TELEGRAM_BOT_TOKEN });
-    return;
-  }
-  const user = await c.env.DB.prepare('SELECT id FROM users WHERE staff_id = ?').bind(staffId).first<{ id: string }>();
-  if (!user) {
-    await sendTelegramMessage({ chatId: String(chatId), text: `❌ Staff ID <code>${escapeHtml(staffId)}</code> not found. Check your ID and try again.`, token: c.env.TELEGRAM_BOT_TOKEN });
-    return;
-  }
+// explains that; it performs NO writes and NO lookups — the reply is uniform
+// whether or not the supplied ID exists (no staff-ID enumeration oracle).
+async function handleLink(c: Ctx, chatId: number): Promise<void> {
   await sendTelegramMessage({
     chatId: String(chatId),
     text: [
@@ -356,9 +344,13 @@ async function handleUnlink(c: Ctx, chatId: number): Promise<void> {
   // Reverse lookup key always belongs to this chat — drop it regardless of
   // whether an officer record is mirrored.
   await c.env.KV.delete(`telegram-chat:${chatId}`);
+  // An admin who unlinks must not strand the daily-summary registration on a
+  // chat they no longer control — clear it too.
+  const adminCleared = (await c.env.KV.get('telegram-admin-chat-id')) === String(chatId);
+  if (adminCleared) await c.env.KV.delete('telegram-admin-chat-id');
   const rows = (await c.env.DB.prepare('SELECT id, email, name FROM officers WHERE telegram_chat_id = ?').bind(String(chatId)).all<{ id: string; email: string | null; name: string }>()).results ?? [];
   if (rows.length === 0) {
-    await sendTelegramMessage({ chatId: String(chatId), text: `You aren’t linked, so there’s nothing to unlink.`, token: c.env.TELEGRAM_BOT_TOKEN });
+    await sendTelegramMessage({ chatId: String(chatId), text: `You aren’t linked, so there’s nothing to unlink.${adminCleared ? ' Daily summaries also stopped.' : ''}`, token: c.env.TELEGRAM_BOT_TOKEN });
     return;
   }
   for (const o of rows) {
@@ -369,7 +361,7 @@ async function handleUnlink(c: Ctx, chatId: number): Promise<void> {
     }
   }
   await c.env.DB.prepare('UPDATE officers SET telegram_chat_id = NULL WHERE telegram_chat_id = ?').bind(String(chatId)).run();
-  await sendTelegramMessage({ chatId: String(chatId), text: `Done — you’ll no longer receive visitor alerts. Re-link any time with a fresh one-time link from the dashboard or attendance app.`, token: c.env.TELEGRAM_BOT_TOKEN });
+  await sendTelegramMessage({ chatId: String(chatId), text: `Done — you’ll no longer receive visitor alerts.${adminCleared ? ' Daily summaries also stopped.' : ''} Re-link any time with a fresh one-time link from the dashboard or attendance app.`, token: c.env.TELEGRAM_BOT_TOKEN });
 }
 
 // Daily-summary registration is admin-only (security audit, 2026-08-01):
@@ -429,48 +421,4 @@ async function handleAvailability(c: Ctx, chatId: number, status: AvailabilitySt
       : `${emoji} Availability set to <b>${label}</b>. Send /available when you're back.`,
     token: c.env.TELEGRAM_BOT_TOKEN,
   });
-}
-
-// Protected — link Telegram account to officer
-const linkSchema = z.object({ code: z.string().min(1) });
-
-export async function telegramLinkRoute(c: Context<{ Bindings: Env; Variables: { session: SessionData } }>) {
-  const body = await c.req.json();
-  const parsed = linkSchema.safeParse(body);
-  if (!parsed.success) {
-    return error(c, 'VALIDATION_ERROR', 'Missing link code', 400);
-  }
-
-  const { code } = parsed.data;
-  const session = c.get('session');
-
-  const chatId = await consumeLinkCode(code, c.env);
-  if (!chatId) {
-    return error(c, 'INVALID_CODE', 'Link code is invalid or expired', 400);
-  }
-
-  const officer = await c.env.DB.prepare(
-    'SELECT id FROM officers WHERE email = ?'
-  ).bind(session.email).first<{ id: string }>();
-
-  if (!officer) {
-    return error(c, 'NOT_OFFICER', 'No officer record found for your account', 404);
-  }
-
-  await c.env.DB.prepare(
-    'UPDATE officers SET telegram_chat_id = ? WHERE id = ?'
-  ).bind(chatId, officer.id).run();
-
-  await recordAudit(c.env, auditActorFromContext(c), {
-    action: 'telegram.link', entityType: 'officer', entityId: officer.id,
-    summary: `Officer Telegram chat linked via link code (chat ${chatId})`,
-  });
-
-  await sendTelegramMessage({
-    chatId,
-    text: `✅ Account linked! You'll now receive visitor arrival notifications for <b>${session.name}</b>.`,
-    token: c.env.TELEGRAM_BOT_TOKEN,
-  });
-
-  return success(c, { message: 'Telegram account linked successfully' });
 }

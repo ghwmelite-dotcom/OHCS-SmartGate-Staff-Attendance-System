@@ -55,8 +55,8 @@ async function sendDailyReport(env: Env): Promise<void> {
     ).bind(today, lateAfter).first<{ c: number }>(),
     env.DB.prepare(
       `SELECT COUNT(DISTINCT user_id) as c FROM absence_notices
-     WHERE ? BETWEEN notice_date AND COALESCE(expected_return_date, notice_date)`
-    ).bind(today).first<{ c: number }>(),
+     WHERE ? >= notice_date AND ? < COALESCE(expected_return_date, date(notice_date, '+1 day'))`
+    ).bind(today, today).first<{ c: number }>(),
   ]);
 
   const total = totalStaff?.c ?? 0;

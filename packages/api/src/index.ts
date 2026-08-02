@@ -7,7 +7,7 @@ import { visitRoutes } from './routes/visits';
 import { officerRoutes } from './routes/officers';
 import { directorateRoutes } from './routes/directorates';
 import { notificationRoutes } from './routes/notifications';
-import { telegramWebhook, telegramAttendanceWebhook, telegramLinkRoute } from './routes/telegram';
+import { telegramWebhook, telegramAttendanceWebhook } from './routes/telegram';
 import { badgeRoutes, serveBadgePage } from './routes/badges';
 import { kioskRoutes } from './routes/kiosk';
 import { presenceRoutes } from './routes/presence';
@@ -140,7 +140,6 @@ app.route('/api/auth/webauthn', authWebAuthnAuthedRoutes);
 app.route('/api/clock', clockRoutes);
 app.route('/api/attendance', attendanceRoutes);
 app.route('/api/photos', photoRoutes);
-app.post('/api/telegram/link', telegramLinkRoute);
 
 // Manual trigger for daily summary (superadmin only)
 app.post('/api/admin/send-daily-summary', async (c) => {
@@ -183,7 +182,13 @@ export default {
           break;
         case '0 9 1 * *':
           try {
-            await sendDailySummaryFn(env);
+            // Skip the daily summary on Jan 1 — Quartz weekday numbering means
+            // the yearly cron ('0 9 1 1 *') also fires Jan 1 09:00 and sends
+            // it; firing here too would double-send. Monthly report still runs.
+            const now = new Date();
+            if (!(now.getUTCMonth() === 0 && now.getUTCDate() === 1)) {
+              await sendDailySummaryFn(env);
+            }
             await sendMonthlyReportReady(env);
           } catch (err) {
             console.error(`[scheduled] monthly-summary failed: ${err instanceof Error ? err.message : String(err)}`);

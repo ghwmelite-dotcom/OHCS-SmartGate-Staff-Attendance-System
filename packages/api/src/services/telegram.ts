@@ -267,20 +267,6 @@ export async function setBotCommands(env: { TELEGRAM_BOT_TOKEN: string }): Promi
   }
 }
 
-export async function generateLinkCode(chatId: string, env: Env): Promise<string> {
-  const code = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
-  await env.KV.put(`telegram-link:${code}`, chatId, { expirationTtl: 600 });
-  return code;
-}
-
-export async function consumeLinkCode(code: string, env: Env): Promise<string | null> {
-  const chatId = await env.KV.get(`telegram-link:${code}`);
-  if (chatId) {
-    await env.KV.delete(`telegram-link:${code}`);
-  }
-  return chatId;
-}
-
 
 /* ---- Arrival thread tracking (visit-ended edits) ----
    Every Telegram arrival message sent for a visit is recorded in KV so a

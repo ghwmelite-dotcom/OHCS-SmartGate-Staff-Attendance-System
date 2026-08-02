@@ -66,7 +66,8 @@ const createUserSchema = z.object({
   staff_id: z.string().min(1).max(20).trim(),
   pin: z.string().length(4).regex(/^\d{4}$/, 'PIN must be 4 digits'),
   role: z.enum(['superadmin', 'admin', 'receptionist', 'it', 'director', 'staff']),
-  // Display-tier role label — rides on `role` (client_service ⇒ role='admin').
+  // Display-tier role label — rides on `role` (client_service ⇒ role='receptionist',
+  // reception parity per 0f7f3dc).
   display_role: z.enum(['client_service', 'chief_director', 'head_of_service']).nullish(),
   grade: z.string().max(100).optional().or(z.literal('')),
   phone: z.string().max(20).optional().or(z.literal('')),

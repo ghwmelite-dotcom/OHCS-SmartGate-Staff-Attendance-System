@@ -15,7 +15,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Hono } from 'hono';
-import { appointmentsPublicRoutes } from './appointments-public';
+import { appointmentsPublicRoutes, findOrCreateAppointmentVisitor } from './appointments-public';
 import { checkOutById } from '../services/check-out';
 import type { Env } from '../types';
 
@@ -62,8 +62,10 @@ function newDb(): SqliteDb {
       id TEXT PRIMARY KEY, first_name TEXT NOT NULL, last_name TEXT NOT NULL,
       phone TEXT, email TEXT, organisation TEXT, photo_url TEXT, flag TEXT,
       total_visits INTEGER NOT NULL DEFAULT 0, last_visit_at TEXT,
+      idempotency_key TEXT,
       created_at TEXT, updated_at TEXT
     );
+    CREATE UNIQUE INDEX idx_visitors_idem_unique ON visitors(idempotency_key) WHERE idempotency_key IS NOT NULL;
     CREATE TABLE visits (
       id TEXT PRIMARY KEY, visitor_id TEXT NOT NULL, host_officer_id TEXT,
       host_name_manual TEXT, directorate_id TEXT, purpose_raw TEXT, purpose_category TEXT,
@@ -88,7 +90,10 @@ function d1(db: SqliteDb) {
       const bound = (...params: unknown[]) => ({
         first: async <T = unknown>() => ((db.prepare(sql).get(...params) as T | undefined) ?? null),
         all: async <T = unknown>() => ({ results: db.prepare(sql).all(...params) as T[] }),
-        run: async () => { db.prepare(sql).run(...params); return { success: true }; },
+        run: async () => {
+          const r = db.prepare(sql).run(...params) as { changes: number | bigint };
+          return { success: true, meta: { changes: Number(r.changes) } };
+        },
       });
       return { bind: bound, ...bound() };
     },
@@ -349,6 +354,37 @@ describe('POST /appointments-public/arrive — joins the visits pipeline', () =>
     expect(fetchMock2).not.toHaveBeenCalled();
   });
 
+  it('two CONCURRENT /arrive calls fan out to approvers exactly once (first writer wins)', async () => {
+    const { env, db } = makeEnv();
+    seedOfficer(db);
+    seedAppointment(db);
+    const fetchMock = stubTelegramFetch();
+    const { ctx: ctx1, pending: p1 } = makeExecCtx();
+    const { ctx: ctx2, pending: p2 } = makeExecCtx();
+
+    // Both requests pass the status check before either flips the appointment —
+    // the guarded UPDATE is what decides who notifies.
+    const app = makeApp();
+    const body = JSON.stringify({ reference_code: 'ABC234' });
+    const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body };
+    const [res1, res2] = await Promise.all([
+      app.request('/appt/arrive', init, env, ctx1),
+      app.request('/appt/arrive', init, env, ctx2),
+    ]);
+    await Promise.allSettled([...p1, ...p2]);
+
+    const statuses = [res1.status, res2.status].sort();
+    expect(statuses).toEqual([200, 422]);
+    // The loser gets the already-completed shape — no 500, no partial fan-out.
+    const loser = res1.status === 422 ? res1 : res2;
+    expect(((await loser.json()) as { error?: { code?: string } }).error?.code).toBe('APPT_ALREADY_COMPLETED');
+
+    const notifs = db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE type = 'appointment_arrived'").get() as { n: number };
+    expect(notifs.n).toBe(1);
+    const toApprover = sentPayloads(fetchMock).filter((p) => String(p.chat_id) === '555');
+    expect(toApprover).toHaveLength(1);
+  });
+
   it('the evacuation roll semantics (status = checked_in, joined to visitors) include the row', async () => {
     const { res, db, pending } = await doArrive();
     expect(res.status).toBe(200);
@@ -406,5 +442,32 @@ describe('POST /appointments-public/arrive — joins the visits pipeline', () =>
     // No longer on the evacuation roll / active list.
     const stillActive = db.prepare("SELECT COUNT(*) AS n FROM visits WHERE status = 'checked_in'").get() as { n: number };
     expect(stillActive.n).toBe(0);
+  });
+});
+
+/* ---------- findOrCreateAppointmentVisitor — duplicate-insert race ---------- */
+
+describe('findOrCreateAppointmentVisitor — raced concurrent creates dedupe on the appointment key', () => {
+  it('two concurrent calls for the same appointment create ONE visitor row and both return it', async () => {
+    const { env, db } = makeEnv();
+    const appt = {
+      visitor_name: 'Ama Serwaa',
+      visitor_phone: '0244123456',
+      visitor_email: null,
+      organisation: null,
+    };
+
+    // Both phone lookups resolve (no match) before either INSERT lands — the
+    // deterministic idempotency key is what stops the second row.
+    const [id1, id2] = await Promise.all([
+      findOrCreateAppointmentVisitor(env, appt, 'a1'),
+      findOrCreateAppointmentVisitor(env, appt, 'a1'),
+    ]);
+
+    expect(id1).toBe(id2);
+    const rows = db.prepare('SELECT id, idempotency_key FROM visitors').all() as Array<{ id: string; idempotency_key: string | null }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe(id1);
+    expect(rows[0]!.idempotency_key).toBe('appt-visitor:a1');
   });
 });

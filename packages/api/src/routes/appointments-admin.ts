@@ -360,7 +360,8 @@ appointmentsAdminRoutes.patch('/:id/complete', async (c) => {
   // through the kiosk arrival flow, so create the same visits row — they
   // appear in /visits/active, the visit log, reports, the SLA cron, the
   // checkout sweep and the evacuation roll, and can be checked out like any
-  // walk-in. Source is 'staff' (a desk action by reception/admin;
+  // walk-in. Source is 'staff' (a desk action by admin/superadmin —
+  // canActOnAppointment blocks reception from completing;
   // check_in_source's union is 'staff'|'kiosk' and 'kiosk' would
   // misattribute a front-desk completion). The deterministic idempotency
   // key dedupes retried completions at the DB level; the explicit
@@ -375,7 +376,7 @@ appointmentsAdminRoutes.patch('/:id/complete', async (c) => {
 
   let visitId = existingVisit?.id ?? null;
   if (!visitId) {
-    const visitorId = await findOrCreateAppointmentVisitor(c.env, appt);
+    const visitorId = await findOrCreateAppointmentVisitor(c.env, appt, appt.id);
     const checkIn = await performCheckIn(c.env, c.executionCtx, {
       visitor_id: visitorId,
       host_officer_id: appt.officer_id,
