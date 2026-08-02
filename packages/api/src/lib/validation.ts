@@ -31,6 +31,9 @@ export const KioskCreateVisitorSchema = z.object({
   organisation: z.string().max(200).optional().or(z.literal('')),
   id_type: idTypeSchema.optional(),
   id_number: z.string().max(50).optional().or(z.literal('')),
+  // Stable key minted by the kiosk per visitor flow; retries reuse it so a
+  // lost response can't double-register the visitor (dedupe in kiosk.ts).
+  idempotency_key: z.string().min(1).max(100).optional(),
 });
 
 // Delegation mode (spec 2026-07-19-delegation-and-watchlist-design §A):
@@ -46,6 +49,9 @@ export const CheckInSchema = z.object({
   purpose_category: z.string().optional(),
   notes: z.string().max(500).optional(),
   idempotency_key: z.string().min(1).max(100).optional(),
+  // Client capture time (offline visit-queue replays). Validated server-side
+  // ([now-48h, now+5min], else ignored); honored as check_in_at.
+  captured_at: z.string().max(40).optional(),
   party_size: z.number().int().min(1).max(20).default(1),
   party_names: z.array(z.string().trim().max(80)).max(19).optional()
     .transform((arr) => (arr ? arr.filter((s) => s.length > 0) : arr)),

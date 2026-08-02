@@ -84,8 +84,11 @@ describe('survey wiring guards', () => {
     expect(kioskSrc).toContain('consumeSurveyToken(c.env, body.token)');
   });
 
-  it('registers the visitor-surveys migration LAST', () => {
+  it('registers the visitor-surveys migration before only later additive migrations', () => {
     const idx = readFileSync(join(ROUTES_DIR, '../db/migrations-index.ts'), 'utf8');
-    expect(idx).toMatch(/\{ filename: 'migration-visitor-surveys\.sql', sql: visitorSurveys \},\s*\];/);
+    // The additive-only convention puts new migrations LAST; visitor-surveys
+    // held that slot until migration-visitors-idempotency.sql (2026-08-01
+    // VMS audit fixes, Commit D) appended after it.
+    expect(idx).toMatch(/\{ filename: 'migration-visitor-surveys\.sql', sql: visitorSurveys \},\s*\{ filename: 'migration-visitors-idempotency\.sql', sql: visitorsIdempotency \},\s*\];/);
   });
 });
