@@ -246,7 +246,11 @@ export const DOC_SECTIONS: DocSection[] = [
         name: 'Appointment arrival',
         status: 'live',
         summary: 'Reference code typed or QR-scanned — both converge on the same lookup, then a confirm screen with directions.',
-        details: ['The confirmed-appointment email carries an email-safe HTML-table QR of the ref code'],
+        details: [
+          'The confirmed-appointment email carries an email-safe HTML-table QR of the ref code',
+          'Arrival joins the visits pipeline: a real visits row (source kiosk, category scheduled_appointment) — visible in active visits, visit log, reports, SLA sweep and the evacuation roll, checkout-able via badge/PIN/reception',
+          'Host gets the canonical arrival alert with Coming-down / Waiting-area buttons; the kiosk shows the badge QR + checkout PIN',
+        ],
       },
     ],
   },

@@ -132,7 +132,10 @@ export async function performCheckIn(
 
   const visit = await env.DB.prepare(SELECT_VISIT_WITH_JOINS).bind(visitId).first();
 
-  if (params.purpose_raw) {
+  // AI classification only runs when the caller didn't pin a category —
+  // appointment arrivals carry purpose_category='scheduled_appointment' and
+  // must not be reclassified into something else.
+  if (params.purpose_raw && !params.purpose_category) {
     ctx.waitUntil(classifyAndUpdate(visitId, params.purpose_raw, params.directorate_id || null, env));
   }
 

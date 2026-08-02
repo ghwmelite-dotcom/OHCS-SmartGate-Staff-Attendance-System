@@ -6,6 +6,8 @@ import { success, created, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
 import { escapeHtml } from '../lib/html';
 import { sendTelegramMessage } from '../services/telegram';
+import { performCheckIn } from '../services/check-in';
+import { normalizeKioskPhone, KIOSK_USER_ID } from './kiosk';
 
 export const appointmentsPublicRoutes = new Hono<{ Bindings: Env }>();
 
@@ -91,9 +93,50 @@ interface AppointmentWithOfficer extends AppointmentRow {
   officer_name: string;
   officer_title: string | null;
   officer_telegram_chat_id: string | null;
+  directorate_id: string;
   directorate_name: string;
   directorate_floor: string | null;
   directorate_wing: string | null;
+}
+
+// Split a free-text appointment visitor_name into the visitors table's
+// NOT NULL first/last columns; a single-word name doubles as both.
+export function splitVisitorName(full: string): { first: string; last: string } {
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0] ?? full.trim();
+  return { first, last: parts.slice(1).join(' ') || first };
+}
+
+// Find-or-create the visitors row for an arriving appointment. Appointments
+// carry free-text name/phone (no visitor FK), so we mirror the kiosk's
+// find-by-phone behavior: same normalizeKioskPhone canonical forms and the
+// same REPLACE-chain match, WITHOUT the visitor-by-phone endpoint's
+// completed-visit gate (that gate is an anti-enumeration oracle guard; here
+// the reference code already proves the booking). Non-Ghana numbers fall
+// back to an exact-string match. A new visitor is created only when no row
+// matches, so repeat appointment visitors accumulate one history.
+async function findOrCreateAppointmentVisitor(
+  env: Env,
+  appt: AppointmentWithOfficer,
+): Promise<string> {
+  const stripped = `REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', '')`;
+  const forms = normalizeKioskPhone(appt.visitor_phone);
+  const found = forms
+    ? await env.DB.prepare(
+        `SELECT id FROM visitors WHERE ${stripped} IN (?, ?) ORDER BY last_visit_at DESC LIMIT 1`
+      ).bind(forms.local, forms.intl).first<{ id: string }>()
+    : await env.DB.prepare(
+        `SELECT id FROM visitors WHERE ${stripped} = ? LIMIT 1`
+      ).bind(appt.visitor_phone.trim()).first<{ id: string }>();
+  if (found) return found.id;
+
+  const { first, last } = splitVisitorName(appt.visitor_name);
+  const id = crypto.randomUUID().replace(/-/g, '');
+  await env.DB.prepare(
+    `INSERT INTO visitors (id, first_name, last_name, phone, email, organisation)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(id, first, last, appt.visitor_phone, appt.visitor_email ?? null, appt.organisation ?? null).run();
+  return id;
 }
 
 // Slim projection for the PUBLIC ref lookup — display fields only, no
@@ -380,7 +423,7 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
   const appointment = await c.env.DB.prepare(
     `SELECT a.*, o.name as officer_name, o.title as officer_title,
             o.telegram_chat_id as officer_telegram_chat_id,
-            d.name as directorate_name
+            d.id as directorate_id, d.name as directorate_name
      FROM appointments a
      JOIN officers o ON o.id = a.officer_id
      JOIN directorates d ON d.id = o.directorate_id
@@ -408,7 +451,33 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
     return error(c, 'APPT_WRONG_DATE', `This appointment is scheduled for ${appointment.appointment_date}, not today`, 422);
   }
 
-  // 4. Update status to completed
+  // 4. Join the visits pipeline (Commit F, 2026-08-01): create the visits row
+  // through the same performCheckIn service the kiosk walk-in path uses, so
+  // the appointment visitor appears in /visits/active, the visit log,
+  // reports, the SLA cron, the checkout sweep and the evacuation roll — and
+  // can be checked out via badge/PIN/reception like any walk-in. Source is
+  // 'kiosk': the arrival happens at the kiosk (check_in_source has no CHECK
+  // constraint; 'staff'/'kiosk' are the existing values). The deterministic
+  // idempotency key dedupes any raced/retried arrival at the DB level
+  // (idx_visits_idem_unique) even if the status guard above is beaten.
+  // check_in.ts skips AI classification because the category is pinned.
+  const visitorId = await findOrCreateAppointmentVisitor(c.env, appointment);
+  const checkIn = await performCheckIn(c.env, c.executionCtx, {
+    visitor_id: visitorId,
+    host_officer_id: appointment.officer_id,
+    directorate_id: appointment.directorate_id,
+    purpose_raw: appointment.purpose,
+    purpose_category: 'scheduled_appointment',
+    idempotency_key: `appt-arrive:${appointment.id}`,
+    created_by: KIOSK_USER_ID,
+    check_in_source: 'kiosk',
+  });
+  if (!checkIn.ok) {
+    return error(c, 'INTERNAL_ERROR', 'Could not register the arrival. Please see reception.', 500);
+  }
+
+  // 5. Update status to completed — the appointment stays the booking record;
+  // the visits row is the arrival record.
   await c.env.DB.prepare(
     `UPDATE appointments
      SET status = 'completed', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
@@ -419,18 +488,11 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
   const arrivalBody = `${appointment.visitor_name} has arrived for their appointment with ${appointment.officer_name} at ${appointment.time_slot}`;
   const arrivalBodyTg = `${escapeHtml(appointment.visitor_name)} has arrived for their appointment with ${escapeHtml(appointment.officer_name)} at ${escapeHtml(appointment.time_slot)}`;
 
-  // 5a. Telegram: notify the officer directly
-  if (appointment.officer_telegram_chat_id) {
-    try {
-      await sendTelegramMessage({
-        chatId: appointment.officer_telegram_chat_id,
-        text: `🏢 Visitor Arrived\n${escapeHtml(appointment.visitor_name)} is here for your ${escapeHtml(appointment.time_slot)} appointment`,
-        token: c.env.TELEGRAM_BOT_TOKEN,
-      });
-    } catch { /* non-fatal */ }
-  }
-
-  // 5b. Notify approvers (in-app + Telegram) — non-fatal
+  // 6. Host arrival alert: fired by performCheckIn through the canonical
+  // notifyOnCheckIn fanout (same Coming-down/Waiting-area buttons walk-ins
+  // produce) — the old ad-hoc officer text here was removed so the host is
+  // never double-notified. Approvers below are a distinct audience (the
+  // appointment's approval chain), so their lifecycle notification stays.
   try {
     const approvers = await c.env.DB.prepare(
       `SELECT aa.user_id, u.telegram_chat_id
@@ -458,11 +520,15 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
     }
   } catch { /* non-fatal: appointment_approvers table may not exist yet */ }
 
+  // The created visit rides the response (same shape the kiosk walk-in
+  // check-in returns) so the kiosk can show the badge QR + checkout PIN —
+  // the appointment visitor's self-checkout path.
   return success(c, {
     ok: true,
     visitor_name: appointment.visitor_name,
     officer_name: appointment.officer_name,
     directorate_name: appointment.directorate_name,
     time_slot: appointment.time_slot,
+    visit: checkIn.visit,
   });
 });

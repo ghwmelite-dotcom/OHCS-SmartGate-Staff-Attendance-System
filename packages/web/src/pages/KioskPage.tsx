@@ -93,6 +93,8 @@ export function KioskPage() {
 
   const [apptRef, setApptRef] = useState('');
   const [apptData, setApptData] = useState<AppointmentLookup | null>(null);
+  // The visit /arrive creates (badge QR + checkout PIN for self-checkout).
+  const [apptVisit, setApptVisit] = useState<KioskVisit | null>(null);
   const [apptLoading, setApptLoading] = useState(false);
   const [apptError, setApptError] = useState('');
 
@@ -228,6 +230,7 @@ export function KioskPage() {
     checkInKeyRef.current = null;
     setApptRef('');
     setApptData(null);
+    setApptVisit(null);
     setApptLoading(false);
     setApptError('');
     setReturningPhone('');
@@ -1026,7 +1029,7 @@ export function KioskPage() {
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ reference_code: apptData.reference_code }),
                     });
-                    const json = await res.json() as { data?: unknown; error?: { code?: string; message?: string } };
+                    const json = await res.json() as { data?: { visit?: KioskVisit }; error?: { code?: string; message?: string } };
                     if (!res.ok) {
                       if (json.error?.code === 'APPT_WRONG_DATE') {
                         setApptError('Your appointment is not scheduled for today.');
@@ -1034,6 +1037,7 @@ export function KioskPage() {
                         setApptError(json.error?.message ?? 'Could not confirm arrival. Please see reception.');
                       }
                     } else {
+                      setApptVisit(json.data?.visit ?? null);
                       setMode('appointment-done');
                     }
                   } catch {
@@ -1060,7 +1064,7 @@ export function KioskPage() {
         )}
 
         {mode === 'appointment-done' && apptData && (
-          <AppointmentDoneScreen apptData={apptData} onReset={resetAll} />
+          <AppointmentDoneScreen apptData={apptData} visit={apptVisit} onReset={resetAll} />
         )}
       </div>
     </div>
@@ -1090,11 +1094,15 @@ function KioskBadgeQr({ badgeCode }: { badgeCode: string }) {
   return <canvas ref={canvasRef} className="mx-auto rounded-lg" />;
 }
 
-function AppointmentDoneScreen({ apptData, onReset }: { apptData: AppointmentLookup; onReset: () => void }) {
+function AppointmentDoneScreen({ apptData, visit, onReset }: { apptData: AppointmentLookup; visit: KioskVisit | null; onReset: () => void }) {
+  // The arrive response carries the created visit — show the badge QR +
+  // checkout PIN (the appointment visitor's self-checkout path, same as the
+  // walk-in success screen). Longer dwell when there's a badge to photograph.
+  const hasBadge = Boolean(visit?.badge_code);
   useEffect(() => {
-    const timer = setTimeout(onReset, 10_000);
+    const timer = setTimeout(onReset, hasBadge ? 30_000 : 10_000);
     return () => clearTimeout(timer);
-  }, [onReset]);
+  }, [onReset, hasBadge]);
 
   return (
     <div className="mt-6 text-center space-y-5">
@@ -1113,6 +1121,19 @@ function AppointmentDoneScreen({ apptData, onReset }: { apptData: AppointmentLoo
           )}.
         </p>
       </div>
+      {visit?.badge_code && (
+        <div className="bg-surface rounded-2xl border border-border shadow-sm p-5 space-y-3">
+          <p className="text-sm text-muted">Scan the QR code or photograph your visit details to check out later</p>
+          <KioskBadgeQr badgeCode={visit.badge_code} />
+          <p className="text-sm font-mono font-bold text-accent">{visit.badge_code}</p>
+          {visit.checkout_pin && (
+            <div className="border-t border-border pt-3 space-y-1">
+              <p className="text-xs text-muted">No phone? Use this PIN to check out at the kiosk</p>
+              <p className="text-3xl font-mono font-bold tracking-[0.25em] text-foreground">{visit.checkout_pin}</p>
+            </div>
+          )}
+        </div>
+      )}
       <p className="text-xs text-muted">A member of staff will attend to you shortly.</p>
       <button
         type="button"

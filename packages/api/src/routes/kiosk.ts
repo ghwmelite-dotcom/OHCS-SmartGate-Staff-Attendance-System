@@ -22,7 +22,9 @@ import { devLog } from '../lib/log';
 
 export const kioskRoutes = new Hono<{ Bindings: Env }>();
 
-const KIOSK_USER_ID = 'user_kiosk';
+// Exported for the appointment-arrival check-in (appointments-public /arrive
+// joins the visits pipeline as a kiosk-sourced arrival).
+export const KIOSK_USER_ID = 'user_kiosk';
 const MAX_PHOTO_BYTES = 500_000;
 
 // The shape persisted onto visits.id_photo_check — an IdCheckVerdict plus an
