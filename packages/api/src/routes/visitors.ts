@@ -25,7 +25,9 @@ visitorRoutes.get('/', zValidator('query', searchSchema), async (c) => {
   const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
   if (blocked) return blocked;
   const { q, limit, cursor } = c.req.valid('query');
-  const dir = await resolveDirectorateScope(c);
+  // Visitor IDENTITIES are visible to all five roles (product decision
+  // 2026-08-03): directors get the same unscoped list as reception. Visit
+  // DATA stays scoped elsewhere (visit log, detail history, reports).
   let sql = `SELECT ${VISITOR_COLUMNS} FROM visitors`;
   const params: unknown[] = [];
   const conditions: string[] = [];
@@ -34,11 +36,6 @@ visitorRoutes.get('/', zValidator('query', searchSchema), async (c) => {
     conditions.push('(first_name LIKE ? OR last_name LIKE ? OR phone LIKE ? OR organisation LIKE ?)');
     const pattern = `%${q}%`;
     params.push(pattern, pattern, pattern, pattern);
-  }
-
-  if (dir !== null) {
-    conditions.push('id IN (SELECT visitor_id FROM visits WHERE directorate_id = ?)');
-    params.push(dir);
   }
 
   if (cursor) {
@@ -70,14 +67,9 @@ visitorRoutes.get('/:id', async (c) => {
   const visitor = await c.env.DB.prepare(`SELECT ${VISITOR_COLUMNS} FROM visitors WHERE id = ?`).bind(id).first();
   if (!visitor) return notFound(c, 'Visitor');
 
-  // Director isolation: only surface a visitor (and their PII) when that
-  // visitor has at least one visit to the director's own directorate.
-  if (dir !== null) {
-    const inScope = await c.env.DB.prepare(
-      'SELECT 1 FROM visits WHERE visitor_id = ? AND directorate_id = ? LIMIT 1'
-    ).bind(id, dir).first();
-    if (!inScope) return notFound(c, 'Visitor');
-  }
+  // Visitor identity is visible to directors regardless of entity (product
+  // decision 2026-08-03); the visit HISTORY below stays entity-scoped for
+  // them, mirroring the visit log.
 
   // History is capped at 100 rows; visit_count is the FULL total so the
   // portal can say "showing N of M" instead of silently truncating.
