@@ -44,9 +44,12 @@ function newDb(): SqliteDb {
     CREATE TABLE appointments (
       id TEXT PRIMARY KEY, officer_id TEXT, reference_code TEXT, appointment_date TEXT,
       time_slot TEXT, visitor_name TEXT, visitor_phone TEXT, visitor_email TEXT,
-      organisation TEXT, purpose TEXT, status TEXT, visit_id TEXT, created_at TEXT, updated_at TEXT
+      organisation TEXT, purpose TEXT, status TEXT, visit_id TEXT,
+      approved_by TEXT, approved_at TEXT, approver_notes TEXT, decline_reason TEXT,
+      created_at TEXT, updated_at TEXT
     );
-    CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, email TEXT, telegram_chat_id TEXT, role TEXT, is_active INTEGER DEFAULT 1);
+    CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, email TEXT, telegram_chat_id TEXT, role TEXT, is_active INTEGER DEFAULT 1,
+      directorate_id TEXT, display_role TEXT);
     CREATE TABLE appointment_approvers (officer_id TEXT, user_id TEXT);
     CREATE TABLE notifications (
       id TEXT PRIMARY KEY, user_id TEXT, type TEXT, title TEXT, body TEXT,
@@ -262,5 +265,117 @@ describe('PATCH /appointments-admin/:id/complete — joins the visits pipeline',
 
     expect(res.status).toBe(422);
     expect(db.prepare('SELECT COUNT(*) AS n FROM visits').get() as { n: number }).toEqual({ n: 0 });
+  });
+});
+
+/* ---------- GET / — director/oversight read scope, fail-closed staff (plan 2026-08-03) ---------- */
+
+describe('GET /appointments-admin — read scope for director + oversight roles', () => {
+  interface ListBody { data: { appointments: Array<{ id: string; officer_id: string }>; total: number } }
+
+  function seedScopeFixtures(db: SqliteDb) {
+    // Entity one: d1/o1/a1 (existing helpers); entity two: d2/o2/a2.
+    seedOfficer(db);
+    db.prepare("INSERT INTO directorates (id, name, abbreviation, floor, wing) VALUES ('d2', 'PMD', 'PMD', '2', 'B')").run();
+    db.prepare("INSERT INTO officers (id, name, title, telegram_chat_id, directorate_id, is_available) VALUES ('o2', 'Ms. Owusu', 'Director', NULL, 'd2', 1)").run();
+    seedAppointment(db, { id: 'a1', ref: 'AAA111' });
+    db.prepare(
+      `INSERT INTO appointments (id, officer_id, reference_code, appointment_date, time_slot,
+         visitor_name, visitor_phone, visitor_email, organisation, purpose, status, created_at, updated_at)
+       VALUES ('a2', 'o2', 'BBB222', ?, '10:00', 'Kofi Boateng', '0244999888', NULL, NULL, 'Review', 'confirmed',
+               '2026-08-01T08:00:00Z', '2026-08-01T08:00:00Z')`
+    ).run(todayStr());
+    // Users the scope resolver / gates read.
+    db.prepare("INSERT INTO users (id, name, email, role, directorate_id, display_role) VALUES ('dir1', 'Director One', 'dir1@ohcs.gov.gh', 'director', 'd1', NULL)").run();
+    db.prepare("INSERT INTO users (id, name, email, role, directorate_id, display_role) VALUES ('dir_no', 'Director None', 'dirn@ohcs.gov.gh', 'director', NULL, NULL)").run();
+    db.prepare("INSERT INTO users (id, name, email, role, directorate_id, display_role) VALUES ('cd1', 'Chief Director', 'cd@ohcs.gov.gh', 'director', 'd1', 'chief_director')").run();
+    db.prepare("INSERT INTO users (id, name, email, role, directorate_id, display_role) VALUES ('hos1', 'Head of Service', 'hos@ohcs.gov.gh', 'director', NULL, 'head_of_service')").run();
+    db.prepare("INSERT INTO users (id, name, email, role, directorate_id, display_role) VALUES ('staff_plain', 'Plain Staff', 'sp@ohcs.gov.gh', 'staff', NULL, NULL)").run();
+    db.prepare("INSERT INTO users (id, name, email, role, directorate_id, display_role) VALUES ('staff_appr', 'Approver Staff', 'sa@ohcs.gov.gh', 'staff', NULL, NULL)").run();
+    db.prepare("INSERT INTO appointment_approvers (officer_id, user_id) VALUES ('o1', 'staff_appr')").run();
+  }
+
+  const sess = (userId: string, role: string, directorate_abbr: string | null = null): SessionData =>
+    ({ userId, email: `${userId}@ohcs.gov.gh`, role, name: `User ${userId}`, directorate_abbr } as SessionData);
+
+  const list = (env: Env, session: SessionData, qs = '') =>
+    makeApp(session).request(`/admin${qs}`, { method: 'GET' }, env);
+
+  it('director sees only their own entity — a client-passed officer_id filter is beaten', async () => {
+    const { env, db } = makeEnv();
+    seedScopeFixtures(db);
+    const session = sess('dir1', 'director');
+
+    const all = await list(env, session);
+    expect(all.status).toBe(200);
+    const allBody = await all.json() as ListBody;
+    expect(allBody.data.appointments.map((a) => a.id)).toEqual(['a1']);
+    expect(allBody.data.total).toBe(1);
+
+    // Asking for the OTHER entity's officer yields nothing (scope is forced,
+    // not a default the client can override).
+    const beaten = await list(env, session, '?officer_id=o2');
+    expect(beaten.status).toBe(200);
+    const beatenBody = await beaten.json() as ListBody;
+    expect(beatenBody.data.appointments).toEqual([]);
+    expect(beatenBody.data.total).toBe(0);
+  });
+
+  it('director with no linked entity 403s (fail-closed sentinel)', async () => {
+    const { env, db } = makeEnv();
+    seedScopeFixtures(db);
+    const res = await list(env, sess('dir_no', 'director'));
+    expect(res.status).toBe(403);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe('FORBIDDEN');
+  });
+
+  it('oversight display roles (chief director / head of service) see all entities', async () => {
+    const { env, db } = makeEnv();
+    seedScopeFixtures(db);
+
+    for (const userId of ['cd1', 'hos1']) {
+      const res = await list(env, sess(userId, 'director'));
+      expect(res.status).toBe(200);
+      const body = await res.json() as ListBody;
+      expect(body.data.appointments.map((a) => a.id).sort()).toEqual(['a1', 'a2']);
+      expect(body.data.total).toBe(2);
+    }
+  });
+
+  it('plain staff (not an approver) 403s', async () => {
+    const { env, db } = makeEnv();
+    seedScopeFixtures(db);
+    const res = await list(env, sess('staff_plain', 'staff'));
+    expect(res.status).toBe(403);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe('FORBIDDEN');
+  });
+
+  it('staff who IS an appointment approver keeps approver-scoped visibility', async () => {
+    const { env, db } = makeEnv();
+    seedScopeFixtures(db);
+    const res = await list(env, sess('staff_appr', 'staff'));
+    expect(res.status).toBe(200);
+    const body = await res.json() as ListBody;
+    expect(body.data.appointments.map((a) => a.id)).toEqual(['a1']);
+  });
+
+  it('RCU staff reads all appointments (effective reception tier)', async () => {
+    const { env, db } = makeEnv();
+    seedScopeFixtures(db);
+    const res = await list(env, sess('staff_plain', 'staff', 'RCU'));
+    expect(res.status).toBe(200);
+    const body = await res.json() as ListBody;
+    expect(body.data.appointments.map((a) => a.id).sort()).toEqual(['a1', 'a2']);
+  });
+
+  it('receptionist and admin remain unscoped', async () => {
+    const { env, db } = makeEnv();
+    seedScopeFixtures(db);
+    for (const role of ['receptionist', 'admin', 'superadmin']) {
+      const res = await list(env, sess('admin1', role));
+      expect(res.status).toBe(200);
+      const body = await res.json() as ListBody;
+      expect(body.data.total).toBe(2);
+    }
   });
 });

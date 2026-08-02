@@ -42,7 +42,10 @@ export async function requireLiveSession<E extends { Bindings: Env }>(
     return c.json({ data: null, error: { code: 'SESSION_REVOKED', message: 'Your session has ended. Please sign in again.' } }, 401);
   }
 
-  return { session: { ...session, role: authState.role }, authState };
+  return {
+    session: { ...session, role: authState.role, directorate_abbr: authState.directorate_abbr },
+    authState,
+  };
 }
 
 export const authMiddleware = createMiddleware<{

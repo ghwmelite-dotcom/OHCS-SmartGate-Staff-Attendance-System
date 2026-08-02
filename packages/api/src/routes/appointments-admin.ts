@@ -3,6 +3,8 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error, notFound } from '../lib/response';
+import { hasEffectiveRole } from '../lib/require-role';
+import { resolveDirectorateScope, DIRECTORATE_SCOPE_NONE } from '../lib/directorate-scope';
 import { sendTelegramMessage } from '../services/telegram';
 import { sendAppointmentConfirmedEmail, sendAppointmentDeclinedEmail } from '../services/email';
 import { performCheckIn } from '../services/check-in';
@@ -73,7 +75,21 @@ appointmentsAdminRoutes.get('/', async (c) => {
 
   // Reception gets read-only visibility of all appointments; mutations stay
   // guarded by canActOnAppointment / admin-only checks on the PATCH routes.
-  const isAdminLevel = ['superadmin', 'admin', 'receptionist'].includes(session.role);
+  // hasEffectiveRole extends that to RCU staff (reception parity).
+  const isAdminLevel = ['superadmin', 'admin'].includes(session.role) ||
+    hasEffectiveRole(session, 'receptionist');
+
+  // Directors get read-only oversight of their own entity (the appointment's
+  // OFFICER's directorate); oversight display roles (chief director / head of
+  // service) resolve org-wide via the scope resolver. Fail-closed: a director
+  // with no linked entity is denied rather than silently unscoped.
+  let directorScope: string | null = null;
+  if (session.role === 'director') {
+    directorScope = await resolveDirectorateScope(c);
+    if (directorScope === DIRECTORATE_SCOPE_NONE) {
+      return error(c, 'FORBIDDEN', 'Your account is not linked to a directorate', 403);
+    }
+  }
 
   const baseSelect = `SELECT a.*, o.name as officer_name, o.title as officer_title,
        d.name as directorate_name,
@@ -93,8 +109,26 @@ LEFT JOIN users u ON u.id = a.approved_by`;
   const params: unknown[] = [];
 
   if (!isAdminLevel) {
-    conditions.push(`a.officer_id IN (SELECT officer_id FROM appointment_approvers WHERE user_id = ?)`);
-    params.push(session.userId);
+    if (directorScope) {
+      // Forced scope — applied regardless of any client-passed filter, so an
+      // officer_id outside the director's entity simply matches nothing.
+      conditions.push(`o.directorate_id = ?`);
+      params.push(directorScope);
+    } else if (session.role !== 'director') {
+      // Approver-scoped visibility is for actual approvers only; anyone else
+      // (plain staff, it) fails closed instead of getting an empty 200.
+      const approver = await c.env.DB.prepare(
+        'SELECT 1 AS x FROM appointment_approvers WHERE user_id = ? LIMIT 1',
+      )
+        .bind(session.userId)
+        .first();
+      if (!approver) {
+        return error(c, 'FORBIDDEN', 'You do not have access to this resource', 403);
+      }
+      conditions.push(`a.officer_id IN (SELECT officer_id FROM appointment_approvers WHERE user_id = ?)`);
+      params.push(session.userId);
+    }
+    // director with directorScope === null ⇒ CD/HoS — org-wide, no condition.
   }
 
   if (officerIdFilter) {

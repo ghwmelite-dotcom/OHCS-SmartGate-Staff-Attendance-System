@@ -22,6 +22,7 @@ import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import { authRoutes } from '../routes/auth';
 import { authMiddleware } from './auth';
+import { requireRole } from '../lib/require-role';
 import { hashPin, createSession, invalidateUserAuthState } from '../services/auth';
 import type { Env, SessionData } from '../types';
 
@@ -44,9 +45,11 @@ function newDb(): SqliteDb {
     CREATE TABLE users (
       id TEXT PRIMARY KEY, name TEXT, email TEXT, staff_id TEXT, nss_number TEXT,
       intern_code TEXT, phone TEXT, role TEXT, display_role TEXT, pin_hash TEXT,
+      directorate_id TEXT,
       pin_acknowledged INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1,
       session_epoch INTEGER NOT NULL DEFAULT 0, updated_at TEXT
     );
+    CREATE TABLE directorates (id TEXT PRIMARY KEY, name TEXT, abbreviation TEXT);
     CREATE TABLE audit_log (
       id TEXT, seq INTEGER, at TEXT, actor_user_id TEXT, actor_role TEXT, actor_label TEXT,
       action TEXT, entity_type TEXT, entity_id TEXT, summary TEXT, changes TEXT, ip TEXT,
@@ -74,6 +77,9 @@ const USERS = {
   unack: { id: 'u_unack', role: 'staff', pin_acknowledged: 0 },
   ack: { id: 'u_ack', role: 'staff', pin_acknowledged: 1 },
   admin: { id: 'u_admin', role: 'admin', pin_acknowledged: 0 },
+  // RCU reception-parity fixtures (directorate_abbr flow tests below).
+  rcuStaff: { id: 'u_rcu', role: 'staff', pin_acknowledged: 1 },
+  otherStaff: { id: 'u_other', role: 'staff', pin_acknowledged: 1 },
 } as const;
 
 async function makeEnv() {
@@ -86,6 +92,11 @@ async function makeEnv() {
        VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)`
     ).run(u.id, `User ${u.id}`, `${u.id}@ohcs.gov.gh`, `SID-${u.id}`, u.role, pinHash, u.pin_acknowledged);
   }
+  // RCU reception-parity fixtures: two directorates, one staffer in each.
+  db.prepare("INSERT INTO directorates (id, name, abbreviation) VALUES ('d_rcu', 'Reception Coordinating Unit', 'RCU')").run();
+  db.prepare("INSERT INTO directorates (id, name, abbreviation) VALUES ('d_rsimd', 'RSIMD', 'RSIMD')").run();
+  db.prepare("UPDATE users SET directorate_id = 'd_rcu' WHERE id = ?").run(USERS.rcuStaff.id);
+  db.prepare("UPDATE users SET directorate_id = 'd_rsimd' WHERE id = ?").run(USERS.otherStaff.id);
   const env = {
     ENVIRONMENT: 'test',
     KV: {
@@ -112,6 +123,13 @@ function makeApp() {
   app.use('/api/*', authMiddleware);
   app.get('/api/clock', (c) => c.json({ data: 'clock-ok', error: null }));
   app.get('/api/visits', (c) => c.json({ data: 'visits-ok', error: null }));
+  // Reception-tier gate for the directorate_abbr flow tests: passes only when
+  // the middleware-carried session satisfies requireRole(..., 'receptionist').
+  app.get('/api/reception-gated', (c) => {
+    const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist');
+    if (blocked) return blocked;
+    return c.json({ data: 'reception-ok', error: null });
+  });
   return app;
 }
 
@@ -189,5 +207,27 @@ describe('authMiddleware — forced PIN reset gate (pin_acknowledged = 0)', () =
     const sid = await sessionFor(env, USERS.admin.id, 'admin');
     expect((await hit(env, sid, '/api/clock')).status).toBe(200);
     expect((await hit(env, sid, '/api/visits')).status).toBe(200);
+  });
+});
+
+describe('authMiddleware — directorate_abbr flows into the session (RCU reception parity)', () => {
+  // Plan: docs/superpowers/plans/2026-08-03-role-display-appointments-rcu.md.
+  // getUserAuthState joins directorates and the middleware overlays
+  // directorate_abbr onto the per-request session, so requireRole's effective
+  // reception tier (role 'staff' + abbr 'RCU') works behind the real middleware.
+
+  it('RCU staff passes a receptionist-gated route through the real middleware', async () => {
+    const { env } = await makeEnv();
+    const sid = await sessionFor(env, USERS.rcuStaff.id, 'staff');
+    const res = await hit(env, sid, '/api/reception-gated');
+    expect(res.status).toBe(200);
+  });
+
+  it('non-RCU staff is 403 on the same gate', async () => {
+    const { env } = await makeEnv();
+    const sid = await sessionFor(env, USERS.otherStaff.id, 'staff');
+    const res = await hit(env, sid, '/api/reception-gated');
+    expect(res.status).toBe(403);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe('FORBIDDEN');
   });
 });

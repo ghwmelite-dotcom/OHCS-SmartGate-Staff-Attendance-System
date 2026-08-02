@@ -54,7 +54,7 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
   const isSuperadmin = user?.role === 'superadmin';
   const isAdmin = user?.role === 'admin';
   const canSeeAdmin = isSuperadmin || isAdmin;
-  const canSeeAppointments = ['receptionist', 'admin', 'superadmin'].includes(user?.role ?? '');
+  const canSeeAppointments = hasRoleAccess(user?.role, MODULE_ROLES.appointments, user?.directorate_abbr);
   const { isCollapsed, toggleCollapse } = useSidebarStore();
 
   const collapsed = forceExpanded ? false : isCollapsed;
@@ -120,11 +120,11 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
 
       {/* Navigation — scrolls when items exceed available height; footer stays pinned */}
       <nav className={cn('sidebar-nav-scroll flex-1 min-h-0 overflow-y-auto overflow-x-hidden py-2 space-y-1 relative', collapsed ? 'px-2' : 'px-3')}>
-        {navItems.filter((item) => !item.gate || hasRoleAccess(user?.role, item.gate)).map((item) => (
+        {navItems.filter((item) => !item.gate || hasRoleAccess(user?.role, item.gate, user?.directorate_abbr)).map((item) => (
           <NavItem key={item.to} {...item} collapsed={collapsed} />
         ))}
 
-        {/* Appointments — reception + admins (read-only day view) */}
+        {/* Appointments — reception + admins + directors (read-only day view for all) */}
         {canSeeAppointments && APPOINTMENTS_NAV.map((item) => (
           <NavItem key={item.to} {...item} collapsed={collapsed} />
         ))}

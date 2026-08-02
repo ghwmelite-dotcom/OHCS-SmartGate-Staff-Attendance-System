@@ -10,6 +10,7 @@ interface User {
   phone: string | null;
   role: string;
   display_role?: string | null;
+  directorate_abbr?: string | null;
   pin_acknowledged?: boolean;
 }
 

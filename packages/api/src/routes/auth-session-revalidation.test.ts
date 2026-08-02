@@ -36,9 +36,11 @@ function newDb(): SqliteDb {
     CREATE TABLE users (
       id TEXT PRIMARY KEY, name TEXT, email TEXT, staff_id TEXT, nss_number TEXT,
       intern_code TEXT, phone TEXT, role TEXT, display_role TEXT, pin_hash TEXT,
+      directorate_id TEXT,
       pin_acknowledged INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1,
-      session_epoch INTEGER NOT NULL DEFAULT 0, updated_at TEXT
+      session_epoch INTEGER NOT NULL DEFAULT 0, updated_at TEXT, last_login_at TEXT
     );
+    CREATE TABLE directorates (id TEXT PRIMARY KEY, name TEXT, abbreviation TEXT);
     CREATE TABLE audit_log (
       id TEXT, seq INTEGER, at TEXT, actor_user_id TEXT, actor_role TEXT, actor_label TEXT,
       action TEXT, entity_type TEXT, entity_id TEXT, summary TEXT, changes TEXT, ip TEXT,
@@ -197,5 +199,46 @@ describe('self-service auth routes — live session revalidation', () => {
     const res = await changePin(env, sid);
     expect(res.status).toBe(401);
     expect(res.headers.get('set-cookie')).toBeNull();
+  });
+});
+
+describe('GET /auth/me — directorate_abbr (plan 2026-08-03-role-display-appointments-rcu)', () => {
+  it('returns the linked directorate abbreviation, null when unlinked', async () => {
+    const { env, db } = await makeEnv();
+    db.prepare("INSERT INTO directorates (id, name, abbreviation) VALUES ('d_rcu', 'Reception Coordinating Unit', 'RCU')").run();
+    db.prepare("UPDATE users SET directorate_id = 'd_rcu' WHERE id = ?").run(USER.id);
+    invalidateUserAuthState(USER.id);
+
+    const sid = await mintSession(env);
+    const linked = await getMe(env, sid);
+    expect(linked.status).toBe(200);
+    const linkedBody = await linked.json() as { data: { user: { directorate_abbr: string | null } } };
+    expect(linkedBody.data.user.directorate_abbr).toBe('RCU');
+
+    db.prepare('UPDATE users SET directorate_id = NULL WHERE id = ?').run(USER.id);
+    invalidateUserAuthState(USER.id);
+    const unlinked = await getMe(env, sid);
+    expect(unlinked.status).toBe(200);
+    const unlinkedBody = await unlinked.json() as { data: { user: { directorate_abbr: string | null } } };
+    expect(unlinkedBody.data.user.directorate_abbr).toBeNull();
+  });
+});
+
+describe('POST /auth/pin-login — user object completeness', () => {
+  it('returns display_role and directorate_abbr (portal badges + RCU parity depend on them)', async () => {
+    const { env, db } = await makeEnv();
+    db.prepare("INSERT INTO directorates (id, name, abbreviation) VALUES ('d_rcu', 'Reception Coordinating Unit', 'RCU')").run();
+    db.prepare("UPDATE users SET display_role = 'chief_director', directorate_id = 'd_rcu' WHERE id = ?").run(USER.id);
+    invalidateUserAuthState(USER.id);
+
+    const res = await makeApp().request('/auth/pin-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staff_id: '896239', pin: USER.pin }),
+    }, env, FAKE_EXEC_CTX);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: { user: Record<string, unknown> } };
+    expect(body.data.user.display_role).toBe('chief_director');
+    expect(body.data.user.directorate_abbr).toBe('RCU');
   });
 });

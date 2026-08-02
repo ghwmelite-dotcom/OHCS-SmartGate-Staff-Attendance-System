@@ -53,8 +53,23 @@ export const MODULE_ROLES = {
   visits: ['superadmin', 'admin', 'receptionist', 'director', 'it'],
   /** Register new visitor — POST /visitors + visitor photo upload */
   visitorRegistration: ['superadmin', 'admin', 'receptionist'],
+  /** /appointments — GET /appointments/admin: reception day view + director (force-scoped) + CD/HoS (org-wide, riding role 'director') */
+  appointments: ['superadmin', 'admin', 'receptionist', 'director'],
 } as const;
 
-export function hasRoleAccess(role: string | null | undefined, allowed: readonly string[]): boolean {
-  return role != null && allowed.includes(role);
+// RCU reception parity (plan 2026-08-03-role-display-appointments-rcu) — client
+// mirror of the server's require-role rule: a user whose access role is 'staff'
+// but whose directorate abbreviation is RCU is treated as receptionist-tier for
+// module gating. The stored role is never rewritten — only the gate consults
+// the rule. Org data is stable, so the abbreviation is a documented constant
+// here and on the API side; the match is exact (case-sensitive), as on the server.
+export const RCU_DIRECTORATE_ABBR = 'RCU';
+
+export function hasRoleAccess(
+  role: string | null | undefined,
+  allowed: readonly string[],
+  directorateAbbr?: string | null,
+): boolean {
+  const effective = role === 'staff' && directorateAbbr === RCU_DIRECTORATE_ABBR ? 'receptionist' : role;
+  return effective != null && allowed.includes(effective);
 }

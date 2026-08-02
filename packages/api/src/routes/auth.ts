@@ -124,11 +124,15 @@ authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
   }
 
   const user = await c.env.DB.prepare(
-    `SELECT id, name, email, role, pin_hash, is_active, pin_acknowledged, staff_id, nss_number, intern_code, phone FROM users WHERE ${lookupColumn} = ?`
+    `SELECT u.id, u.name, u.email, u.role, u.display_role, u.pin_hash, u.is_active, u.pin_acknowledged,
+            u.staff_id, u.nss_number, u.intern_code, u.phone, d.abbreviation AS directorate_abbr
+     FROM users u LEFT JOIN directorates d ON d.id = u.directorate_id
+     WHERE u.${lookupColumn} = ?`
   ).bind(rawId).first<{
-    id: string; name: string; email: string; role: string;
+    id: string; name: string; email: string; role: string; display_role: string | null;
     pin_hash: string | null; is_active: number; pin_acknowledged: number;
     staff_id: string | null; nss_number: string | null; intern_code: string | null; phone: string | null;
+    directorate_abbr: string | null;
   }>();
 
   if (!user || !user.is_active) {
@@ -172,6 +176,8 @@ authRoutes.post('/pin-login', zValidator('json', pinLoginSchema), async (c) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      display_role: user.display_role,
+      directorate_abbr: user.directorate_abbr,
       staff_id: user.staff_id,
       nss_number: user.nss_number,
       intern_code: user.intern_code,
@@ -338,12 +344,19 @@ authRoutes.get('/me', async (c) => {
   const session = auth.session;
 
   // Read name/email/role fresh from DB so edits made in the admin portal
-  // propagate without requiring the user to log out and back in.
+  // propagate without requiring the user to log out and back in. The
+  // directorates join feeds the web client's RCU reception-parity rule and
+  // entity display (plan 2026-08-03-role-display-appointments-rcu).
   const row = await c.env.DB.prepare(
-    'SELECT name, email, staff_id, nss_number, intern_code, phone, role, display_role, pin_acknowledged, is_active FROM users WHERE id = ?'
+    `SELECT u.name, u.email, u.staff_id, u.nss_number, u.intern_code, u.phone,
+            u.role, u.display_role, u.pin_acknowledged, u.is_active,
+            d.abbreviation AS directorate_abbr
+     FROM users u
+     LEFT JOIN directorates d ON d.id = u.directorate_id
+     WHERE u.id = ?`
   )
     .bind(session.userId)
-    .first<{ name: string; email: string; staff_id: string | null; nss_number: string | null; intern_code: string | null; phone: string | null; role: string; display_role: string | null; pin_acknowledged: number; is_active: number }>();
+    .first<{ name: string; email: string; staff_id: string | null; nss_number: string | null; intern_code: string | null; phone: string | null; role: string; display_role: string | null; pin_acknowledged: number; is_active: number; directorate_abbr: string | null }>();
 
   if (!row || row.is_active !== 1) {
     return error(c, 'UNAUTHORIZED', 'Account disabled or deleted', 401);
@@ -360,6 +373,7 @@ authRoutes.get('/me', async (c) => {
       phone: row.phone,
       role: row.role,
       display_role: row.display_role,
+      directorate_abbr: row.directorate_abbr,
       pin_acknowledged: row.pin_acknowledged === 1,
     },
   });

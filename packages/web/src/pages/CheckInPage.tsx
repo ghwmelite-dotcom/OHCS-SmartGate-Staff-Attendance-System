@@ -81,8 +81,9 @@ export function CheckInPage() {
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   // POST /visitors + photo upload are reception-tier only — director/it check
-  // in existing visitors; the register affordance hides for them.
-  const canRegisterVisitor = hasRoleAccess(user?.role, MODULE_ROLES.visitorRegistration);
+  // in existing visitors; the register affordance hides for them. RCU staff
+  // are reception-tier via the hasRoleAccess rule (see roles.ts).
+  const canRegisterVisitor = hasRoleAccess(user?.role, MODULE_ROLES.visitorRegistration, user?.directorate_abbr);
 
   const [step, setStep] = useState<Step>('search');
   const [searchQuery, setSearchQuery] = useState('');

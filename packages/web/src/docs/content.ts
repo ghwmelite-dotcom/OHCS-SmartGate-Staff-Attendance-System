@@ -375,8 +375,8 @@ export const DOC_SECTIONS: DocSection[] = [
       {
         name: 'Administration',
         status: 'live',
-        summary: 'Superadmin/admin manage appointments in the Admin portal tab; reception gets a read-only day view.',
-        details: [],
+        summary: 'Superadmin/admin manage appointments in the Admin portal tab; reception, directors (scoped to their own directorate) and CD/HoS (org-wide) get a read-only day view under Appointments.',
+        details: ['Action endpoints stay admin/superadmin/approver-delegates only — the day view shows no actions to oversight roles'],
       },
     ],
   },
@@ -449,6 +449,15 @@ export const DOC_SECTIONS: DocSection[] = [
           'Scope resolver treats chief_director/head_of_service as org-wide; plain directors without an entity still fail closed',
           'Attendance endpoints (/today, /records, /by-directorate) opened to directors (force-scoped) and CD/HoS (org-wide); /records rows carry absence reason/note',
           'Portal home becomes an Overview page for these roles (present/absent/late/noticed + active visits; CD/HoS get the by-directorate grid); assign via Admin → Users display_role',
+        ],
+      },
+      {
+        name: 'RCU reception parity',
+        status: 'live',
+        summary: 'Staff accounts in the RCU directorate are treated as receptionist-tier by every role gate — check-in (incl. register), visitors, visit log, feedback and the appointments day view — without rewriting their stored role (identity stays honest; only the gate consults the rule).',
+        details: [
+          'Server: requireRole lifts role=staff + directorate_abbr=RCU to reception tier; client: hasRoleAccess mirrors it from the /auth/me directorate_abbr',
+          'The abbreviation is an exact, case-sensitive match — org data is stable, so it is a documented constant on both sides',
         ],
       },
       {

@@ -56,6 +56,11 @@ export interface SessionData {
   // (which lack it) read as 0 — matching the users.session_epoch default — and are
   // not force-logged-out on deploy. See middleware/auth.ts.
   epoch?: number;
+  // Live directorate abbreviation, overlaid per-request by requireLiveSession
+  // from the cached auth state (same pattern as the live `role` above) — never
+  // stored in the KV session blob. Gates consult it (RCU reception parity in
+  // lib/require-role.ts); null/undefined means no directorate-linked rule fires.
+  directorate_abbr?: string | null;
 }
 
 /**

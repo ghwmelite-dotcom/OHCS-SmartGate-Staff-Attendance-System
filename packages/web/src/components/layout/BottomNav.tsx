@@ -57,8 +57,8 @@ export function BottomNav() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const isSuperadmin = user?.role === 'superadmin';
-  const canSeeAppointments = ['receptionist', 'admin', 'superadmin'].includes(user?.role ?? '');
-  const visible = (items: NavDef[]) => items.filter((i) => !i.gate || hasRoleAccess(user?.role, i.gate));
+  const canSeeAppointments = hasRoleAccess(user?.role, MODULE_ROLES.appointments, user?.directorate_abbr);
+  const visible = (items: NavDef[]) => items.filter((i) => !i.gate || hasRoleAccess(user?.role, i.gate, user?.directorate_abbr));
   // Directors and CD/HoS land on the Overview — relabel the home tab (see Sidebar).
   const homeItem: NavDef = isOversightUser(user?.role, user?.display_role)
     ? { to: '/', icon: Home, label: 'Overview' }

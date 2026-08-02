@@ -167,7 +167,7 @@ export async function createSession(
 // authMiddleware re-checks the user on each request (is the account still active,
 // is the session epoch current, what's the current role). Cached per-isolate for
 // AUTH_STATE_TTL_MS so it adds negligible DB load; staleness is bounded by the TTL.
-export interface UserAuthState { is_active: number; role: string; session_epoch: number; pin_acknowledged: number }
+export interface UserAuthState { is_active: number; role: string; session_epoch: number; pin_acknowledged: number; directorate_abbr: string | null }
 
 const AUTH_STATE_TTL_MS = 30_000;
 const authStateMemo = new Map<string, { state: UserAuthState | null; ts: number }>();
@@ -188,18 +188,25 @@ export async function getUserAuthState(env: Env, userId: string): Promise<UserAu
   let row: UserAuthState | null = null;
   try {
     row = await env.DB.prepare(
-      'SELECT is_active, role, session_epoch, pin_acknowledged FROM users WHERE id = ?'
+      `SELECT u.is_active, u.role, u.session_epoch, u.pin_acknowledged,
+              d.abbreviation AS directorate_abbr
+       FROM users u
+       LEFT JOIN directorates d ON d.id = u.directorate_id
+       WHERE u.id = ?`
     ).bind(userId).first<UserAuthState>();
   } catch (err) {
-    // Deploy-safety: tolerate ONLY a missing column (pre-migration session_epoch
-    // or pin_acknowledged). Any other error propagates so a transient DB blip
-    // can't masquerade as "user gone" (which would delete the session) or
-    // silently disable epoch checks. pin_acknowledged fails OPEN (1) here so the
-    // forced-reset gate stays off until the migration has landed.
+    // Deploy-safety: tolerate ONLY a missing column (pre-migration session_epoch,
+    // pin_acknowledged or users.directorate_id). Any other error propagates so a
+    // transient DB blip can't masquerade as "user gone" (which would delete the
+    // session) or silently disable epoch checks. pin_acknowledged fails OPEN (1)
+    // here so the forced-reset gate stays off until the migration has landed;
+    // directorate_abbr fails CLOSED (null) so the RCU reception-parity rule in
+    // lib/require-role.ts simply never fires pre-migration — the safe direction
+    // for a privilege grant.
     if (!isMissingColumnError(err)) throw err;
     const fallback = await env.DB.prepare('SELECT is_active, role FROM users WHERE id = ?')
       .bind(userId).first<{ is_active: number; role: string }>();
-    row = fallback ? { is_active: fallback.is_active, role: fallback.role, session_epoch: 0, pin_acknowledged: 1 } : null;
+    row = fallback ? { is_active: fallback.is_active, role: fallback.role, session_epoch: 0, pin_acknowledged: 1, directorate_abbr: null } : null;
   }
   authStateMemo.set(userId, { state: row, ts: now });
   return row;
