@@ -1,0 +1,46 @@
+import { describe, it, expect } from 'vitest';
+import { Hono } from 'hono';
+import { visitorRoutes } from '../routes/visitors';
+import type { Env, SessionData } from '../types';
+
+function d1(db: any) {
+  const stmt = (sql: string, params: unknown[]) => ({
+    first: async () => db.prepare(sql).get(...params) ?? null,
+    all: async () => ({ results: db.prepare(sql).all(...params) }),
+    run: async () => { db.prepare(sql).run(...params); return { success: true }; },
+  });
+  return { prepare: (sql: string) => ({ ...stmt(sql, []), bind: (...p: unknown[]) => stmt(sql, p) }) };
+}
+
+function makeEnv(role: string, abbr: string | null) {
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE visitors (id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, phone TEXT, email TEXT, organisation TEXT, id_type TEXT, id_number TEXT, photo_url TEXT, id_photo_url TEXT, total_visits INTEGER, last_visit_at TEXT, created_at TEXT, updated_at TEXT, flag TEXT, flag_note TEXT, flag_updated_at TEXT, flag_updated_by TEXT);
+    CREATE TABLE visits (id TEXT PRIMARY KEY, visitor_id TEXT, directorate_id TEXT);
+    CREATE TABLE users (id TEXT PRIMARY KEY, directorate_id TEXT, display_role TEXT);
+    CREATE TABLE directorates (id TEXT PRIMARY KEY, name TEXT, abbreviation TEXT, is_active INTEGER);
+  `);
+  db.prepare("INSERT INTO visitors (id, first_name, last_name, phone, created_at) VALUES ('v1','Kwame','Addo','054','2026-07-20')").run();
+  const session: SessionData = { userId: 'u1', email: 's@b.c', role, name: 'S', directorate_abbr: abbr } as SessionData;
+  const app = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
+  app.use('/v/*', async (c, next) => { c.set('session', session); await next(); });
+  app.route('/v', visitorRoutes);
+  const env = { DB: d1(db), KV: { get: async () => null, put: async () => {}, delete: async () => {} } } as unknown as Env;
+  return { app, env };
+}
+
+describe('GET /visitors — RCU parity', () => {
+  it('RCU staff (role=staff, abbr=RCU) gets the visitor list', async () => {
+    const { app, env } = makeEnv('staff', 'RCU');
+    const res = await app.request('/v', {}, env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: unknown[] };
+    expect(body.data).toHaveLength(1);
+  });
+  it('non-RCU staff is still 403', async () => {
+    const { app, env } = makeEnv('staff', 'RSIMD');
+    const res = await app.request('/v', {}, env);
+    expect(res.status).toBe(403);
+  });
+});
