@@ -147,6 +147,8 @@ export interface Directorate {
   wing: string | null;
   is_active: number;
   reception_officer_id?: string | null;
+  head_officer_id?: string | null;
+  head_name?: string | null;
 }
 
 export interface VisitorDetail extends Visitor {

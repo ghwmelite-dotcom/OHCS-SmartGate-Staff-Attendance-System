@@ -12,17 +12,46 @@ const REASONS: { value: Reason; label: string; Icon: typeof Thermometer }[] = [
   { value: 'other', label: 'Other', Icon: HelpCircle },
 ];
 
+// Quick-pick return dates; "Pick a date" reveals the native date input.
+const CHIPS = [
+  { id: 'tomorrow', label: 'Tomorrow', days: 1 },
+  { id: '2days', label: '2 days', days: 2 },
+  { id: 'week', label: '1 week', days: 7 },
+] as const;
+type Choice = (typeof CHIPS)[number]['id'] | 'custom';
+
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function addDays(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return ymd(d);
+}
+function readable(iso: string): string {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
 export function AbsenceNoticeModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const [reason, setReason] = useState<Reason | null>(null);
   const [note, setNote] = useState('');
+  const [choice, setChoice] = useState<Choice | null>(null);
   const [expectedReturn, setExpectedReturn] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  const today = new Date().toISOString().slice(0, 10);
+  // Server contract: note and expected_return_date are REQUIRED — note 2-200
+  // chars, return date > today and ≤ today+30d (longer absences are the
+  // leave-requests workflow).
+  const minDate = addDays(1);
+  const maxDate = addDays(30);
+  const isOther = reason === 'other';
+  const noteValid = note.trim().length >= 2 && note.trim().length <= 200;
+  const dateValid = expectedReturn >= minDate && expectedReturn <= maxDate;
+  const isValid = reason !== null && noteValid && dateValid;
 
   const mutation = useMutation({
-    mutationFn: (body: { reason: Reason; note?: string; expected_return_date?: string }) =>
+    mutationFn: (body: { reason: Reason; note: string; expected_return_date: string }) =>
       api.post('/attendance/absence-notice', body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['absence-notice-today'] });
@@ -33,21 +62,23 @@ export function AbsenceNoticeModal({ onClose }: { onClose: () => void }) {
     },
   });
 
+  function pickChip(id: Choice, days?: number) {
+    setChoice(id);
+    if (days !== undefined) setExpectedReturn(addDays(days));
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!reason) return;
+    if (!reason || !isValid) return;
     setErrorMsg('');
-    const body: { reason: Reason; note?: string; expected_return_date?: string } = { reason };
-    if (note.trim()) body.note = note.trim();
-    if (expectedReturn) body.expected_return_date = expectedReturn;
-    mutation.mutate(body);
+    mutation.mutate({ reason, note: note.trim(), expected_return_date: expectedReturn });
   }
 
   const isSuccess = mutation.isSuccess;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-5" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-fade-in-up" onClick={(e) => e.stopPropagation()}>
         <div className="h-[2px]" style={{ background: 'linear-gradient(90deg, #D4A017, #F5D76E, #D4A017)' }} />
         <div className="p-6">
           {isSuccess ? (
@@ -92,34 +123,71 @@ export function AbsenceNoticeModal({ onClose }: { onClose: () => void }) {
                 </div>
 
                 <div>
-                  <label className="block text-[12px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Note <span className="text-gray-400 normal-case">(optional)</span></label>
+                  <label className="block text-[12px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                    {isOther ? 'Please specify' : 'Brief detail'}
+                  </label>
                   <textarea
                     value={note}
                     onChange={(e) => setNote(e.target.value.slice(0, 200))}
                     maxLength={200}
                     rows={2}
-                    placeholder="Any context you'd like your director to know."
+                    placeholder={isOther ? 'Tell us briefly what it is' : 'e.g. clinic visit, funeral rites'}
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-[14px] focus:outline-none focus:ring-2 focus:ring-[#1A4D2E]/20 focus:border-[#1A4D2E] resize-none"
                   />
                   <p className="text-[11px] text-gray-400 mt-1 text-right">{note.length}/200</p>
                 </div>
 
                 <div>
-                  <label className="block text-[12px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Expected back <span className="text-gray-400 normal-case">(optional)</span></label>
-                  <input
-                    type="date"
-                    min={today}
-                    value={expectedReturn}
-                    onChange={(e) => setExpectedReturn(e.target.value)}
-                    className="w-full h-11 px-3 rounded-xl border border-gray-200 bg-gray-50 text-[14px] focus:outline-none focus:ring-2 focus:ring-[#1A4D2E]/20 focus:border-[#1A4D2E]"
-                  />
+                  <label className="block text-[12px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Expected back</label>
+                  <div className="flex flex-wrap gap-2">
+                    {CHIPS.map(({ id, label, days }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => pickChip(id, days)}
+                        className={`px-3.5 h-9 rounded-full border text-[13px] font-semibold transition-all ${
+                          choice === id
+                            ? 'border-[#1A4D2E] bg-[#1A4D2E] text-white'
+                            : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => pickChip('custom')}
+                      className={`px-3.5 h-9 rounded-full border text-[13px] font-semibold transition-all ${
+                        choice === 'custom'
+                          ? 'border-[#1A4D2E] bg-[#1A4D2E] text-white'
+                          : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      Pick a date
+                    </button>
+                  </div>
+                  {choice === 'custom' && (
+                    <input
+                      type="date"
+                      aria-label="Pick a return date"
+                      min={minDate}
+                      max={maxDate}
+                      value={expectedReturn}
+                      onChange={(e) => setExpectedReturn(e.target.value)}
+                      className="mt-2 w-full h-11 px-3 rounded-xl border border-gray-200 bg-gray-50 text-[14px] focus:outline-none focus:ring-2 focus:ring-[#1A4D2E]/20 focus:border-[#1A4D2E]"
+                    />
+                  )}
+                  <p className="text-[11px] text-gray-400 mt-1.5">
+                    First day you'll be back at work.
+                    {dateValid && <span className="text-[#1A4D2E] font-semibold"> Back on {readable(expectedReturn)}</span>}
+                  </p>
                 </div>
 
                 {errorMsg && <p className="text-red-600 text-[13px] font-medium">{errorMsg}</p>}
 
                 <button
                   type="submit"
-                  disabled={!reason || mutation.isPending}
+                  disabled={!isValid || mutation.isPending}
                   className="w-full h-12 bg-[#1A4D2E] text-white rounded-xl font-bold text-[15px] hover:brightness-110 disabled:opacity-50 transition-all"
                 >
                   {mutation.isPending ? 'Sending...' : 'Send notice'}

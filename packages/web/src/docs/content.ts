@@ -4,7 +4,7 @@
 // Statuses: 'live' = in production · 'shadow' = shipped dark (record-only
 // mode, not enforced) · 'design' = spec exists, not built.
 
-export const DOCS_LAST_UPDATED = '2026-07-20';
+export const DOCS_LAST_UPDATED = '2026-08-02';
 
 export type DocStatus = 'live' | 'shadow' | 'design';
 
@@ -156,6 +156,18 @@ export const DOC_SECTIONS: DocSection[] = [
         status: 'live',
         summary: 'Day streaks and longest-streak tracking give the clock screen its daily pull.',
         details: ['GET /clock/my-status — clocked_in/out, times, streaks (30s poll)'],
+      },
+      {
+        name: 'Absence notices',
+        status: 'live',
+        summary: 'The staff PWA "Can\'t make it today" flow records why an officer is out — reason, brief detail and expected-back date — and routes it straight to the head of their org entity.',
+        details: [
+          'All three fields are required; expected-back offers quick-pick chips (Tomorrow / 2 days / 1 week) or a date picker; "Other" demands a specify note (stored in note)',
+          'Re-submitting the same day updates the row (upsert, one notice per user per day); the notice can be withdrawn same-day via DELETE /attendance/absence-notice/today',
+          'Routing chain: directorates.head_officer_id → director-role users of the entity → superadmins as fallback only; the submitter is excluded at every step, and an unreachable head falls through',
+          'The head receives in-app + push, plus Telegram via the main bot when their officer record is linked (heads are assigned per entity in Admin → Org entities)',
+          'Clock-reminder suppression ends the morning of the return date — nudges resume the day the officer is expected back',
+        ],
       },
     ],
   },

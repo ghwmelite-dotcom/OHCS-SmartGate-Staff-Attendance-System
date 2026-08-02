@@ -60,7 +60,13 @@ export const api = {
     method: 'PATCH',
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   }),
+  del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
+
+/** True when an api.ts failure carried an HTTP status (ApiError). */
+export function apiErrorStatus(err: unknown): number | null {
+  return err instanceof ApiError ? err.status : null;
+}
 
 // ---- Clock-in re-auth + liveness helpers ----
 

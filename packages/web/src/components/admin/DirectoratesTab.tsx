@@ -115,6 +115,7 @@ export function DirectoratesTab() {
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Type</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Location</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Status</th>
+                <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Head</th>
                 <th className="text-left px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Reception team</th>
                 <th className="text-right px-6 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Edit</th>
               </tr>
@@ -138,6 +139,9 @@ export function DirectoratesTab() {
                         d.is_active ? 'bg-success/10 text-success' : 'bg-border text-muted')}>
                         {d.is_active ? 'Active' : 'Inactive'}
                       </span>
+                    </td>
+                    <td className="px-6 py-3">
+                      <HeadCell directorate={d} officers={officers} onChanged={refreshDirs} />
                     </td>
                     <td className="px-6 py-3">
                       <ReceptionTeamCell directorate={d} officers={officers} onChanged={refreshDirs} />
@@ -281,6 +285,43 @@ function locationLabel(d: DirectorateExt): string | null {
 }
 
 interface ReceiverRow { id: string; name: string; linked: boolean; primary: boolean }
+
+function HeadCell({ directorate, officers, onChanged }: {
+  directorate: DirectorateExt;
+  officers: OfficerExt[];
+  onChanged: () => void;
+}) {
+  const own = officers.filter((o) => o.directorate_id === directorate.id);
+  const current = directorate.head_officer_id ?? '';
+  // Keep the select controlled even when the head officer is no longer in the
+  // fetched list — fall back to the joined name as a read-only option.
+  const headMissing = !!current && !own.some((o) => o.id === current);
+
+  const setM = useMutation({
+    mutationFn: (head_officer_id: string | null) =>
+      api.put(`/admin/directorates/${directorate.id}`, { head_officer_id }),
+    onSuccess: onChanged,
+  });
+
+  return (
+    <div className="space-y-1 min-w-[180px]">
+      <select
+        value={current}
+        disabled={setM.isPending}
+        onChange={(e) => setM.mutate(e.target.value || null)}
+        className="h-8 px-2 rounded-lg border border-border bg-background text-[12px] disabled:opacity-50"
+      >
+        <option value="">— None —</option>
+        {headMissing && <option value={current}>{directorate.head_name ?? 'Current head'}</option>}
+        {own.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+      </select>
+      {headMissing && (
+        <p className="text-[11px] text-muted">Current head: {directorate.head_name ?? 'unknown'} (officer no longer listed)</p>
+      )}
+      <p className="text-[11px] text-muted">Receives absence notices for this entity.</p>
+    </div>
+  );
+}
 
 function ReceptionTeamCell({ directorate, officers, onChanged }: {
   directorate: DirectorateExt;
