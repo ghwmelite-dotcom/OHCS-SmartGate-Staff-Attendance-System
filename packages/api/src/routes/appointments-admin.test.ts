@@ -359,19 +359,20 @@ describe('GET /appointments-admin — read scope for director + oversight roles'
     expect(body.data.appointments.map((a) => a.id)).toEqual(['a1']);
   });
 
-  it('RCU staff reads all appointments (effective reception tier)', async () => {
+  it('RCU staff 403s — Appointments is an oversight module, not reception-tier (product decision 2026-08-03)', async () => {
     const { env, db } = makeEnv();
     seedScopeFixtures(db);
     const res = await list(env, sess('staff_plain', 'staff', 'RCU'));
-    expect(res.status).toBe(200);
-    const body = await res.json() as ListBody;
-    expect(body.data.appointments.map((a) => a.id).sort()).toEqual(['a1', 'a2']);
+    expect(res.status).toBe(403);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe('FORBIDDEN');
   });
 
-  it('receptionist and admin remain unscoped', async () => {
+  it('receptionist 403s; admin and superadmin remain unscoped', async () => {
     const { env, db } = makeEnv();
     seedScopeFixtures(db);
-    for (const role of ['receptionist', 'admin', 'superadmin']) {
+    const recep = await list(env, sess('admin1', 'receptionist'));
+    expect(recep.status).toBe(403);
+    for (const role of ['admin', 'superadmin']) {
       const res = await list(env, sess('admin1', role));
       expect(res.status).toBe(200);
       const body = await res.json() as ListBody;

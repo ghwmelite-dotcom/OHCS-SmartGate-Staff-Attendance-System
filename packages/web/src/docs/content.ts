@@ -454,7 +454,7 @@ export const DOC_SECTIONS: DocSection[] = [
       {
         name: 'RCU reception parity',
         status: 'live',
-        summary: 'Staff accounts in the RCU directorate are treated as receptionist-tier by every role gate — check-in (incl. register), visitors, visit log, feedback and the appointments day view — without rewriting their stored role (identity stays honest; only the gate consults the rule).',
+        summary: 'Staff accounts in the RCU directorate are treated as receptionist-tier by every role gate — check-in (incl. register), visitors, visit log, feedback — without rewriting their stored role (identity stays honest; only the gate consults the rule). Appointments is deliberately excluded: it is an oversight module for director+ and admins (product decision 2026-08-03).',
         details: [
           'Server: requireRole lifts role=staff + directorate_abbr=RCU to reception tier; client: hasRoleAccess mirrors it from the /auth/me directorate_abbr',
           'The abbreviation is an exact, case-sensitive match — org data is stable, so it is a documented constant on both sides',

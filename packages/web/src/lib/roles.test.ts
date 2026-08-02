@@ -96,11 +96,11 @@ describe('MODULE_ROLES / hasRoleAccess', () => {
 });
 
 describe('MODULE_ROLES.appointments', () => {
-  it('mirrors the API gate: reception + admins + director (CD/HoS ride director)', () => {
-    expect(MODULE_ROLES.appointments).toEqual(['superadmin', 'admin', 'receptionist', 'director']);
+  it('mirrors the API gate: admins + director only — oversight module, NOT reception-tier (product decision 2026-08-03)', () => {
+    expect(MODULE_ROLES.appointments).toEqual(['superadmin', 'admin', 'director']);
     expect(hasRoleAccess('director', MODULE_ROLES.appointments)).toBe(true);
     expect(hasRoleAccess('director', MODULE_ROLES.appointments, null)).toBe(true);
-    expect(hasRoleAccess('receptionist', MODULE_ROLES.appointments)).toBe(true);
+    expect(hasRoleAccess('receptionist', MODULE_ROLES.appointments)).toBe(false);
     expect(hasRoleAccess('it', MODULE_ROLES.appointments)).toBe(false);
     expect(hasRoleAccess('staff', MODULE_ROLES.appointments)).toBe(false);
   });
@@ -111,11 +111,11 @@ describe('RCU reception parity (client mirror of the server require-role rule)',
     expect(RCU_DIRECTORATE_ABBR).toBe('RCU');
   });
 
-  it('RCU staff reach every reception-tier module', () => {
+  it('RCU staff reach every reception-tier module — except Appointments (oversight-only since 2026-08-03)', () => {
     expect(hasRoleAccess('staff', MODULE_ROLES.visits, 'RCU')).toBe(true);
     expect(hasRoleAccess('staff', MODULE_ROLES.visitorRegistration, 'RCU')).toBe(true);
     expect(hasRoleAccess('staff', MODULE_ROLES.reports, 'RCU')).toBe(true);
-    expect(hasRoleAccess('staff', MODULE_ROLES.appointments, 'RCU')).toBe(true);
+    expect(hasRoleAccess('staff', MODULE_ROLES.appointments, 'RCU')).toBe(false);
   });
 
   it('RCU staff do NOT gain modules receptionists lack', () => {

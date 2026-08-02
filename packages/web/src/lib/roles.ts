@@ -53,8 +53,8 @@ export const MODULE_ROLES = {
   visits: ['superadmin', 'admin', 'receptionist', 'director', 'it'],
   /** Register new visitor — POST /visitors + visitor photo upload */
   visitorRegistration: ['superadmin', 'admin', 'receptionist'],
-  /** /appointments — GET /appointments/admin: reception day view + director (force-scoped) + CD/HoS (org-wide, riding role 'director') */
-  appointments: ['superadmin', 'admin', 'receptionist', 'director'],
+  /** /appointments — GET /appointments/admin: oversight module (product decision 2026-08-03) — admin tier + director (force-scoped) + CD/HoS (org-wide). NOT reception-tier; RCU parity does not grant it */
+  appointments: ['superadmin', 'admin', 'director'],
 } as const;
 
 // RCU reception parity (plan 2026-08-03-role-display-appointments-rcu) — client

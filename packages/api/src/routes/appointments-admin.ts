@@ -3,7 +3,6 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error, notFound } from '../lib/response';
-import { hasEffectiveRole } from '../lib/require-role';
 import { resolveDirectorateScope, DIRECTORATE_SCOPE_NONE } from '../lib/directorate-scope';
 import { sendTelegramMessage } from '../services/telegram';
 import { sendAppointmentConfirmedEmail, sendAppointmentDeclinedEmail } from '../services/email';
@@ -73,11 +72,11 @@ appointmentsAdminRoutes.get('/', async (c) => {
   const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20));
   const offset = (page - 1) * limit;
 
-  // Reception gets read-only visibility of all appointments; mutations stay
-  // guarded by canActOnAppointment / admin-only checks on the PATCH routes.
-  // hasEffectiveRole extends that to RCU staff (reception parity).
-  const isAdminLevel = ['superadmin', 'admin'].includes(session.role) ||
-    hasEffectiveRole(session, 'receptionist');
+  // Appointments is an OVERSIGHT module (product decision 2026-08-03): admin
+  // tier + directors (scoped) + CD/HoS (org-wide). Reception and RCU staff do
+  // NOT get it — their front-desk work lives in Check-In/Visitors/Visit Log.
+  // Approver delegates keep their scoped read below (they need it to act).
+  const isAdminLevel = ['superadmin', 'admin'].includes(session.role);
 
   // Directors get read-only oversight of their own entity (the appointment's
   // OFFICER's directorate); oversight display roles (chief director / head of
