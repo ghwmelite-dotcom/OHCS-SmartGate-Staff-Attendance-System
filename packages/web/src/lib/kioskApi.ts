@@ -35,11 +35,16 @@ async function kioskRequest<T>(path: string, body: unknown): Promise<T> {
   return json.data as T;
 }
 
-async function kioskUploadPhoto<T>(visitorId: string, kind: 'photo' | 'id-photo' | 'id-photo-back', blob: Blob): Promise<T> {
+async function kioskUploadPhoto<T>(visitorId: string, kind: 'photo' | 'id-photo' | 'id-photo-back', blob: Blob, uploadToken?: string): Promise<T> {
   const buf = await blob.arrayBuffer();
   const res = await fetch(`${API_BASE}/kiosk/visitors/${visitorId}/${kind}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'image/jpeg' },
+    headers: {
+      'Content-Type': 'image/jpeg',
+      // Required only when REPLACING a stored photo (returning visitor);
+      // minted by GET /kiosk/visitor-by-phone.
+      ...(uploadToken ? { 'x-upload-token': uploadToken } : {}),
+    },
     body: buf,
   });
   const json = (await res.json()) as ApiResponse<T>;
@@ -72,6 +77,8 @@ export interface KioskVisitorMatch {
   last_name: string;
   organisation: string | null;
   photo_url: string | null;
+  /** Short-lived token authorizing photo overwrites on this visitor (10 min). */
+  upload_token?: string | null;
 }
 
 export interface KioskVisit {
@@ -134,6 +141,8 @@ export interface KioskCheckInBody {
   directorate_id?: string;
   host_name_manual?: string;
   purpose_raw?: string;
+  /** Stable per visitor flow; retries reuse it so the server dedupes. */
+  idempotency_key?: string;
   /** AI document-gate verdict captured during ID upload. */
   id_check?: IdCheckVerdict;
   /** Reception PIN to override a failed ID document gate. */
@@ -142,9 +151,9 @@ export interface KioskCheckInBody {
 
 export const kioskApi = {
   createVisitor: (body: Record<string, unknown>) => kioskRequest<KioskVisitor>('/visitors', body),
-  uploadFacePhoto: (id: string, blob: Blob) => kioskUploadPhoto<{ photo_url: string }>(id, 'photo', blob),
-  uploadIdPhoto: (id: string, blob: Blob) => kioskUploadPhoto<IdPhotoResult>(id, 'id-photo', blob),
-  uploadIdPhotoBack: (id: string, blob: Blob) => kioskUploadPhoto<{ id_photo_back_url: string }>(id, 'id-photo-back', blob),
+  uploadFacePhoto: (id: string, blob: Blob, uploadToken?: string) => kioskUploadPhoto<{ photo_url: string }>(id, 'photo', blob, uploadToken),
+  uploadIdPhoto: (id: string, blob: Blob, uploadToken?: string) => kioskUploadPhoto<IdPhotoResult>(id, 'id-photo', blob, uploadToken),
+  uploadIdPhotoBack: (id: string, blob: Blob, uploadToken?: string) => kioskUploadPhoto<{ id_photo_back_url: string }>(id, 'id-photo-back', blob, uploadToken),
   checkIn: (body: KioskCheckInBody) => kioskRequest<KioskVisit>('/check-in', body),
   checkOut: (badgeCode: string) => kioskRequest<KioskVisit>('/check-out', { badge_code: badgeCode }),
   checkOutByPin: (pin: string) => kioskRequest<KioskVisit>('/check-out-by-pin', { pin }),

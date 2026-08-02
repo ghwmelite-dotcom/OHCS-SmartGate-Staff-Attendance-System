@@ -79,6 +79,8 @@ visitorRoutes.get('/:id', async (c) => {
     if (!inScope) return notFound(c, 'Visitor');
   }
 
+  // History is capped at 100 rows; visit_count is the FULL total so the
+  // portal can say "showing N of M" instead of silently truncating.
   const visitsSql =
     `SELECT v.*, o.name as host_name, d.abbreviation as directorate_abbr
      FROM visits v
@@ -86,11 +88,14 @@ visitorRoutes.get('/:id', async (c) => {
      LEFT JOIN directorates d ON v.directorate_id = d.id
      WHERE v.visitor_id = ?` +
     (dir !== null ? ' AND v.directorate_id = ?' : '') +
-    ` ORDER BY v.check_in_at DESC LIMIT 20`;
+    ` ORDER BY v.check_in_at DESC LIMIT 100`;
   const visitParams: unknown[] = dir !== null ? [id, dir] : [id];
   const visits = await c.env.DB.prepare(visitsSql).bind(...visitParams).all();
+  const countRow = await c.env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM visits v WHERE v.visitor_id = ?' + (dir !== null ? ' AND v.directorate_id = ?' : '')
+  ).bind(...visitParams).first<{ n: number }>();
 
-  return success(c, { ...visitor, visits: visits.results ?? [] });
+  return success(c, { ...visitor, visits: visits.results ?? [], visit_count: countRow?.n ?? 0 });
 });
 
 visitorRoutes.post('/', zValidator('json', CreateVisitorSchema), async (c) => {
@@ -114,7 +119,8 @@ visitorRoutes.put('/:id', zValidator('json', UpdateVisitorSchema), async (c) => 
   const id = c.req.param('id');
   const body = c.req.valid('json');
 
-  const existing = await c.env.DB.prepare('SELECT id FROM visitors WHERE id = ?').bind(id).first();
+  const existing = await c.env.DB.prepare(`SELECT ${VISITOR_COLUMNS} FROM visitors WHERE id = ?`)
+    .bind(id).first<Record<string, unknown>>();
   if (!existing) return notFound(c, 'Visitor');
 
   const fields: string[] = [];
@@ -134,7 +140,19 @@ visitorRoutes.put('/:id', zValidator('json', UpdateVisitorSchema), async (c) => 
     await c.env.DB.prepare(`UPDATE visitors SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
   }
 
-  const visitor = await c.env.DB.prepare(`SELECT ${VISITOR_COLUMNS} FROM visitors WHERE id = ?`).bind(id).first();
+  const visitor = await c.env.DB.prepare(`SELECT ${VISITOR_COLUMNS} FROM visitors WHERE id = ?`).bind(id).first<Record<string, unknown>>();
+
+  // PII edits are audited (same treatment as the watchlist flag below).
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'visitor.update',
+    entityType: 'visitor',
+    entityId: id,
+    summary: `Edited visitor ${existing.first_name} ${existing.last_name}`,
+    changes: diffRecords(existing, visitor, [
+      'first_name', 'last_name', 'phone', 'email', 'organisation', 'id_type', 'id_number',
+    ]),
+  });
+
   return success(c, visitor);
 });
 
@@ -189,15 +207,25 @@ visitorRoutes.delete('/:id', async (c) => {
   }
 
   const id = c.req.param('id');
-  const existing = await c.env.DB.prepare('SELECT id FROM visitors WHERE id = ?').bind(id).first();
+  const existing = await c.env.DB.prepare('SELECT id, first_name, last_name FROM visitors WHERE id = ?').bind(id)
+    .first<{ id: string; first_name: string; last_name: string }>();
   if (!existing) return notFound(c, 'Visitor');
 
-  // Delete visits first (foreign key), then notifications, then visitor
+  // Delete surveys first (visitor_surveys.visit_id → visits.id FK), then
+  // notifications, then visits, then the visitor.
   await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM visitor_surveys WHERE visit_id IN (SELECT id FROM visits WHERE visitor_id = ?)').bind(id),
     c.env.DB.prepare('DELETE FROM notifications WHERE visit_id IN (SELECT id FROM visits WHERE visitor_id = ?)').bind(id),
     c.env.DB.prepare('DELETE FROM visits WHERE visitor_id = ?').bind(id),
     c.env.DB.prepare('DELETE FROM visitors WHERE id = ?').bind(id),
   ]);
+
+  await recordAudit(c.env, auditActorFromContext(c), {
+    action: 'visitor.delete',
+    entityType: 'visitor',
+    entityId: id,
+    summary: `Deleted visitor ${existing.first_name} ${existing.last_name} and all related visits`,
+  });
 
   return success(c, { message: 'Visitor and all related visits deleted' });
 });

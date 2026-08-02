@@ -79,9 +79,15 @@ surveyRoutes.get('/summary', zValidator('query', summaryQuerySchema), async (c) 
     `SELECT s.rating, COUNT(*) AS n FROM visitor_surveys s ${where} GROUP BY s.rating`
   ).bind(...binds).all<{ rating: number; n: number }>();
 
-  // Denominator for the response rate: visits checked out in the same window.
-  // Keyed on check_out_at (the moment the survey was offered), not check_in_at.
-  const visitClauses: string[] = ["status = 'checked_out'"];
+  // Denominator for the response rate: survey tokens are minted ONLY at kiosk
+  // checkout, so counting every checked-out visit (reception-dashboard and
+  // swept checkouts were never offered a survey) understates the rate. visits
+  // has no checkout-channel column, so the denominator is the queryable kiosk
+  // cohort: checked-out visits that were checked in at the kiosk. (Known
+  // approximation — reception-checked-in visitors who leave via the kiosk are
+  // excluded, and kiosk check-ins checked out at the desk are included; a
+  // future check_out_source column would make this exact.)
+  const visitClauses: string[] = ["status = 'checked_out'", "check_in_source = 'kiosk'"];
   const visitBinds: unknown[] = [];
   if (q.from) { visitClauses.push('check_out_at >= ?'); visitBinds.push(`${q.from}T00:00:00Z`); }
   if (q.to) { visitClauses.push('check_out_at <= ?'); visitBinds.push(`${q.to}T23:59:59Z`); }
@@ -94,13 +100,13 @@ surveyRoutes.get('/summary', zValidator('query', summaryQuerySchema), async (c) 
   for (const d of dist.results ?? []) distribution[String(d.rating)] = d.n;
 
   const total = agg?.total ?? 0;
-  const checkoutCount = checkouts?.n ?? 0;
+  const kioskCheckouts = checkouts?.n ?? 0;
   return success(c, {
     average: agg?.average ?? null,
     total,
     low: agg?.low ?? 0,
     distribution,
-    checkouts: checkoutCount,
-    response_rate: checkoutCount > 0 ? total / checkoutCount : null,
+    kiosk_checkouts: kioskCheckouts,
+    response_rate: kioskCheckouts > 0 ? total / kioskCheckouts : null,
   });
 });

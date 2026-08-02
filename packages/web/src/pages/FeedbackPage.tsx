@@ -36,7 +36,8 @@ interface SurveySummary {
   total: number;
   low: number;
   distribution: Record<string, number>;
-  checkouts: number;
+  // Kiosk-cohort checkouts (the only visits ever offered a survey).
+  kiosk_checkouts: number;
   response_rate: number | null;
 }
 
@@ -143,14 +144,14 @@ export function FeedbackPage() {
           label="Responses"
           tone="primary"
           value={summary?.total ?? 0}
-          sub={summary ? `${summary.checkouts} checkouts in period` : null}
+          sub={summary ? `${summary.kiosk_checkouts} kiosk checkouts in period` : null}
         />
         <StatCard
           icon={<Percent className="h-4 w-4" />}
           label="Response rate"
           tone="info"
           value={summary?.response_rate != null ? `${Math.round(summary.response_rate * 100)}%` : '--'}
-          sub="of completed checkouts"
+          sub="of kiosk checkouts (survey offered at the kiosk)"
         />
         <StatCard
           icon={<AlertTriangle className="h-4 w-4" />}

@@ -43,10 +43,15 @@ reportRoutes.get('/visits', zValidator('query', reportSchema), async (c) => {
     params.push(directorate_id);
   }
 
+  // Fetch one extra row as a cheap "are there more?" probe so the response
+  // can flag truncation instead of silently presenting a partial export.
   sql += ' ORDER BY v.check_in_at DESC LIMIT ?';
-  params.push(limit);
+  params.push(limit + 1);
 
   const results = await c.env.DB.prepare(sql).bind(...params).all();
+  const fetched = results.results ?? [];
+  const truncated = fetched.length > limit;
+  const rows = truncated ? fetched.slice(0, limit) : fetched;
 
   // Summary stats — scope by directorate when a filter is in effect
   // (including the director-isolation override above).
@@ -81,7 +86,8 @@ reportRoutes.get('/visits', zValidator('query', reportSchema), async (c) => {
       from,
       to,
     },
-    visits: results.results ?? [],
+    visits: rows,
+    truncated,
   });
 });
 
@@ -96,6 +102,22 @@ interface EvacuationVisitor {
   directorate: string | null;
   since: string;
   party_size: number | null;
+  party_names: string[];
+}
+
+// Raw SQL row shape before party_names JSON parsing.
+type EvacuationVisitorRow = Omit<EvacuationVisitor, 'party_names'> & { party_names: string | null };
+
+// party_names is stored as a JSON array string (delegation mode); parse
+// defensively — a malformed value degrades to an empty list, never a 500.
+function parsePartyNames(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 interface EvacuationStaff {
@@ -123,14 +145,14 @@ async function buildEvacuationRoll(env: Env): Promise<EvacuationRoll> {
       `SELECT (vis.first_name || ' ' || vis.last_name) AS name, v.badge_code,
               COALESCE(o.name, v.host_name_manual) AS host_name,
               d.abbreviation AS directorate,
-              v.check_in_at AS since, v.party_size
+              v.check_in_at AS since, v.party_size, v.party_names
        FROM visits v
        JOIN visitors vis ON v.visitor_id = vis.id
        LEFT JOIN officers o ON v.host_officer_id = o.id
        LEFT JOIN directorates d ON v.directorate_id = d.id
        WHERE v.status = 'checked_in'
        ORDER BY v.check_in_at`
-    ).all<EvacuationVisitor>(),
+    ).all<EvacuationVisitorRow>(),
 
     env.DB.prepare(
       `SELECT COALESCE(SUM(COALESCE(v.party_size, 1)), 0) AS n
@@ -157,7 +179,7 @@ async function buildEvacuationRoll(env: Env): Promise<EvacuationRoll> {
     ).bind(today, today).all<EvacuationStaff>(),
   ]);
 
-  const visitors = visitorRows.results ?? [];
+  const visitors = (visitorRows.results ?? []).map((r) => ({ ...r, party_names: parsePartyNames(r.party_names) }));
   const staff = staffRows.results ?? [];
   const visitorTotal = visitorCount?.n ?? 0;
   return {

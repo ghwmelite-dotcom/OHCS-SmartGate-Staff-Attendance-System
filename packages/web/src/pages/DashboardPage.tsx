@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, type Visit } from '@/lib/api';
@@ -45,7 +45,7 @@ export function DashboardPage() {
     queryKey: ['visits', 'today'],
     queryFn: () =>
       api.get<Visit[]>(
-        `/visits?date=${new Date().toISOString().slice(0, 10)}&limit=100`
+        `/visits?date=${new Date().toISOString().slice(0, 10)}&limit=500`
       ),
   });
 
@@ -414,6 +414,7 @@ interface EvacuationRoll {
     directorate: string | null;
     since: string;
     party_size: number | null;
+    party_names: string[];
   }[];
   staff: {
     name: string;
@@ -527,18 +528,29 @@ function EvacuationRollModal({ onClose }: { onClose: () => void }) {
                     </thead>
                     <tbody>
                       {roll.visitors.map((v, i) => (
-                        <tr key={i} className="border-b border-border last:border-0">
-                          <td className="py-1.5 pr-3 font-medium text-foreground">
-                            {v.name}
-                            {(v.party_size ?? 1) > 1 && (
-                              <span className="text-muted"> ×{v.party_size}</span>
-                            )}
-                          </td>
-                          <td className="py-1.5 pr-3 font-mono text-[12px] text-muted">{v.badge_code ?? '—'}</td>
-                          <td className="py-1.5 pr-3 text-muted">{v.host_name ?? '—'}</td>
-                          <td className="py-1.5 pr-3 text-muted">{v.directorate ?? '—'}</td>
-                          <td className="py-1.5 text-muted">{formatTime(v.since)}</td>
-                        </tr>
+                        <Fragment key={i}>
+                          <tr className="border-b border-border last:border-0">
+                            <td className="py-1.5 pr-3 font-medium text-foreground">
+                              {v.name}
+                              {(v.party_size ?? 1) > 1 && (
+                                <span className="text-muted"> ×{v.party_size}</span>
+                              )}
+                            </td>
+                            <td className="py-1.5 pr-3 font-mono text-[12px] text-muted">{v.badge_code ?? '—'}</td>
+                            <td className="py-1.5 pr-3 text-muted">{v.host_name ?? '—'}</td>
+                            <td className="py-1.5 pr-3 text-muted">{v.directorate ?? '—'}</td>
+                            <td className="py-1.5 text-muted">{formatTime(v.since)}</td>
+                          </tr>
+                          {/* Delegation members by name — the roll must list
+                              every person, not just "×N". Indented under the
+                              lead visitor; prints with the roll. */}
+                          {(v.party_names ?? []).map((n, j) => (
+                            <tr key={`${i}-p${j}`} className="border-b border-border last:border-0">
+                              <td className="py-1 pr-3 pl-6 text-[12px] text-muted">↳ {n}</td>
+                              <td colSpan={4} className="py-1 text-[12px] text-muted">with {v.name}</td>
+                            </tr>
+                          ))}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>

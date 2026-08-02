@@ -275,7 +275,11 @@ export function VisitorDetailPage() {
       <div className="bg-surface rounded-xl border border-border shadow-sm">
         <div className="px-5 py-4 border-b border-border">
           <h3 className="text-sm font-semibold text-foreground">Visit History</h3>
-          <p className="text-xs text-muted mt-0.5">Last 20 visits</p>
+          <p className="text-xs text-muted mt-0.5">
+            {visitor.visit_count != null && visitor.visit_count > visitor.visits.length
+              ? `Showing latest ${visitor.visits.length} of ${visitor.visit_count} visits`
+              : `${visitor.visits.length} visit${visitor.visits.length === 1 ? '' : 's'}`}
+          </p>
         </div>
 
         {visitor.visits.length === 0 ? (

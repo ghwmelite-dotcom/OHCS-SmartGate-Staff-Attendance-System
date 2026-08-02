@@ -21,7 +21,7 @@ export function formatCsvCell(cell: string): string {
   return `"${guarded.replace(/"/g, '""')}"`;
 }
 
-export function generateCSV(visits: VisitRow[]): string {
+export function generateCSV(visits: VisitRow[], note?: string): string {
   const headers = [
     'Date', 'Visitor Name', 'Organisation', 'Host Officer', 'Directorate',
     'Purpose', 'Check In', 'Check Out', 'Duration (min)', 'Status', 'Badge Code',
@@ -41,7 +41,10 @@ export function generateCSV(visits: VisitRow[]): string {
     v.badge_code ?? '',
   ]);
 
-  const csvContent = [headers, ...rows]
+  // Truncation marker rides as a leading single-cell line so a capped export
+  // can't masquerade as a complete one.
+  const lines: string[][] = note ? [[note], headers, ...rows] : [headers, ...rows];
+  const csvContent = lines
     .map(row => row.map(formatCsvCell).join(','))
     .join('\n');
 

@@ -1,5 +1,6 @@
 import type { Env } from '../types';
 import { encryptText, decryptToText } from './backup-crypto';
+import { alertAdminError } from '../lib/error-alert';
 
 /**
  * Daily D1 -> R2 table backup.
@@ -24,8 +25,8 @@ export interface BackupResult {
   // Tables whose export failed (logged, not thrown). Callers about to do
   // something destructive MUST check this is empty before trusting the backup.
   failed: string[];
-  // Whether the payload was written encrypted (false = BACKUP_ENCRYPTION_KEY
-  // unset → plaintext PII at rest).
+  // Whether the payload was written encrypted. false means the key was unset
+  // and the backup was SKIPPED (fail-closed) — tables/failed reflect that.
   encrypted: boolean;
 }
 
@@ -59,8 +60,15 @@ export async function exportBackupToR2(env: Env): Promise<BackupResult> {
   const tables: { name: string; rows: number }[] = [];
   const failed: string[] = [];
 
+  // Fail CLOSED: without the encryption key a backup would be plaintext PII at
+  // rest in R2 — that is a provisioning error, not a warning condition. Skip
+  // the backup entirely, report every table failed (so destructive operations
+  // gated on a complete backup refuse to proceed), and page the admins.
   if (!env.BACKUP_ENCRYPTION_KEY) {
-    console.warn('[backup] BACKUP_ENCRYPTION_KEY not set — writing plaintext backup (PII at rest in R2).');
+    const err = new Error('BACKUP_ENCRYPTION_KEY is not set — backup SKIPPED (fail-closed: no plaintext PII written to R2)');
+    console.error(`[backup] ${err.message}`);
+    await alertAdminError(env, 'cron:backup', err);
+    return { date, tables: [], pruned: 0, failed: [...BACKUP_TABLES], encrypted: false };
   }
 
   for (const t of BACKUP_TABLES) {

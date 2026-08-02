@@ -46,7 +46,7 @@ export function ReportsPage() {
     queryFn: () => {
       let url = `/reports/visits?from=${from}&to=${to}&limit=500`;
       if (directorateId) url += `&directorate_id=${directorateId}`;
-      return api.get<{ summary: Record<string, unknown>; visits: Array<Record<string, unknown>> }>(url);
+      return api.get<{ summary: Record<string, unknown>; visits: Array<Record<string, unknown>>; truncated?: boolean }>(url);
     },
     enabled: false,
   });
@@ -70,12 +70,17 @@ export function ReportsPage() {
         first_name: string; last_name: string; organisation: string | null;
         host_name: string | null; directorate_abbr: string | null;
       }>;
+      // Never let a partial export masquerade as a complete one — the note
+      // goes on screen AND into the PDF/CSV itself.
+      const truncationNote = data.truncated
+        ? `Export shows first ${visits.length} of ${summary.total_visits} visits — narrow the date range`
+        : undefined;
 
       if (type === 'pdf') {
-        const doc = generatePDF(summary, visits);
+        const doc = generatePDF(summary, visits, truncationNote);
         doc.save(`OHCS-VMS-Report-${from}.pdf`);
       } else {
-        const csv = generateCSV(visits);
+        const csv = generateCSV(visits, truncationNote);
         downloadCSV(csv, `OHCS-VMS-Export-${from}.csv`);
       }
     } finally {
@@ -86,6 +91,7 @@ export function ReportsPage() {
   const previewSummary = reportData?.data?.summary as {
     total_visits?: number; unique_visitors?: number;
   } | undefined;
+  const previewTruncated = reportData?.data?.truncated === true;
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
@@ -179,6 +185,11 @@ export function ReportsPage() {
                 <> &middot; {previewSummary.total_visits} visits, {previewSummary.unique_visitors} unique visitors</>
               )}
             </p>
+            {previewTruncated && previewSummary?.total_visits != null && (
+              <p className="text-[13px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+                Export shows first {reportData?.data?.visits.length ?? 0} of {previewSummary.total_visits} visits — narrow the date range
+              </p>
+            )}
           </div>
 
           {/* Actions */}

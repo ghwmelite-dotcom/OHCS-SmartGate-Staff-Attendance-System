@@ -165,22 +165,53 @@ kioskRoutes.get('/directorates', async (c) => {
 // finished a visit reveals nothing. Identical 404 for unknown numbers, invalid
 // input, and no-completed-visit (no enumeration oracle). Returns only the
 // fields the kiosk needs. No audit entry (public read); devLog for abuse watch.
+// Also mints the short-lived upload_token that authorizes photo OVERWRITES on
+// this visitor (see assertPhotoOverwriteAllowed below).
 kioskRoutes.get('/visitor-by-phone', async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
   const forms = normalizeKioskPhone(c.req.query('phone') ?? '');
   if (!forms) return notFound(c, 'Visitor');
   devLog(c.env, '[kiosk] visitor-by-phone lookup', forms.local);
-  const row = await c.env.DB.prepare(VISITOR_BY_PHONE_SQL).bind(forms.local, forms.intl).first();
+  const row = await c.env.DB.prepare(VISITOR_BY_PHONE_SQL).bind(forms.local, forms.intl)
+    .first<{ id: string }>();
   if (!row) return notFound(c, 'Visitor');
-  return success(c, row);
+  const uploadToken = crypto.randomUUID();
+  await c.env.KV.put(`photo-upload:${uploadToken}`, row.id, { expirationTtl: PHOTO_UPLOAD_TOKEN_TTL_S });
+  return success(c, { ...row, upload_token: uploadToken });
 });
+
+const PHOTO_UPLOAD_TOKEN_TTL_S = 600; // 10 min — one kiosk visit's worth
+
+// Photo-overwrite guard. The three photo routes are public and visitor ids are
+// knowable (visitor-by-phone), so REPLACING a stored photo requires the
+// short-lived upload_token minted by visitor-by-phone (header x-upload-token
+// or ?upload_token=). FIRST upload for a visitor with no stored photo stays
+// open — the new-visitor kiosk flow must not break. Returns a Response when
+// the request is rejected, null when it may proceed. `column` is one of three
+// fixed literals — safe to interpolate.
+async function assertPhotoOverwriteAllowed(
+  c: Context<{ Bindings: Env }>,
+  visitorId: string,
+  column: 'photo_url' | 'id_photo_url' | 'id_photo_back_url',
+): Promise<Response | null> {
+  const visitor = await c.env.DB.prepare(`SELECT id, ${column} AS existing FROM visitors WHERE id = ?`)
+    .bind(visitorId).first<{ id: string; existing: string | null }>();
+  if (!visitor) return notFound(c, 'Visitor');
+  if (!visitor.existing) return null; // first upload — open
+  const token = c.req.header('x-upload-token') ?? c.req.query('upload_token') ?? '';
+  const boundVisitorId = token ? await c.env.KV.get(`photo-upload:${token}`) : null;
+  if (!boundVisitorId || boundVisitorId !== visitorId) {
+    return error(c, 'UPLOAD_TOKEN_INVALID', 'A valid upload token is required to replace a stored photo', 403);
+  }
+  return null;
+}
 
 // Raw-JPEG face photo upload.
 kioskRoutes.post('/visitors/:id/photo', async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
   const visitorId = c.req.param('id');
-  const visitor = await c.env.DB.prepare('SELECT id FROM visitors WHERE id = ?').bind(visitorId).first();
-  if (!visitor) return notFound(c, 'Visitor');
+  const blocked = await assertPhotoOverwriteAllowed(c, visitorId, 'photo_url');
+  if (blocked) return blocked;
   if (Number(c.req.header('content-length') ?? '0') > MAX_PHOTO_BYTES) {
     return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
   }
@@ -197,8 +228,8 @@ kioskRoutes.post('/visitors/:id/photo', async (c) => {
 kioskRoutes.post('/visitors/:id/id-photo', async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
   const visitorId = c.req.param('id');
-  const visitor = await c.env.DB.prepare('SELECT id FROM visitors WHERE id = ?').bind(visitorId).first();
-  if (!visitor) return notFound(c, 'Visitor');
+  const blocked = await assertPhotoOverwriteAllowed(c, visitorId, 'id_photo_url');
+  if (blocked) return blocked;
   if (Number(c.req.header('content-length') ?? '0') > MAX_PHOTO_BYTES) {
     return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
   }
@@ -222,8 +253,8 @@ kioskRoutes.post('/visitors/:id/id-photo', async (c) => {
 kioskRoutes.post('/visitors/:id/id-photo-back', async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
   const visitorId = c.req.param('id');
-  const visitor = await c.env.DB.prepare('SELECT id FROM visitors WHERE id = ?').bind(visitorId).first();
-  if (!visitor) return notFound(c, 'Visitor');
+  const blocked = await assertPhotoOverwriteAllowed(c, visitorId, 'id_photo_back_url');
+  if (blocked) return blocked;
   if (Number(c.req.header('content-length') ?? '0') > MAX_PHOTO_BYTES) {
     return error(c, 'TOO_LARGE', 'Photo must be under 500KB', 400);
   }

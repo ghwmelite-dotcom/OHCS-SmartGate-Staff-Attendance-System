@@ -39,7 +39,6 @@ interface AppointmentLookup {
   directorate_floor?: string | null;
   directorate_wing?: string | null;
   visitor_name: string;
-  visitor_phone: string;
   appointment_date: string;
   time_slot: string;
   status: string;
@@ -161,7 +160,7 @@ export function KioskPage() {
 
   async function handleFaceCapture(blob: Blob) {
     setMode('submitting');
-    if (visitorId) { try { await kioskApi.uploadFacePhoto(visitorId, blob); } catch { /* continue */ } }
+    if (visitorId) { try { await kioskApi.uploadFacePhoto(visitorId, blob, returningVisitor?.upload_token ?? undefined); } catch { /* continue */ } }
     await finishCheckIn();
   }
 

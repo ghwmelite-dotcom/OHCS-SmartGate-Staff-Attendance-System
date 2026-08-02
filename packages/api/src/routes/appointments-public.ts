@@ -96,6 +96,24 @@ interface AppointmentWithOfficer extends AppointmentRow {
   directorate_wing: string | null;
 }
 
+// Slim projection for the PUBLIC ref lookup — display fields only, no
+// visitor_phone / visitor_email (PII minimization on an unauthenticated route).
+interface AppointmentRefLookup {
+  id: string;
+  reference_code: string;
+  appointment_date: string;
+  time_slot: string;
+  visitor_name: string;
+  organisation: string | null;
+  purpose: string;
+  status: string;
+  officer_name: string;
+  officer_title: string | null;
+  directorate_name: string;
+  directorate_floor: string | null;
+  directorate_wing: string | null;
+}
+
 // ─── Route: GET /officers ────────────────────────────────────────────────────
 
 appointmentsPublicRoutes.get('/officers', async (c) => {
@@ -314,18 +332,30 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
 
 // ─── Route: GET /ref/:code ───────────────────────────────────────────────────
 
+// Public kiosk lookup. Explicit display columns (never a.*): visitor phone and
+// email are NOT display data — a guessed 6-char reference must not leak PII.
+// Per-IP rate limit mirrors /arrive.
 appointmentsPublicRoutes.get('/ref/:code', async (c) => {
+  const clientIP = c.req.header('CF-Connecting-IP') ?? 'unknown';
+  const rl = await rateLimit(c.env, `appt-ref:${clientIP}`, 20, 60);
+  if (!rl.allowed) {
+    c.header('Retry-After', String(rl.retryAfter));
+    return error(c, 'RATE_LIMITED', 'Too many requests. Please try again shortly.', 429);
+  }
+
   const code = c.req.param('code');
 
   const appointment = await c.env.DB.prepare(
-    `SELECT a.*, o.name as officer_name, o.title as officer_title,
+    `SELECT a.id, a.reference_code, a.appointment_date, a.time_slot,
+            a.visitor_name, a.organisation, a.purpose, a.status,
+            o.name as officer_name, o.title as officer_title,
             d.name as directorate_name,
             d.floor as directorate_floor, d.wing as directorate_wing
      FROM appointments a
      JOIN officers o ON o.id = a.officer_id
      JOIN directorates d ON d.id = o.directorate_id
      WHERE a.reference_code = ?`
-  ).bind(code).first<AppointmentWithOfficer>();
+  ).bind(code).first<AppointmentRefLookup>();
 
   if (!appointment) {
     return notFound(c, 'Appointment');

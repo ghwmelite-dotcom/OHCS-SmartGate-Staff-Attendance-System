@@ -151,6 +151,8 @@ export interface Directorate {
 
 export interface VisitorDetail extends Visitor {
   visits: Visit[];
+  /** Total visit count (visits array itself is capped at the latest 100). */
+  visit_count?: number;
 }
 
 export interface Notification {

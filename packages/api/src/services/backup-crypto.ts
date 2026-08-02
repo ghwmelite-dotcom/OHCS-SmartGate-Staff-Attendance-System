@@ -13,9 +13,10 @@
  * `decryptToText` auto-detects: a parsed envelope object is decrypted; a JSON
  * array is returned as-is (legacy passthrough), so old backups stay restorable.
  *
- * Deploy-safe: if no key is configured, `encryptText` returns the plaintext
- * unchanged and the caller writes a plaintext backup (with a warning logged by
- * the caller). Nothing breaks when the secret is absent.
+ * Fail-closed: if no key is configured the backup caller (services/backup.ts)
+ * skips the backup entirely and pages the admins — no plaintext PII is ever
+ * written. `encryptText` keeps its plaintext passthrough only so legacy
+ * pre-encryption backups remain restorable via `decryptToText`.
  */
 
 const ENVELOPE_VERSION = 1;
@@ -56,7 +57,8 @@ async function importKey(keyB64: string): Promise<CryptoKey> {
 
 /**
  * Encrypt `plaintext` into a serialized envelope string. If `keyB64` is empty/
- * undefined, returns `plaintext` unchanged (caller writes a plaintext backup).
+ * undefined, returns `plaintext` unchanged — retained only for legacy-backup
+ * compatibility; the backup path itself fails closed when the key is absent.
  */
 export async function encryptText(plaintext: string, keyB64: string | undefined): Promise<string> {
   if (!keyB64) return plaintext;

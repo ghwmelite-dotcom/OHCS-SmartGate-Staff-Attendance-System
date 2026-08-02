@@ -26,7 +26,7 @@ interface VisitRow {
   directorate_abbr: string | null;
 }
 
-export function generatePDF(summary: ReportSummary, visits: VisitRow[]) {
+export function generatePDF(summary: ReportSummary, visits: VisitRow[], note?: string) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
 
@@ -66,8 +66,18 @@ export function generatePDF(summary: ReportSummary, visits: VisitRow[]) {
   doc.setFillColor(0, 107, 63); // Green
   doc.rect(third * 2, barY, third, 1.5, 'F');
 
+  // Truncation marker: a capped export must say so on its face (amber line
+  // under the title band, same treatment as the attendance filtersNote).
+  let summaryY = 35;
+  if (note) {
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(180, 120, 20); // amber
+    doc.text(note, 14, 32.5);
+    summaryY = 40;
+  }
+
   // Summary stats
-  const summaryY = 35;
   doc.setTextColor(28, 24, 16);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
