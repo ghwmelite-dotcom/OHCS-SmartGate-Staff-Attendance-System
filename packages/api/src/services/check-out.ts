@@ -1,22 +1,28 @@
 import type { Env } from '../types';
 import { SELECT_VISIT_WITH_JOINS } from './visit-queries';
 import { closeArrivalThread } from './telegram';
+import { parseCapturedAt } from '../lib/clock-date';
 
 export type CheckOutOutcome =
   | { ok: true; visit: Record<string, unknown> }
   | { ok: false; code: 'NOT_FOUND' | 'ALREADY_CHECKED_OUT' };
 
-export async function checkOutById(env: Env, visitId: string): Promise<CheckOutOutcome> {
+// capturedAt: client capture time from an offline visit-queue replay.
+// Validated server-side ([now-48h, now+5min], else ignored) and honored as
+// check_out_at so a tap made at 17:05 that drains at 18:20 records ~17:05.
+export async function checkOutById(env: Env, visitId: string, capturedAt?: string | null): Promise<CheckOutOutcome> {
   const visit = await env.DB.prepare('SELECT id, check_in_at, status FROM visits WHERE id = ?')
     .bind(visitId)
     .first<{ id: string; check_in_at: string; status: string }>();
   if (!visit) return { ok: false, code: 'NOT_FOUND' };
   if (visit.status !== 'checked_in') return { ok: false, code: 'ALREADY_CHECKED_OUT' };
 
-  const checkOutAt = new Date().toISOString();
-  const durationMinutes = Math.round(
+  const checkOutAt = parseCapturedAt(capturedAt ?? undefined) ?? new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // Clamp at 0 — a validated-but-early captured_at must never write a
+  // negative duration.
+  const durationMinutes = Math.max(0, Math.round(
     (new Date(checkOutAt).getTime() - new Date(visit.check_in_at).getTime()) / 60000
-  );
+  ));
 
   const res = await env.DB.prepare(
     `UPDATE visits SET status = 'checked_out', check_out_at = ?, duration_minutes = ? WHERE id = ? AND status = 'checked_in'`
@@ -49,13 +55,16 @@ export async function checkOutByBadgeCode(env: Env, badgeCode: string): Promise<
   return checkOutById(env, row.id);
 }
 
-// PIN-based checkout: matches only checked-in visits from today so stale PINs
-// from previous visits (same visitor, same day) never accidentally match.
+// PIN-based checkout: matches checked-in visits from the last 24 HOURS (not
+// calendar-today — the old date('now') rule meant yesterday's stragglers
+// could never be PIN-checked-out the next morning). Still bounded, so stale
+// PINs from older visits never match. julianday comparison because
+// check_in_at is ISO-8601 ('T'/'Z') while datetime('now') is not.
 export async function checkOutByPin(env: Env, pin: string): Promise<CheckOutOutcome> {
   const row = await env.DB.prepare(
     `SELECT id FROM visits
      WHERE checkout_pin = ? AND status = 'checked_in'
-       AND date(check_in_at) = date('now')
+       AND julianday(check_in_at) >= julianday('now', '-24 hours')
      LIMIT 1`
   ).bind(pin).first<{ id: string }>();
   if (!row) return { ok: false, code: 'NOT_FOUND' };

@@ -75,6 +75,10 @@ export const DOC_SECTIONS: DocSection[] = [
           'Queues: clock-queue (staff app), visit-queue (VMS)',
           'Every mutation carries a crypto.randomUUID() idempotency key',
           'Server dedupes via partial unique indexes — replay can never double-write',
+          'Replay classifies outcomes: 2xx/dedupe = delivered; network/5xx/429 = retried (10-attempt cap); other 4xx or >24h old = marked failed and RETAINED',
+          'Failed visit-queue entries surface in an amber banner on the dashboard and check-in page until reception dismisses them — nothing is silently dropped',
+          'Queued bodies carry the original captured_at; the server honors it within a 48h window so a 09:00 arrival drained at 11:00 records ~09:00',
+          'Kiosk check-in and visitor registration mint idempotency keys too; a failed kiosk check-in shows an error screen with retry, never the success screen',
         ],
       },
       {

@@ -29,7 +29,7 @@ const visitorSchema = z.object({
 });
 type VisitorForm = z.infer<typeof visitorSchema>;
 
-type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'office-blocked' | 'checkout-scan' | 'checkout-pin' | 'checkout-confirm' | 'checkout-done' | 'survey-comment' | 'survey-thanks' | 'appointment' | 'appointment-scan' | 'appointment-confirm' | 'appointment-done' | 'returning-phone' | 'returning-confirm';
+type Mode = 'welcome' | 'form' | 'face' | 'submitting' | 'success' | 'error' | 'office-blocked' | 'checkout-scan' | 'checkout-pin' | 'checkout-confirm' | 'checkout-done' | 'survey-comment' | 'survey-thanks' | 'appointment' | 'appointment-scan' | 'appointment-confirm' | 'appointment-done' | 'returning-phone' | 'returning-confirm';
 
 interface AppointmentLookup {
   id: string;
@@ -77,6 +77,12 @@ export function KioskPage() {
   const [pinSubmitting, setPinSubmitting] = useState(false);
   const checkingInRef = useRef(false);
   const checkingOutRef = useRef(false);
+  // Idempotency keys for the visitor-register + check-in POSTs. Minted once
+  // per visitor flow and REUSED across retries (error-screen retry, office
+  // override retry), so a retry after a lost response dedupes server-side
+  // instead of double-creating the visitor/visit.
+  const visitorKeyRef = useRef<string | null>(null);
+  const checkInKeyRef = useRef<string | null>(null);
 
   // Post-checkout satisfaction survey (spec: 2026-07-20-visitor-satisfaction-survey-design).
   // The single-use token arrives on the checkout response; rating state lives
@@ -142,6 +148,7 @@ export function KioskPage() {
           last_name: data.last_name,
           phone: data.phone || '',
           organisation: data.organisation || '',
+          idempotency_key: (visitorKeyRef.current ??= crypto.randomUUID()),
         });
         id = visitor.id;
         setVisitorId(id);
@@ -175,6 +182,7 @@ export function KioskPage() {
         directorate_id: form.getValues('directorate_id'),
         host_name_manual: form.getValues('host_name'),
         purpose_raw: form.getValues('purpose_raw'),
+        idempotency_key: (checkInKeyRef.current ??= crypto.randomUUID()),
         ...(overridePinArg ? { reception_override_pin: overridePinArg } : {}),
       });
       setCreatedVisit(visit);
@@ -192,8 +200,12 @@ export function KioskPage() {
         }
         setMode('office-blocked'); // prompt for the reception override
       } else {
+        // Real failure — a dedicated error screen, NOT the success layout.
+        // Try Again reuses the same idempotency key, so if the first attempt
+        // actually landed (lost response) the server dedupes instead of
+        // double-creating the visit.
         setSubmitError(e instanceof Error ? e.message : 'Check-in failed. Please see reception.');
-        setMode('success');
+        setMode('error');
       }
     } finally {
       checkingInRef.current = false;
@@ -213,6 +225,8 @@ export function KioskPage() {
     setCheckoutVisit(null);
     checkingInRef.current = false;
     checkingOutRef.current = false;
+    visitorKeyRef.current = null;
+    checkInKeyRef.current = null;
     setApptRef('');
     setApptData(null);
     setApptLoading(false);
@@ -698,7 +712,7 @@ export function KioskPage() {
 
         {mode === 'success' && (
           <div className="mt-6">
-            {createdVisit?.badge_code ? (
+            {createdVisit?.badge_code && (
               <div className="bg-surface rounded-2xl border border-border shadow-sm p-6 text-center space-y-4">
                 <div className="w-14 h-14 bg-success/10 rounded-full flex items-center justify-center mx-auto">
                   <CheckCircle2 className="h-7 w-7 text-success" />
@@ -723,12 +737,27 @@ export function KioskPage() {
                 )}
                 <button onClick={resetAll} className="h-12 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Done</button>
               </div>
-            ) : (
-              <div className="text-center space-y-4">
-                <p className="text-danger text-sm">{submitError ?? 'Something went wrong. Please see reception.'}</p>
-                <button onClick={resetAll} className="h-12 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Done</button>
-              </div>
             )}
+          </div>
+        )}
+
+        {mode === 'error' && (
+          <div className="mt-6">
+            <div className="bg-surface rounded-2xl border border-border shadow-sm p-6 text-center space-y-4">
+              <div className="w-14 h-14 bg-danger/10 rounded-full flex items-center justify-center mx-auto">
+                <ShieldAlert className="h-7 w-7 text-danger" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Check-in Didn&apos;t Go Through</h2>
+                <p className="text-sm text-muted mt-1">
+                  {submitError ?? 'Something went wrong.'} You were NOT checked in — try again, or ask reception for help.
+                </p>
+              </div>
+              <div className="flex gap-3 justify-center">
+                <button onClick={() => void finishCheckIn()} className="h-12 px-6 bg-primary text-white text-sm font-semibold rounded-xl">Try Again</button>
+                <button onClick={resetAll} className="h-12 px-6 bg-surface text-foreground text-sm font-semibold rounded-xl border border-border">Start Over</button>
+              </div>
+            </div>
           </div>
         )}
 

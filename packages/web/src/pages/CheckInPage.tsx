@@ -10,6 +10,7 @@ import { apiOrQueue, type ApiOrQueueResult } from '@/lib/offlineQueue';
 import { cn, getInitials, formatDate } from '@/lib/utils';
 import { BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
+import { QueuedFailuresBanner } from '@/components/QueuedFailuresBanner';
 import { FieldWrapper } from '@/components/checkin/FieldWrapper';
 import { PurposeRoutingHint } from '@/components/checkin/PurposeRoutingHint';
 import { OfficerCombobox } from '@/components/checkin/OfficerCombobox';
@@ -250,6 +251,9 @@ export function CheckInPage() {
           return <StepIndicator steps={indicatorSteps} currentIdx={idx} />;
         })()}
       </div>
+
+      {/* Offline queue failures — check-ins the SW could not deliver */}
+      <QueuedFailuresBanner />
 
       {/* STEP 1: Search visitor */}
       {step === 'search' && (

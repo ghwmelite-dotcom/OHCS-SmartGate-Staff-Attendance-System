@@ -2,6 +2,7 @@ import type { Env } from '../types';
 import { classifyAndUpdate } from './classifier';
 import { notifyOnCheckIn } from './notifier';
 import { SELECT_VISIT_WITH_JOINS } from './visit-queries';
+import { parseCapturedAt } from '../lib/clock-date';
 
 export interface CheckInParams {
   visitor_id: string;
@@ -14,6 +15,10 @@ export interface CheckInParams {
   id_photo_check?: string | null;
   party_size?: number | null;
   party_names?: string[] | null;
+  // Client capture time (offline visit-queue replays). Validated server-side
+  // ([now-48h, now+5min], else ignored); honored as check_in_at so a 09:00
+  // arrival drained at 11:00 records ~09:00.
+  captured_at?: string | null;
   created_by: string | null;
   check_in_source: 'staff' | 'kiosk';
 }
@@ -85,16 +90,19 @@ export async function performCheckIn(
     ? JSON.stringify(params.party_names)
     : null;
 
+  // Validated client capture time (offline replay) ?? DB-default now.
+  const checkInAt = parseCapturedAt(params.captured_at ?? undefined);
+
   const insertBatch = (code: string, checkoutPin: string) =>
     env.DB.batch([
       env.DB.prepare(
-        `INSERT INTO visits (id, visitor_id, host_officer_id, host_name_manual, directorate_id, purpose_raw, purpose_category, badge_code, checkout_pin, status, created_by, idempotency_key, check_in_source, id_photo_check, party_size, party_names)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO visits (id, visitor_id, host_officer_id, host_name_manual, directorate_id, purpose_raw, purpose_category, badge_code, checkout_pin, status, created_by, idempotency_key, check_in_source, id_photo_check, party_size, party_names, check_in_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', ?, ?, ?, ?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))`
       ).bind(
         visitId, params.visitor_id, params.host_officer_id || null, params.host_name_manual || null,
         params.directorate_id || null, params.purpose_raw || null, params.purpose_category || null,
         code, checkoutPin, params.created_by, params.idempotency_key ?? null, params.check_in_source,
-        params.id_photo_check ?? null, partySize, partyNames,
+        params.id_photo_check ?? null, partySize, partyNames, checkInAt,
       ),
       env.DB.prepare(
         `UPDATE visitors SET total_visits = total_visits + 1, last_visit_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),

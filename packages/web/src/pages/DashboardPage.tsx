@@ -5,6 +5,7 @@ import { api, type Visit } from '@/lib/api';
 import { apiOrQueue } from '@/lib/offlineQueue';
 import { cn, formatTime, formatDateTime } from '@/lib/utils';
 import { VisitorAvatar } from '@/components/VisitorAvatar';
+import { QueuedFailuresBanner } from '@/components/QueuedFailuresBanner';
 import { HostResponseChip } from '@/components/HostResponseChip';
 import type { AppSettings } from '@/components/admin/SettingsModal';
 import { toast } from '@/stores/toast';
@@ -124,6 +125,9 @@ export function DashboardPage() {
         </h1>
         <p className="text-[15px] text-muted mt-0.5">Real-time visitor overview</p>
       </div>
+
+      {/* Offline queue failures — check-ins the SW could not deliver */}
+      <QueuedFailuresBanner />
 
       {/* Stats row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -126,11 +126,16 @@ CREATE TABLE IF NOT EXISTS visitors (
     flag_note     TEXT,
     flag_updated_at TEXT,
     flag_updated_by TEXT,
+    -- Kiosk registration idempotency (added by migration-visitors-idempotency.sql)
+    idempotency_key TEXT,
     created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_visitors_name ON visitors(last_name, first_name);
 CREATE INDEX IF NOT EXISTS idx_visitors_phone ON visitors(phone);
+-- Partial UNIQUE index enforces kiosk registration idempotency at the DB level
+-- AND serves equality lookups by idempotency_key (mirrors idx_visits_idem_unique).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_visitors_idem_unique ON visitors(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS visit_categories (
     id                  TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
@@ -152,6 +157,8 @@ CREATE TABLE IF NOT EXISTS visits (
     check_out_at     TEXT,
     duration_minutes INTEGER,
     badge_code       TEXT UNIQUE,
+    -- Phone-free kiosk checkout PIN (added by migration-checkout-pin.sql)
+    checkout_pin     TEXT,
     status           TEXT NOT NULL DEFAULT 'checked_in' CHECK(status IN ('checked_in','checked_out','cancelled')),
     check_in_source  TEXT NOT NULL DEFAULT 'staff',
     notes            TEXT,
@@ -176,6 +183,8 @@ CREATE INDEX IF NOT EXISTS idx_visits_host ON visits(host_officer_id, check_in_a
 -- and removed from this fresh-init schema (migration-idempotency-unique.sql). The
 -- plain index is NOT dropped on prod by a migration — it simply stops being created.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_visits_idem_unique ON visits(idempotency_key) WHERE idempotency_key IS NOT NULL;
+-- Unique per active visit; NULL for visits created before the migration.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_visits_checkout_pin ON visits(checkout_pin) WHERE checkout_pin IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- Visitor satisfaction survey (added by migration-visitor-surveys.sql)

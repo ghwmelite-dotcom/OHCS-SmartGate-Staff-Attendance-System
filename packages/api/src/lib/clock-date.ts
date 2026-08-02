@@ -1,11 +1,14 @@
 /**
  * Effective-date helpers for clock records (attendance integrity fixes,
- * plan 2026-08-01 Commit A).
+ * plan 2026-08-01 Commit A) and the captured_at acceptance window shared with
+ * the VMS offline visit queue (plan 2026-08-01-vms-audit-fixes.md, Commit D).
  *
  * The staff PWA's offline queue can replay a clock submit a day or more after
  * it was captured. The client sends `captured_at`; when it validates, the
  * server persists the capture DATE as `device_info.capturedDate` (JSON) so the
  * record is attributed to the day it actually happened, not the replay day.
+ * The VMS visit queue carries the same field; parseCapturedAt validates it and
+ * returns the full timestamp for check_in_at / check_out_at.
  */
 
 // captured_at is accepted only within [now-48h, now+5min]; anything outside is
@@ -23,6 +26,20 @@ export function parseCapturedDate(raw: string | undefined, nowMs = Date.now()): 
   if (!Number.isFinite(ms)) return null;
   if (ms < nowMs - CAPTURED_AT_MAX_AGE_MS || ms > nowMs + CAPTURED_AT_MAX_FUTURE_MS) return null;
   return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Same window as parseCapturedDate, but returns the full timestamp normalised
+ * to the DB's second-resolution format (strftime('%Y-%m-%dT%H:%M:%SZ')) — the
+ * shape every existing check_in_at/check_out_at row carries. Used by the
+ * visits check-in/check-out paths for offline-queue replays.
+ */
+export function parseCapturedAt(raw: string | undefined, nowMs = Date.now()): string | null {
+  if (!raw) return null;
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) return null;
+  if (ms < nowMs - CAPTURED_AT_MAX_AGE_MS || ms > nowMs + CAPTURED_AT_MAX_FUTURE_MS) return null;
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
 /**

@@ -135,6 +135,7 @@ visitRoutes.post('/check-in', zValidator('json', CheckInSchema), async (c) => {
     purpose_raw: body.purpose_raw,
     purpose_category: body.purpose_category,
     idempotency_key: body.idempotency_key,
+    captured_at: body.captured_at ?? null,
     party_size: body.party_size,
     party_names: body.party_names,
     created_by: session.userId,
@@ -204,6 +205,12 @@ visitRoutes.post('/:id/check-out', async (c) => {
   const blocked = requireRole(c, 'superadmin', 'admin', 'receptionist', 'director', 'it');
   if (blocked) return blocked;
   const visitId = c.req.param('id');
+  // Optional body: { captured_at } from offline visit-queue replays. Parsed
+  // leniently (no zValidator) so legacy body-less posts keep working; the
+  // timestamp itself is validated (and possibly ignored) in checkOutById.
+  const rawBody = await c.req.json().catch(() => ({}));
+  const parsed = z.object({ captured_at: z.string().max(40).optional() }).safeParse(rawBody);
+  const capturedAt = parsed.success ? parsed.data.captured_at ?? null : null;
   // Directorate isolation: a director may only check out visits in their directorate.
   const directorScope = await resolveDirectorateScope(c);
   if (directorScope !== null) {
@@ -211,7 +218,7 @@ visitRoutes.post('/:id/check-out', async (c) => {
       .bind(visitId).first<{ directorate_id: string | null }>();
     if (!v || v.directorate_id !== directorScope) return notFound(c, 'Visit');
   }
-  const result = await checkOutById(c.env, visitId);
+  const result = await checkOutById(c.env, visitId, capturedAt);
   if (!result.ok) {
     if (result.code === 'NOT_FOUND') return notFound(c, 'Visit');
     return error(c, 'ALREADY_CHECKED_OUT', 'This visit has already ended', 400);

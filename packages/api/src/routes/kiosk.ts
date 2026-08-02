@@ -79,15 +79,39 @@ async function kioskRateLimit(c: Context<{ Bindings: Env }>): Promise<boolean> {
 }
 
 // Create a visitor (no search/list exposure on the kiosk surface).
+// Idempotent on idempotency_key: the kiosk mints one key per visitor flow and
+// reuses it across retries, so a retry after a lost response returns the
+// original row instead of double-registering (mirrors performCheckIn's
+// pre-check + UNIQUE-violation recovery).
 kioskRoutes.post('/visitors', zValidator('json', KioskCreateVisitorSchema), async (c) => {
   if (!(await kioskRateLimit(c))) return error(c, 'RATE_LIMITED', 'Too many requests', 429);
   const body = c.req.valid('json');
+
+  if (body.idempotency_key) {
+    const existing = await c.env.DB.prepare('SELECT * FROM visitors WHERE idempotency_key = ?')
+      .bind(body.idempotency_key).first();
+    if (existing) return created(c, existing);
+  }
+
   const id = crypto.randomUUID().replace(/-/g, '');
-  await c.env.DB.prepare(
-    `INSERT INTO visitors (id, first_name, last_name, phone, organisation, id_type, id_number)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).bind(id, body.first_name, body.last_name, body.phone || null,
-         body.organisation || null, body.id_type || null, body.id_number || null).run();
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO visitors (id, first_name, last_name, phone, organisation, id_type, id_number, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, body.first_name, body.last_name, body.phone || null,
+           body.organisation || null, body.id_type || null, body.id_number || null,
+           body.idempotency_key ?? null).run();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // Idempotency-key race: a concurrent registration won the insert — re-read
+    // and return that row in the same shape.
+    if (body.idempotency_key && /UNIQUE/i.test(msg) && /idempotency_key/i.test(msg)) {
+      const existing = await c.env.DB.prepare('SELECT * FROM visitors WHERE idempotency_key = ?')
+        .bind(body.idempotency_key).first();
+      if (existing) return created(c, existing);
+    }
+    throw e;
+  }
   const visitor = await c.env.DB.prepare('SELECT * FROM visitors WHERE id = ?').bind(id).first();
   return created(c, visitor);
 });
