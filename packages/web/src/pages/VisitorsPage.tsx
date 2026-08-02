@@ -1,24 +1,36 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, type Visitor } from '@/lib/api';
 import { getInitials, formatDate } from '@/lib/utils';
-import { Search, Users, ArrowRight, ChevronRight } from 'lucide-react';
+import { Search, Users, ArrowRight, ChevronRight, ChevronDown } from 'lucide-react';
+
+const PAGE_SIZE = 30;
 
 export function VisitorsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
 
-  const { data, isLoading, isFetching } = useQuery({
+  // Cursor pagination — the API returns meta.cursor (last row's created_at)
+  // + meta.hasMore; "Load more" appends the next page (visit-log pattern).
+  const {
+    data,
+    isLoading,
+    isFetching,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['visitors', 'list', search],
-    queryFn: () =>
+    queryFn: ({ pageParam }) =>
       api.get<Visitor[]>(
-        `/visitors?q=${encodeURIComponent(search)}&limit=30`
+        `/visitors?q=${encodeURIComponent(search)}&limit=${PAGE_SIZE}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`
       ),
-    placeholderData: (prev) => prev,
+    initialPageParam: '',
+    getNextPageParam: (last) => (last.meta?.hasMore && last.meta.cursor ? last.meta.cursor : undefined),
   });
 
-  const visitors = data?.data ?? [];
+  const visitors = data?.pages.flatMap((p) => p.data ?? []) ?? [];
 
   return (
     <div className="space-y-4">
@@ -73,8 +85,9 @@ export function VisitorsPage() {
             )}
           </div>
         ) : (
-          <div className="divide-y divide-border">
-            {visitors.map((visitor) => (
+          <>
+            <div className="divide-y divide-border">
+              {visitors.map((visitor) => (
               <button
                 key={visitor.id}
                 onClick={() => navigate(`/visitors/${visitor.id}`)}
@@ -108,7 +121,21 @@ export function VisitorsPage() {
                 <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
               </button>
             ))}
-          </div>
+            </div>
+
+            {hasNextPage && (
+              <div className="px-5 py-4 border-t border-border text-center">
+                <button
+                  onClick={() => fetchNextPage()}
+                  disabled={isFetchingNextPage}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline disabled:opacity-50"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                  {isFetchingNextPage ? 'Loading…' : 'Load More'}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

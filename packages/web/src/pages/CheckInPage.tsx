@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { api, type Visitor, type Visit, type Officer, type Directorate } from '@/lib/api';
 import { apiOrQueue, type ApiOrQueueResult } from '@/lib/offlineQueue';
 import { cn, getInitials, formatDate } from '@/lib/utils';
+import { MODULE_ROLES, hasRoleAccess } from '@/lib/roles';
 import { BADGE_BASE } from '@/lib/constants';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { QueuedFailuresBanner } from '@/components/QueuedFailuresBanner';
@@ -17,6 +18,7 @@ import { OfficerCombobox } from '@/components/checkin/OfficerCombobox';
 import { StepIndicator } from '@/components/checkin/StepIndicator';
 import { suggestDirectorate, groupDirectorates } from '@/lib/directorate-routing';
 import { toast } from '@/stores/toast';
+import { useAuthStore } from '@/stores/auth';
 import { playCheckInChime } from '@/lib/sounds';
 import {
   Search,
@@ -77,6 +79,10 @@ type Step = 'search' | 'new-visitor' | 'photo' | 'check-in' | 'success';
 export function CheckInPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const user = useAuthStore((s) => s.user);
+  // POST /visitors + photo upload are reception-tier only — director/it check
+  // in existing visitors; the register affordance hides for them.
+  const canRegisterVisitor = hasRoleAccess(user?.role, MODULE_ROLES.visitorRegistration);
 
   const [step, setStep] = useState<Step>('search');
   const [searchQuery, setSearchQuery] = useState('');
@@ -188,15 +194,18 @@ export function CheckInPage() {
     if (!selectedVisitor) return;
     try {
       const arrayBuffer = await blob.arrayBuffer();
-      await fetch(`/api/photos/visitors/${selectedVisitor.id}/photo`, {
+      const res = await fetch(`/api/photos/visitors/${selectedVisitor.id}/photo`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'image/jpeg' },
         body: arrayBuffer,
       });
+      if (!res.ok) throw new Error(`Photo upload failed (HTTP ${res.status})`);
       queryClient.invalidateQueries({ queryKey: ['visitors'] });
     } catch {
-      // Photo upload failed silently — continue
+      // Non-blocking: the check-in proceeds and the visit is recorded
+      // without a photo — the receptionist just needs to know.
+      toast.info("Photo couldn't be saved — the visit will be recorded without it");
     }
     setStep('check-in');
   }
@@ -320,15 +329,20 @@ export function CheckInPage() {
                 )
               )}
 
-              {/* New visitor button always visible in results area */}
+              {/* New visitor button always visible in results area — for
+                  roles allowed to register (POST /visitors is reception-tier) */}
               <div className="border-t border-border px-4 py-3 bg-background/50">
-                <button
-                  onClick={goToNewVisitor}
-                  className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
-                >
-                  <UserPlus className="h-4 w-4" />
-                  Register new visitor{searchQuery.trim() ? `: "${searchQuery.trim()}"` : ''}
-                </button>
+                {canRegisterVisitor ? (
+                  <button
+                    onClick={goToNewVisitor}
+                    className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    Register new visitor{searchQuery.trim() ? `: "${searchQuery.trim()}"` : ''}
+                  </button>
+                ) : (
+                  <p className="text-xs text-muted">Only reception and admins can register new visitors.</p>
+                )}
               </div>
             </div>
           )}
@@ -337,13 +351,17 @@ export function CheckInPage() {
             <div className="bg-surface rounded-xl border border-border shadow-sm px-4 py-6 text-center">
               <Search className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
               <p className="text-sm text-muted">Type at least 2 characters to search</p>
-              <button
-                onClick={() => setStep('new-visitor')}
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-primary mt-3 hover:underline"
-              >
-                <UserPlus className="h-4 w-4" />
-                Register a new visitor
-              </button>
+              {canRegisterVisitor ? (
+                <button
+                  onClick={() => setStep('new-visitor')}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-primary mt-3 hover:underline"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  Register a new visitor
+                </button>
+              ) : (
+                <p className="text-xs text-muted mt-3">Only reception and admins can register new visitors.</p>
+              )}
             </div>
           )}
         </div>

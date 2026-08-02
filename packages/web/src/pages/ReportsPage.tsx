@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, type Directorate } from '@/lib/api';
+import { api, ApiError, type Directorate } from '@/lib/api';
 import { generatePDF } from '@/lib/pdf';
 import { generateCSV, downloadCSV } from '@/lib/csv';
+import { AccessDenied } from '@/components/AccessDenied';
+import { toast } from '@/stores/toast';
 import { FileText, Download, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -32,6 +34,7 @@ export function ReportsPage() {
   const [customTo, setCustomTo] = useState('');
   const [directorateId, setDirectorateId] = useState('');
   const [generating, setGenerating] = useState<'pdf' | 'csv' | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
 
   const { from, to } = getDateRange(preset, customFrom, customTo);
 
@@ -57,8 +60,20 @@ export function ReportsPage() {
     setGenerating(type);
     try {
       const result = await refetch();
+      // react-query resolves errors through the result object, not a throw.
+      if (result.error) {
+        if (result.error instanceof ApiError && result.error.status === 403) {
+          setAccessDenied(true);
+        } else {
+          toast.error(result.error instanceof Error ? result.error.message : 'Failed to generate the report.');
+        }
+        return;
+      }
       const data = result.data?.data;
-      if (!data) return;
+      if (!data) {
+        toast.error('Report came back empty — please try again.');
+        return;
+      }
 
       const summary = data.summary as {
         total_visits: number; unique_visitors: number; avg_duration: number;
@@ -83,6 +98,8 @@ export function ReportsPage() {
         const csv = generateCSV(visits, truncationNote);
         downloadCSV(csv, `OHCS-VMS-Export-${from}.csv`);
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to generate the report.');
     } finally {
       setGenerating(null);
     }
@@ -92,6 +109,20 @@ export function ReportsPage() {
     total_visits?: number; unique_visitors?: number;
   } | undefined;
   const previewTruncated = reportData?.data?.truncated === true;
+
+  if (accessDenied) {
+    return (
+      <div className="space-y-6 max-w-3xl mx-auto">
+        <div className="animate-fade-in-up">
+          <h1 className="text-[28px] font-bold text-foreground tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
+            Reports
+          </h1>
+          <p className="text-[15px] text-muted mt-0.5">Generate and export visitor reports</p>
+        </div>
+        <AccessDenied module="Reports" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto">

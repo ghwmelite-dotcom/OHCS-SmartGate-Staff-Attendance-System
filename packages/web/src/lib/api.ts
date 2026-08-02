@@ -7,7 +7,7 @@ interface ApiResponse<T> {
   meta?: { cursor?: string; hasMore?: boolean; total?: number };
 }
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(public code: string, message: string, public status: number) {
     super(message);
   }

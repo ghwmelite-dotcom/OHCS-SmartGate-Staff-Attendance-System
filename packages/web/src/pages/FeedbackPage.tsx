@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { downloadCSV, formatCsvCell } from '@/lib/csv';
 import { cn, formatTime } from '@/lib/utils';
+import { toast } from '@/stores/toast';
 import {
   Star, Download, MessageSquareText, AlertTriangle, Percent, Clock,
 } from 'lucide-react';
@@ -92,23 +93,27 @@ export function FeedbackPage() {
   const directorates = directoratesData?.data ?? [];
 
   async function exportCsv() {
-    const res = await api.get<SurveyList>(`/surveys${qs}${qs ? '&' : '?'}page_size=500`);
-    const all = res.data?.rows ?? [];
-    const headers = ['Date', 'Time', 'Rating', 'Comment', 'Visitor', 'Host', 'Directorate', 'Wait (min)', 'Source', 'Badge Code'];
-    const body = all.map((r) => [
-      new Date(r.created_at).toLocaleDateString('en-GB'),
-      formatTime(r.created_at),
-      `${r.rating}/5`,
-      (r.comment ?? '').replace(/,/g, ';'),
-      `${r.first_name} ${r.last_name}`,
-      r.host_name ?? '',
-      r.directorate_abbr ?? '',
-      r.wait_minutes != null ? String(r.wait_minutes) : '',
-      r.source,
-      r.badge_code ?? '',
-    ]);
-    const csv = [headers, ...body].map((row) => row.map(formatCsvCell).join(',')).join('\n');
-    downloadCSV(csv, `visitor-feedback-${from || 'all'}-to-${to || 'all'}.csv`);
+    try {
+      const res = await api.get<SurveyList>(`/surveys${qs}${qs ? '&' : '?'}page_size=500`);
+      const all = res.data?.rows ?? [];
+      const headers = ['Date', 'Time', 'Rating', 'Comment', 'Visitor', 'Host', 'Directorate', 'Wait (min)', 'Source', 'Badge Code'];
+      const body = all.map((r) => [
+        new Date(r.created_at).toLocaleDateString('en-GB'),
+        formatTime(r.created_at),
+        `${r.rating}/5`,
+        (r.comment ?? '').replace(/,/g, ';'),
+        `${r.first_name} ${r.last_name}`,
+        r.host_name ?? '',
+        r.directorate_abbr ?? '',
+        r.wait_minutes != null ? String(r.wait_minutes) : '',
+        r.source,
+        r.badge_code ?? '',
+      ]);
+      const csv = [headers, ...body].map((row) => row.map(formatCsvCell).join(',')).join('\n');
+      downloadCSV(csv, `visitor-feedback-${from || 'all'}-to-${to || 'all'}.csv`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export feedback.');
+    }
   }
 
   const maxDist = Math.max(1, ...Object.values(summary?.distribution ?? {}));

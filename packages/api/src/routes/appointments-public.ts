@@ -115,9 +115,15 @@ export function splitVisitorName(full: string): { first: string; last: string } 
 // the reference code already proves the booking). Non-Ghana numbers fall
 // back to an exact-string match. A new visitor is created only when no row
 // matches, so repeat appointment visitors accumulate one history.
-async function findOrCreateAppointmentVisitor(
+// Shared with the admin desk-completion path (appointments-admin.ts).
+export async function findOrCreateAppointmentVisitor(
   env: Env,
-  appt: AppointmentWithOfficer,
+  appt: {
+    visitor_name: string;
+    visitor_phone: string;
+    visitor_email: string | null;
+    organisation: string | null;
+  },
 ): Promise<string> {
   const stripped = `REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', '')`;
   const forms = normalizeKioskPhone(appt.visitor_phone);

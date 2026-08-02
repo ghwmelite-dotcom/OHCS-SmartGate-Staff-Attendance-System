@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { AccessDenied } from '@/components/AccessDenied';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
@@ -46,20 +47,26 @@ const CHART_COLORS = ['#1A4D2E', '#D4A017', '#8B1A1A', '#1A4D8B', '#2A9D8F', '#9
 export function AnalyticsPage() {
   const [days, setDays] = useState(30);
 
-  const { data: todayData } = useQuery({
+  const { data: todayData, error: todayError } = useQuery({
     queryKey: ['analytics', 'today'],
     queryFn: () => api.get<TodayData>('/analytics/today'),
   });
 
-  const { data: trendsData } = useQuery({
+  const { data: trendsData, error: trendsError } = useQuery({
     queryKey: ['analytics', 'trends', days],
     queryFn: () => api.get<TrendsData>(`/analytics/trends?days=${days}`),
   });
 
-  const { data: topData } = useQuery({
+  const { data: topData, error: topError } = useQuery({
     queryKey: ['analytics', 'top-visitors', days],
     queryFn: () => api.get<TopVisitor[]>(`/analytics/top-visitors?days=${days}&limit=10`),
   });
+
+  // Role-gated module: a 403 (direct URL visit by a role the nav hides)
+  // renders an explicit no-access state instead of zeros and empty charts.
+  const forbidden = [todayError, trendsError, topError].some(
+    (e) => e instanceof ApiError && e.status === 403
+  );
 
   const today = todayData?.data;
   const trends = trendsData?.data;
@@ -71,6 +78,20 @@ export function AnalyticsPage() {
     if (h === 12) return '12 PM';
     return `${h - 12} PM`;
   };
+
+  if (forbidden) {
+    return (
+      <div className="space-y-6">
+        <div className="animate-fade-in-up">
+          <h1 className="text-[28px] font-bold text-foreground tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
+            Analytics
+          </h1>
+          <p className="text-[15px] text-muted mt-0.5">Visitor insights and trends</p>
+        </div>
+        <AccessDenied module="Analytics" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

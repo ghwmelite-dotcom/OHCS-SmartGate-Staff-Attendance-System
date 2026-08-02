@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/stores/auth';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { roleLabel } from '@/lib/roles';
 import { cn } from '@/lib/utils';
-import { UserCircle, Phone, Mail, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { toast } from '@/stores/toast';
+import { UserCircle, Phone, Mail, Lock, KeyRound, CheckCircle2, AlertCircle } from 'lucide-react';
 
 type Availability = 'available' | 'in_meeting' | 'out_of_office';
 
@@ -100,6 +101,13 @@ export function ProfilePage() {
       setResult({ ok: true, msg: emailChanged ? 'Profile updated. Other devices have been signed out.' : 'Profile updated.' });
       setPin('');
     } catch (err) {
+      // /auth/* 401s are exempt from the client-wide login redirect so
+      // WRONG_PIN can render inline — but a revoked session is not a wrong
+      // PIN; send the user back to login.
+      if (err instanceof ApiError && err.code === 'SESSION_REVOKED') {
+        window.location.href = '/login';
+        return;
+      }
       setResult({ ok: false, msg: err instanceof Error ? err.message : 'Failed to update profile.' });
     } finally {
       setSaving(false);
@@ -286,6 +294,133 @@ export function ProfilePage() {
           </button>
         </div>
       </form>
+
+      <ChangePinCard />
     </div>
+  );
+}
+
+/* ---- Change PIN — mirrors the staff PWA's change-PIN flow (current + new +
+   confirm). POST /auth/change-pin requires the NEW pin to be exactly 4
+   digits (current may be 4–6, matching whatever the account was issued). */
+function ChangePinCard() {
+  const [currentPin, setCurrentPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  const inputCls = 'w-full h-11 px-3.5 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
+  const pinInputCls = cn(inputCls, 'text-center tracking-[0.4em] font-mono text-xl');
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (newPin !== confirmPin) {
+      setResult({ ok: false, msg: 'New PINs do not match.' });
+      return;
+    }
+    setSaving(true);
+    setResult(null);
+    try {
+      await api.post('/auth/change-pin', { current_pin: currentPin, new_pin: newPin });
+      toast.success('PIN changed successfully');
+      setCurrentPin('');
+      setNewPin('');
+      setConfirmPin('');
+    } catch (err) {
+      // Same SESSION_REVOKED special-case as the profile form above.
+      if (err instanceof ApiError && err.code === 'SESSION_REVOKED') {
+        window.location.href = '/login';
+        return;
+      }
+      setResult({ ok: false, msg: err instanceof Error ? err.message : 'Failed to change PIN.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-surface rounded-2xl border border-border shadow-sm overflow-hidden animate-fade-in-up stagger-3">
+      <div className="h-[2px]" style={{ background: 'linear-gradient(90deg, #D4A017, #F5D76E, #D4A017)' }} />
+      <div className="p-6 space-y-5">
+        <div>
+          <h2 className="text-base font-bold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
+            Change PIN
+          </h2>
+          <p className="text-[13px] text-muted mt-0.5">
+            Your PIN signs you in and confirms identity changes. New PINs are 4 digits.
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-[12px] font-semibold text-foreground/70 uppercase tracking-wide mb-1.5">
+            <span className="flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" /> Current PIN</span>
+          </label>
+          <input
+            type="password"
+            maxLength={6}
+            value={currentPin}
+            onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ''))}
+            className={pinInputCls}
+            placeholder="••••"
+            inputMode="numeric"
+            required
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-[12px] font-semibold text-foreground/70 uppercase tracking-wide mb-1.5">
+              <span className="flex items-center gap-1.5"><KeyRound className="h-3.5 w-3.5" /> New PIN</span>
+            </label>
+            <input
+              type="password"
+              maxLength={4}
+              value={newPin}
+              onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+              className={pinInputCls}
+              placeholder="••••"
+              inputMode="numeric"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-[12px] font-semibold text-foreground/70 uppercase tracking-wide mb-1.5">
+              <span className="flex items-center gap-1.5"><KeyRound className="h-3.5 w-3.5" /> Confirm New PIN</span>
+            </label>
+            <input
+              type="password"
+              maxLength={4}
+              value={confirmPin}
+              onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ''))}
+              className={pinInputCls}
+              placeholder="••••"
+              inputMode="numeric"
+              required
+            />
+          </div>
+        </div>
+
+        {result && (
+          <div className={cn(
+            'flex items-center gap-2 text-[13px] font-medium',
+            result.ok ? 'text-success' : 'text-danger'
+          )}>
+            {result.ok
+              ? <CheckCircle2 className="h-4 w-4 shrink-0" />
+              : <AlertCircle className="h-4 w-4 shrink-0" />}
+            {result.msg}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={saving || currentPin.length < 4 || newPin.length !== 4 || confirmPin.length !== 4}
+          className="w-full h-11 bg-primary text-white text-[14px] font-semibold rounded-xl hover:bg-primary-light transition-all disabled:opacity-50 shadow-lg shadow-primary/15 active:scale-[0.98]"
+        >
+          {saving ? 'Changing…' : 'Change PIN'}
+        </button>
+      </div>
+    </form>
   );
 }

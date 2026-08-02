@@ -5,6 +5,8 @@ import type { Env, SessionData } from '../types';
 import { success, error, notFound } from '../lib/response';
 import { sendTelegramMessage } from '../services/telegram';
 import { sendAppointmentConfirmedEmail, sendAppointmentDeclinedEmail } from '../services/email';
+import { performCheckIn } from '../services/check-in';
+import { findOrCreateAppointmentVisitor } from './appointments-public';
 
 export const appointmentsAdminRoutes = new Hono<{
   Bindings: Env;
@@ -335,9 +337,14 @@ appointmentsAdminRoutes.patch('/:id/complete', async (c) => {
   const session = c.get('session');
   const id = c.req.param('id');
 
-  const appt = await c.env.DB.prepare('SELECT id, officer_id, status FROM appointments WHERE id = ?')
+  const appt = await c.env.DB.prepare(
+    `SELECT a.*, o.directorate_id
+     FROM appointments a
+     JOIN officers o ON o.id = a.officer_id
+     WHERE a.id = ?`,
+  )
     .bind(id)
-    .first<{ id: string; officer_id: string; status: string }>();
+    .first<AppointmentAdminRow & { directorate_id: string }>();
 
   if (!appt) return notFound(c, 'Appointment');
 
@@ -348,13 +355,51 @@ appointmentsAdminRoutes.patch('/:id/complete', async (c) => {
     return error(c, 'INVALID_STATE', `Appointment must be confirmed to mark as completed (current: ${appt.status})`, 422);
   }
 
+  // Join the visits pipeline like /appointments/public/arrive does
+  // (2026-08-02): a desk completion means the visitor showed without going
+  // through the kiosk arrival flow, so create the same visits row — they
+  // appear in /visits/active, the visit log, reports, the SLA cron, the
+  // checkout sweep and the evacuation roll, and can be checked out like any
+  // walk-in. Source is 'staff' (a desk action by reception/admin;
+  // check_in_source's union is 'staff'|'kiosk' and 'kiosk' would
+  // misattribute a front-desk completion). The deterministic idempotency
+  // key dedupes retried completions at the DB level; the explicit
+  // arrive-key check covers the race where the kiosk arrival created the
+  // visit first (between its performCheckIn and its status flip this
+  // appointment still reads 'confirmed').
+  const existingVisit = await c.env.DB.prepare(
+    'SELECT id FROM visits WHERE idempotency_key IN (?, ?) LIMIT 1',
+  )
+    .bind(`appt-arrive:${appt.id}`, `appt-complete:${appt.id}`)
+    .first<{ id: string }>();
+
+  let visitId = existingVisit?.id ?? null;
+  if (!visitId) {
+    const visitorId = await findOrCreateAppointmentVisitor(c.env, appt);
+    const checkIn = await performCheckIn(c.env, c.executionCtx, {
+      visitor_id: visitorId,
+      host_officer_id: appt.officer_id,
+      directorate_id: appt.directorate_id,
+      purpose_raw: appt.purpose,
+      purpose_category: 'scheduled_appointment',
+      idempotency_key: `appt-complete:${appt.id}`,
+      created_by: session.userId,
+      check_in_source: 'staff',
+    });
+    if (!checkIn.ok) {
+      return error(c, 'INTERNAL_ERROR', 'Could not register the visit for this appointment', 500);
+    }
+    visitId = (checkIn.visit as { id?: string }).id ?? null;
+  }
+
   await c.env.DB.prepare(
     `UPDATE appointments
      SET status = 'completed',
+         visit_id = COALESCE(visit_id, ?),
          updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
      WHERE id = ?`,
   )
-    .bind(id)
+    .bind(visitId, id)
     .run();
 
   return success(c, { ok: true });

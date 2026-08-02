@@ -3,14 +3,24 @@ import { cn } from '@/lib/utils';
 import { LayoutDashboard, ClipboardCheck, Users, ScrollText, BarChart3, FileText, Settings, LogOut, ChevronsLeft, ChevronsRight, UserCircle, Calendar, Star, BookMarked } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import { useSidebarStore } from '@/stores/sidebar';
+import { MODULE_ROLES, hasRoleAccess } from '@/lib/roles';
 
-const NAV_ITEMS = [
+// `gate` mirrors the API requireRole list for the module — a role without
+// access never sees the item (the API would 403 the page's queries anyway).
+interface NavDef {
+  to: string;
+  icon: typeof LayoutDashboard;
+  label: string;
+  gate?: readonly string[];
+}
+
+const NAV_ITEMS: NavDef[] = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/check-in', icon: ClipboardCheck, label: 'Check-In' },
-  { to: '/visitors', icon: Users, label: 'Visitors' },
-  { to: '/visit-log', icon: ScrollText, label: 'Visit Log' },
-  { to: '/analytics', icon: BarChart3, label: 'Analytics' },
-  { to: '/reports', icon: FileText, label: 'Reports' },
+  { to: '/check-in', icon: ClipboardCheck, label: 'Check-In', gate: MODULE_ROLES.visits },
+  { to: '/visitors', icon: Users, label: 'Visitors', gate: MODULE_ROLES.visits },
+  { to: '/visit-log', icon: ScrollText, label: 'Visit Log', gate: MODULE_ROLES.visits },
+  { to: '/analytics', icon: BarChart3, label: 'Analytics', gate: MODULE_ROLES.analytics },
+  { to: '/reports', icon: FileText, label: 'Reports', gate: MODULE_ROLES.reports },
   { to: '/profile', icon: UserCircle, label: 'My Profile' },
 ];
 
@@ -103,7 +113,7 @@ export function Sidebar({ forceExpanded }: SidebarProps) {
 
       {/* Navigation — scrolls when items exceed available height; footer stays pinned */}
       <nav className={cn('sidebar-nav-scroll flex-1 min-h-0 overflow-y-auto overflow-x-hidden py-2 space-y-1 relative', collapsed ? 'px-2' : 'px-3')}>
-        {NAV_ITEMS.map((item) => (
+        {NAV_ITEMS.filter((item) => !item.gate || hasRoleAccess(user?.role, item.gate)).map((item) => (
           <NavItem key={item.to} {...item} collapsed={collapsed} />
         ))}
 

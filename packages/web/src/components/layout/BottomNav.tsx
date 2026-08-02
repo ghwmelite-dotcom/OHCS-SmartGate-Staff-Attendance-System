@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
+import { MODULE_ROLES, hasRoleAccess } from '@/lib/roles';
 import {
   LayoutDashboard,
   ClipboardCheck,
@@ -19,17 +20,25 @@ import {
   BookMarked,
 } from 'lucide-react';
 
-const MAIN_ITEMS = [
+// `gate` mirrors the API requireRole list for the module (see Sidebar).
+interface NavDef {
+  to: string;
+  icon: typeof LayoutDashboard;
+  label: string;
+  gate?: readonly string[];
+}
+
+const MAIN_ITEMS: NavDef[] = [
   { to: '/', icon: LayoutDashboard, label: 'Home' },
-  { to: '/check-in', icon: ClipboardCheck, label: 'Check-In' },
-  { to: '/visitors', icon: Users, label: 'Visitors' },
-  { to: '/analytics', icon: BarChart3, label: 'Analytics' },
+  { to: '/check-in', icon: ClipboardCheck, label: 'Check-In', gate: MODULE_ROLES.visits },
+  { to: '/visitors', icon: Users, label: 'Visitors', gate: MODULE_ROLES.visits },
+  { to: '/analytics', icon: BarChart3, label: 'Analytics', gate: MODULE_ROLES.analytics },
 ];
 
-const MORE_ITEMS = [
+const MORE_ITEMS: NavDef[] = [
   { to: '/profile', icon: UserCircle, label: 'My Profile' },
-  { to: '/visit-log', icon: ScrollText, label: 'Visit Log' },
-  { to: '/reports', icon: FileText, label: 'Reports' },
+  { to: '/visit-log', icon: ScrollText, label: 'Visit Log', gate: MODULE_ROLES.visits },
+  { to: '/reports', icon: FileText, label: 'Reports', gate: MODULE_ROLES.reports },
 ];
 
 const APPOINTMENTS_ITEM = { to: '/appointments', icon: Calendar, label: 'Appointments' };
@@ -48,7 +57,9 @@ export function BottomNav() {
   const logout = useAuthStore((s) => s.logout);
   const isSuperadmin = user?.role === 'superadmin';
   const canSeeAppointments = ['receptionist', 'admin', 'superadmin'].includes(user?.role ?? '');
-  const moreItems = canSeeAppointments ? [APPOINTMENTS_ITEM, FEEDBACK_ITEM, ...MORE_ITEMS] : MORE_ITEMS;
+  const visible = (items: NavDef[]) => items.filter((i) => !i.gate || hasRoleAccess(user?.role, i.gate));
+  const mainItems = visible(MAIN_ITEMS);
+  const moreItems = visible(canSeeAppointments ? [APPOINTMENTS_ITEM, FEEDBACK_ITEM, ...MORE_ITEMS] : MORE_ITEMS);
 
   // Check if current route is in the "more" section
   const moreRoutes = [...moreItems, ...ADMIN_ITEMS].map(i => i.to);
@@ -123,7 +134,7 @@ export function BottomNav() {
       {/* Bottom navigation bar */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-surface border-t border-border safe-area-bottom">
         <div className="flex items-center justify-around h-[64px] px-2">
-          {MAIN_ITEMS.map(item => (
+          {mainItems.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
