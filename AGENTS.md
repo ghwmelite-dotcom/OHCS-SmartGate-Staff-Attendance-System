@@ -67,8 +67,10 @@ corrections are fixed forward, never block the loop.
 Everything else — specs, plans, code, tests, commits, pushes, CI deploys, doc
 updates — proceeds without asking.
 
-**New projects:** seed that project's `AGENTS.md` with this Loop section plus the
-relevant conventions; the user says "work the loop" to activate it.
+**New projects:** seed with `bash ~/.agents/new-project.sh <path>` (gstack is
+the primary stack machine-wide — global conventions in `~/.agents/AGENTS.md`);
+the script writes a gstack-primary AGENTS.md. The user says "work the loop" to
+activate the Loop in that project.
 
 ## Conventions
 
