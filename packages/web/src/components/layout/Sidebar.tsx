@@ -41,7 +41,7 @@ const DOCS_NAV = [
 ];
 
 const ADMIN_NAV_ADMIN = [
-  { to: '/admin?tab=nss', icon: Settings, label: 'NSS & Interns' },
+  { to: '/admin', icon: Settings, label: 'Admin' },
 ];
 
 interface SidebarProps {
