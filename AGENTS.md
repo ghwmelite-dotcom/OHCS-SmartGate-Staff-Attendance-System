@@ -9,6 +9,18 @@ Prod: `staff-attendance.ohcsghana.org` · `smartgate.ohcsghana.org` · API Worke
 `ohcs-smartgate-api.ohcsghana-main.workers.dev`. Both PWAs hard-redirect away from
 `*.pages.dev` to the branded domains (first-party cookie requirement).
 
+## gstack
+
+The gstack skill pack (Garry Tan's AI engineering team, MIT) is installed at
+user level on this machine (`~/.claude/skills/gstack`, mirrored into
+`~/.agents/skills/gstack-*`). Useful skills for this repo: `/office-hours`
+(product framing), `/plan-eng-review` (architecture), `/review` (pre-landing
+bugs), `/cso` (OWASP/STRIDE security audit), `/qa` / `/qa-only` (real-browser
+testing), `/investigate` (root-cause debugging), `/ship` + `/land-and-deploy`
+(release flow), `/retro` (weekly retro), `/document-release` (docs sync).
+Upgrade: `cd ~/.claude/skills/gstack && git pull && ./setup`, then
+`bash ~/.agents/sync-gstack-skills.sh` (Windows copy mode, no symlinks).
+
 ## Commands
 
 ```bash
