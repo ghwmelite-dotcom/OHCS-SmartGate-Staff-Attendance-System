@@ -152,8 +152,9 @@ export async function runSlaEscalation(env: Env): Promise<void> {
 }
 
 // Mirror of notifier.ts's findUserByOfficer: officers link to user accounts by
-// email, falling back to an exact name match.
-async function findUserIdByOfficer(officerId: string, env: Env): Promise<string | null> {
+// email, falling back to an exact name match. Exported for the appointments
+// /book receiver fanout (same officer→user resolution).
+export async function findUserIdByOfficer(officerId: string, env: Env): Promise<string | null> {
   const officer = await env.DB.prepare('SELECT email, name FROM officers WHERE id = ?')
     .bind(officerId).first<{ email: string | null; name: string }>();
   if (!officer) return null;

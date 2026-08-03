@@ -6,6 +6,8 @@ import { success, created, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
 import { escapeHtml } from '../lib/html';
 import { sendTelegramMessage } from '../services/telegram';
+import { sendAppointmentReceivedEmail } from '../services/email';
+import { findUserIdByOfficer } from '../services/sla-escalation';
 import { respondToProposal, rebookUrl } from '../services/appointment-reschedule';
 import { performCheckIn } from '../services/check-in';
 import { normalizeKioskPhone, KIOSK_USER_ID } from './kiosk';
@@ -271,11 +273,16 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
   const config = await c.env.DB.prepare(
     `SELECT bo.slot_start_time, bo.slot_end_time, bo.slot_duration_mins,
             bo.advance_days_min, bo.advance_days_max,
-            o.name as officer_name
+            o.name as officer_name, o.directorate_id,
+            o.telegram_chat_id as officer_telegram_chat_id
      FROM bookable_officers bo
      JOIN officers o ON o.id = bo.officer_id
      WHERE bo.officer_id = ? AND bo.is_active = 1 AND o.is_available = 1`
-  ).bind(body.officer_id).first<BookableOfficerRow & { officer_name: string }>();
+  ).bind(body.officer_id).first<BookableOfficerRow & {
+    officer_name: string;
+    directorate_id: string | null;
+    officer_telegram_chat_id: string | null;
+  }>();
 
   if (!config) {
     return error(c, 'OFFICER_NOT_BOOKABLE', 'This officer is not accepting appointments', 422);
@@ -355,7 +362,18 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
     body.purpose,
   ).run();
 
-  // 7. Notify approvers (in-app + Telegram) — non-fatal: booking succeeds even if this fails
+  // 7. Notify approvers + the host directorate's reception team (in-app +
+  // Telegram) — non-fatal: booking succeeds even if this fails.
+  const notifTitle = `New appointment request`;
+  const notifBody = `${body.visitor_name} requests a meeting with ${config.officer_name} on ${body.appointment_date} at ${body.time_slot}`;
+  // Telegram sends with parse_mode HTML — escape user-controlled values at
+  // this boundary; the in-app notification keeps the raw text (React escapes).
+  const notifBodyTg = `${escapeHtml(body.visitor_name)} requests a meeting with ${escapeHtml(config.officer_name)} on ${escapeHtml(body.appointment_date)} at ${escapeHtml(body.time_slot)}`;
+  // Cross-audience dedupe (Feature B, spec 2026-08-03): a person who is both
+  // an approver (or the host) and a directorate receiver gets exactly one
+  // notification per channel — user id for in-app, chat id for Telegram.
+  const notifiedUserIds = new Set<string>();
+  const notifiedChatIds = new Set<string>();
   try {
     const approvers = await c.env.DB.prepare(
       `SELECT aa.user_id, u.telegram_chat_id
@@ -364,12 +382,6 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
        WHERE aa.officer_id = ?`
     ).bind(body.officer_id).all<AppointmentApproverRow>();
 
-    const notifTitle = `New appointment request`;
-    const notifBody = `${body.visitor_name} requests a meeting with ${config.officer_name} on ${body.appointment_date} at ${body.time_slot}`;
-    // Telegram sends with parse_mode HTML — escape user-controlled values at
-    // this boundary; the in-app notification keeps the raw text (React escapes).
-    const notifBodyTg = `${escapeHtml(body.visitor_name)} requests a meeting with ${escapeHtml(config.officer_name)} on ${escapeHtml(body.appointment_date)} at ${escapeHtml(body.time_slot)}`;
-
     for (const approver of approvers.results ?? []) {
       try {
         const notifId = `appt-${crypto.randomUUID()}`;
@@ -377,8 +389,10 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
           `INSERT INTO notifications (id, user_id, type, title, body, visit_id, created_at)
            VALUES (?, ?, 'appointment_request', ?, ?, NULL, strftime('%Y-%m-%dT%H:%M:%SZ','now'))`
         ).bind(notifId, approver.user_id, notifTitle, notifBody).run();
+        notifiedUserIds.add(approver.user_id);
 
         if (approver.telegram_chat_id) {
+          notifiedChatIds.add(approver.telegram_chat_id);
           await sendTelegramMessage({
             chatId: approver.telegram_chat_id,
             text: `📋 New Appointment Request\n${notifBodyTg}`,
@@ -388,6 +402,48 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
       } catch { /* non-fatal per-approver */ }
     }
   } catch { /* non-fatal: appointment_approvers table may not exist yet */ }
+
+  // Receiver fanout (Feature B): the host directorate's reception team
+  // (directorate_receivers) hears about every new request so they can track
+  // incoming approvals. Same content as the approver alert; the host officer
+  // is folded into the dedupe sets so they're never double-notified.
+  try {
+    if (config.directorate_id) {
+      const hostUserId = await findUserIdByOfficer(body.officer_id, c.env);
+      if (hostUserId) notifiedUserIds.add(hostUserId);
+      if (config.officer_telegram_chat_id) notifiedChatIds.add(config.officer_telegram_chat_id);
+
+      const receivers = await c.env.DB.prepare(
+        `SELECT o.id AS officer_id, o.telegram_chat_id
+         FROM directorate_receivers dr
+         JOIN officers o ON o.id = dr.officer_id
+         WHERE dr.directorate_id = ?`
+      ).bind(config.directorate_id).all<{ officer_id: string; telegram_chat_id: string | null }>();
+
+      for (const receiver of receivers.results ?? []) {
+        try {
+          const userId = await findUserIdByOfficer(receiver.officer_id, c.env);
+          if (userId && !notifiedUserIds.has(userId)) {
+            notifiedUserIds.add(userId);
+            const notifId = `appt-${crypto.randomUUID()}`;
+            await c.env.DB.prepare(
+              `INSERT INTO notifications (id, user_id, type, title, body, visit_id, created_at)
+               VALUES (?, ?, 'appointment_request', ?, ?, NULL, strftime('%Y-%m-%dT%H:%M:%SZ','now'))`
+            ).bind(notifId, userId, notifTitle, notifBody).run();
+          }
+
+          if (receiver.telegram_chat_id && !notifiedChatIds.has(receiver.telegram_chat_id)) {
+            notifiedChatIds.add(receiver.telegram_chat_id);
+            await sendTelegramMessage({
+              chatId: receiver.telegram_chat_id,
+              text: `📋 New Appointment Request\n${notifBodyTg}`,
+              token: c.env.TELEGRAM_BOT_TOKEN,
+            }).catch(() => {});
+          }
+        } catch { /* non-fatal per-receiver */ }
+      }
+    }
+  } catch { /* non-fatal: directorate_receivers table may not exist yet */ }
 
   // Visitor Telegram deep-link (spec 2026-08-03): the booking-success page
   // turns this into a "Get updates on Telegram" button. Bots can't DM
@@ -399,6 +455,21 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
     const linkToken = crypto.randomUUID().replace(/-/g, '');
     await c.env.KV.put(`visit-link:${linkToken}`, apptId, { expirationTtl: 86_400 });
     telegramLinkUrl = `https://t.me/${botUsername}?start=${linkToken}`;
+  }
+
+  // Visitor acknowledgment email (Feature A, spec 2026-08-03): "Request
+  // received — pending approval". Best-effort via waitUntil — the service
+  // never throws and the booking never depends on it.
+  if (body.visitor_email) {
+    c.executionCtx.waitUntil(sendAppointmentReceivedEmail(c.env, {
+      visitorName: body.visitor_name,
+      visitorEmail: body.visitor_email,
+      officerName: config.officer_name,
+      appointmentDate: body.appointment_date,
+      timeSlot: body.time_slot,
+      referenceCode,
+      telegramUpdates: telegramLinkUrl !== null,
+    }));
   }
 
   return created(c, {

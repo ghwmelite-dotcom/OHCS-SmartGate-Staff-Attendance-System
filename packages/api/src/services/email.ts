@@ -115,6 +115,91 @@ export async function sendAppointmentDeclinedEmail(env: Env, input: AppointmentE
   } catch { return false; }
 }
 
+// ─── Booking acknowledgment email (spec 2026-08-03, Feature A) ───────────────
+
+export interface AppointmentReceivedEmailInput {
+  visitorName: string;
+  visitorEmail: string;
+  officerName: string;
+  appointmentDate: string;
+  timeSlot: string;
+  referenceCode: string;
+  /** True when the booking offered a Telegram link — the copy points there. */
+  telegramUpdates?: boolean;
+}
+
+export async function sendAppointmentReceivedEmail(env: Env, input: AppointmentReceivedEmailInput): Promise<boolean> {
+  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return false;
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: env.EMAIL_FROM,
+        to: [input.visitorEmail],
+        subject: `Appointment request received — Ref ${input.referenceCode}`,
+        html: appointmentReceivedHtml(input),
+        text: appointmentReceivedText(input),
+      }),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+function appointmentReceivedText(i: AppointmentReceivedEmailInput): string {
+  return [
+    `Hello ${i.visitorName},`,
+    '',
+    `Your appointment request has been received and is pending approval from ${i.officerName}.`,
+    '',
+    `Details:`,
+    `  Officer : ${i.officerName}`,
+    `  Date    : ${i.appointmentDate}`,
+    `  Time    : ${i.timeSlot}`,
+    `  Ref     : ${i.referenceCode}`,
+    '',
+    `We'll email you as soon as your request is confirmed or declined${i.telegramUpdates ? ' — or get updates on Telegram if you link your chat from the confirmation page' : ''}.`,
+    '',
+    `— Office of the Head of the Civil Service`,
+  ].join('\n');
+}
+
+function appointmentReceivedHtml(i: AppointmentReceivedEmailInput): string {
+  const name = escapeHtml(i.visitorName);
+  const officer = escapeHtml(i.officerName);
+  const ref = escapeHtml(i.referenceCode);
+  const nextSteps = i.telegramUpdates
+    ? `We&#39;ll email you as soon as your request is confirmed or declined — or get updates on Telegram if you link your chat from the confirmation page.`
+    : `We&#39;ll email you as soon as your request is confirmed or declined.`;
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;background:#F8F9FA;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
+  <div style="max-width:520px;margin:0 auto;padding:24px 16px;">
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+      <div style="background:#1A4D2E;color:#fff;padding:24px;text-align:center;">
+        <h1 style="margin:0;font-size:16px;font-weight:700;">Request Received</h1>
+        <p style="margin:4px 0 0;font-size:12px;opacity:.75;">Office of the Head of the Civil Service, Ghana</p>
+      </div>
+      <div style="height:3px;background:linear-gradient(90deg,#CE1126 33%,#FCD116 33% 66%,#006B3F 66%);"></div>
+      <div style="padding:28px 24px;">
+        <p style="margin:0 0 18px;font-size:15px;">Hello <strong>${name}</strong>,</p>
+        <p style="margin:0 0 20px;font-size:14px;color:#374151;">Your appointment request has been received and is <strong style="color:#92400E;">pending approval</strong> from <strong>${officer}</strong>.</p>
+        <table role="presentation" style="width:100%;border-collapse:collapse;background:#F0FDF4;border-radius:12px;margin:0 0 20px;border:1px solid #BBF7D0;">
+          <tr><td style="padding:12px 16px 4px;font-size:11px;color:#166534;text-transform:uppercase;letter-spacing:.5px;">Officer</td></tr>
+          <tr><td style="padding:0 16px 10px;font-size:15px;font-weight:600;color:#14532D;">${officer}</td></tr>
+          <tr><td style="padding:0 16px 4px;font-size:11px;color:#166534;text-transform:uppercase;letter-spacing:.5px;border-top:1px solid #BBF7D0;">Date &amp; Time</td></tr>
+          <tr><td style="padding:0 16px 10px;font-size:15px;font-weight:600;color:#14532D;">${escapeHtml(i.appointmentDate)} at ${escapeHtml(i.timeSlot)}</td></tr>
+          <tr><td style="padding:0 16px 4px;font-size:11px;color:#166534;text-transform:uppercase;letter-spacing:.5px;border-top:1px solid #BBF7D0;">Reference Code</td></tr>
+          <tr><td style="padding:0 16px 14px;font-size:22px;font-weight:700;font-family:monospace;color:#14532D;letter-spacing:4px;">${ref}</td></tr>
+        </table>
+        <p style="margin:0;font-size:13px;color:#6B7280;">${nextSteps}</p>
+      </div>
+      <div style="padding:14px 24px;border-top:1px solid #E5E7EB;text-align:center;font-size:11px;color:#9CA3AF;">Office of the Head of the Civil Service</div>
+    </div>
+  </div>
+</body></html>`;
+}
+
 // ─── Reschedule proposal email (unlinked visitors — spec 2026-08-03) ─────────
 
 export interface RescheduleProposalEmailInput extends AppointmentEmailInput {

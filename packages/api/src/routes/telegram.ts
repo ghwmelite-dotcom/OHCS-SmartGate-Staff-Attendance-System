@@ -269,13 +269,18 @@ async function handleStart(c: Ctx, chatId: number, args: string): Promise<void> 
       await c.env.KV.put(`telegram-visitor:${appointmentId}`, String(chatId));
       await c.env.KV.delete(`visit-link:${args}`);
       const appt = await c.env.DB.prepare(
-        `SELECT o.name AS officer_name
+        `SELECT o.name AS officer_name, a.appointment_date, a.time_slot, a.status
          FROM appointments a JOIN officers o ON o.id = a.officer_id
          WHERE a.id = ?`
-      ).bind(appointmentId).first<{ officer_name: string }>();
+      ).bind(appointmentId).first<{ officer_name: string; appointment_date: string; time_slot: string; status: string }>();
+      const when = appt ? `${escapeHtml(appt.appointment_date)} at ${escapeHtml(appt.time_slot)}` : null;
+      const officer = escapeHtml(appt?.officer_name ?? 'your host');
+      const text = appt?.status === 'pending'
+        ? `✅ <b>Linked!</b>\n\nYour appointment request for ${when} with ${officer} is <b>pending approval</b> — I'll message you here when there's news.`
+        : `✅ <b>Linked!</b>\n\nYou'll get updates about your appointment with ${officer}${when ? ` on ${when}` : ''} here.`;
       await sendTelegramMessage({
         chatId: String(chatId),
-        text: `✅ <b>Linked!</b>\n\nYou'll get updates about your appointment with ${escapeHtml(appt?.officer_name ?? 'your host')} here.`,
+        text,
         token: c.env.TELEGRAM_BOT_TOKEN,
       });
       return;
