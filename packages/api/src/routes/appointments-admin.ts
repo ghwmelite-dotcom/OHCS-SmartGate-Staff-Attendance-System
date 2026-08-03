@@ -4,8 +4,10 @@ import { z } from 'zod';
 import type { Env, SessionData } from '../types';
 import { success, error, notFound } from '../lib/response';
 import { resolveDirectorateScope, DIRECTORATE_SCOPE_NONE } from '../lib/directorate-scope';
-import { sendTelegramMessage } from '../services/telegram';
-import { sendAppointmentConfirmedEmail, sendAppointmentDeclinedEmail } from '../services/email';
+import { sendTelegramMessage, buildAppointmentRespondKeyboard } from '../services/telegram';
+import { sendAppointmentConfirmedEmail, sendAppointmentDeclinedEmail, sendAppointmentRescheduleProposalEmail } from '../services/email';
+import { notifyAppointmentApprovers } from '../services/appointment-reschedule';
+import { escapeHtml } from '../lib/html';
 import { performCheckIn } from '../services/check-in';
 import { findOrCreateAppointmentVisitor } from './appointments-public';
 
@@ -170,6 +172,123 @@ LEFT JOIN users u ON u.id = a.approved_by`;
     limit,
   });
 });
+
+// ─── Route: PATCH /:id/propose ────────────────────────────────────────────────
+
+// Reschedule proposal (spec 2026-08-03): the approver counter-proposes a new
+// date/slot for a PENDING appointment. One round only — the visitor's verdict
+// (Telegram inline keyboard when linked, email links otherwise) ends it;
+// accept confirms on the proposed slot, decline is terminal.
+appointmentsAdminRoutes.patch(
+  '/:id/propose',
+  zValidator('json', z.object({
+    proposed_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    proposed_time_slot: z.string().regex(/^\d{2}:\d{2}$/),
+  })),
+  async (c) => {
+    const session = c.get('session');
+    const id = c.req.param('id');
+    const body = c.req.valid('json');
+
+    // Strictly future-or-today (string compare is safe on YYYY-MM-DD).
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (body.proposed_date < todayStr) {
+      return error(c, 'DATE_IN_PAST', 'proposed_date must be today or later', 422);
+    }
+
+    const appt = await c.env.DB.prepare(
+      `SELECT a.id, a.officer_id, a.reference_code, a.appointment_date, a.time_slot,
+              a.visitor_name, a.visitor_email, a.status,
+              o.name as officer_name, o.title as officer_title,
+              d.name as directorate_name
+       FROM appointments a
+       JOIN officers o ON o.id = a.officer_id
+       JOIN directorates d ON d.id = o.directorate_id
+       WHERE a.id = ?`,
+    )
+      .bind(id)
+      .first<{
+        id: string; officer_id: string; reference_code: string;
+        appointment_date: string; time_slot: string;
+        visitor_name: string; visitor_email: string | null; status: string;
+        officer_name: string; officer_title: string | null; directorate_name: string;
+      }>();
+
+    if (!appt) return notFound(c, 'Appointment');
+
+    const allowed = await canActOnAppointment(c.env, session, appt.officer_id);
+    if (!allowed) return error(c, 'FORBIDDEN', 'You do not have permission to propose a new time for this appointment', 403);
+
+    if (appt.status !== 'pending') {
+      return error(c, 'INVALID_STATE', `A new time can only be proposed while the appointment is pending (current: ${appt.status})`, 422);
+    }
+
+    // Guarded flip: only from pending, so a raced double-propose loses here.
+    const flip = await c.env.DB.prepare(
+      `UPDATE appointments
+       SET status = 'reschedule_proposed',
+           proposed_date = ?,
+           proposed_time_slot = ?,
+           updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+       WHERE id = ? AND status = 'pending'`,
+    )
+      .bind(body.proposed_date, body.proposed_time_slot, id)
+      .run();
+
+    if ((flip.meta?.changes ?? 0) === 0) {
+      return error(c, 'INVALID_STATE', 'This appointment is no longer pending', 422);
+    }
+
+    // Delivery — Telegram-primary: the linked visitor gets the inline
+    // Accept/Decline keyboard; unlinked visitors get the email fallback with
+    // the two public respond links. All sends are best-effort.
+    let deliveredVia: 'telegram' | 'email' | 'none' = 'none';
+    try {
+      const visitorChatId = await c.env.KV.get(`telegram-visitor:${appt.id}`);
+      if (visitorChatId) {
+        const sent = await sendTelegramMessage({
+          chatId: visitorChatId,
+          text: [
+            `📅 <b>New time proposed for your appointment</b>`,
+            '',
+            `${escapeHtml(appt.officer_name)} has proposed <b>${escapeHtml(body.proposed_date)}</b> at <b>${escapeHtml(body.proposed_time_slot)}</b> for your meeting (was ${escapeHtml(appt.appointment_date)} at ${escapeHtml(appt.time_slot)}).`,
+            `Ref: <code>${escapeHtml(appt.reference_code)}</code>`,
+          ].join('\n'),
+          token: c.env.TELEGRAM_BOT_TOKEN,
+          replyMarkup: buildAppointmentRespondKeyboard(appt.id),
+        });
+        if (sent) deliveredVia = 'telegram';
+      }
+      if (deliveredVia === 'none' && appt.visitor_email) {
+        const base = c.env.ADMIN_APP_URL || 'https://smartgate.ohcsghana.org';
+        c.executionCtx.waitUntil(sendAppointmentRescheduleProposalEmail(c.env, {
+          visitorName: appt.visitor_name,
+          visitorEmail: appt.visitor_email,
+          officerName: appt.officer_name,
+          officerTitle: appt.officer_title,
+          directorateName: appt.directorate_name,
+          appointmentDate: appt.appointment_date,
+          timeSlot: appt.time_slot,
+          referenceCode: appt.reference_code,
+          proposedDate: body.proposed_date,
+          proposedTimeSlot: body.proposed_time_slot,
+          acceptUrl: `${base}/api/appointments/public/respond/${appt.reference_code}/accept`,
+          declineUrl: `${base}/api/appointments/public/respond/${appt.reference_code}/decline`,
+        }));
+        deliveredVia = 'email';
+      }
+    } catch { /* non-fatal — the proposal state stands regardless */ }
+
+    // Approver in-app confirmation that the proposal went out.
+    await notifyAppointmentApprovers(c.env, appt.officer_id, {
+      type: 'appointment_reschedule_proposed',
+      title: 'Reschedule proposal sent',
+      body: `${session.name} proposed ${body.proposed_date} at ${body.proposed_time_slot} to ${appt.visitor_name} (Ref ${appt.reference_code}) — awaiting the visitor's response.`,
+    });
+
+    return success(c, { ok: true, delivered_via: deliveredVia });
+  },
+);
 
 // ─── Route: PATCH /:id/confirm ────────────────────────────────────────────────
 

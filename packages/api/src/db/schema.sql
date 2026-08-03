@@ -449,13 +449,15 @@ CREATE TABLE IF NOT EXISTS appointments (
     appointment_date TEXT NOT NULL,
     time_slot        TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'pending'
-                       CHECK(status IN ('pending','confirmed','declined','cancelled','completed')),
+                       CHECK(status IN ('pending','confirmed','declined','cancelled','completed','reschedule_proposed')),
     reference_code   TEXT NOT NULL UNIQUE,
     approved_by      TEXT REFERENCES users(id),
     approved_at      TEXT,
     decline_reason   TEXT,
     approver_notes   TEXT,
     visit_id         TEXT REFERENCES visits(id),
+    proposed_date    TEXT,
+    proposed_time_slot TEXT,
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );

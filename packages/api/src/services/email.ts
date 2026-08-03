@@ -115,6 +115,86 @@ export async function sendAppointmentDeclinedEmail(env: Env, input: AppointmentE
   } catch { return false; }
 }
 
+// ─── Reschedule proposal email (unlinked visitors — spec 2026-08-03) ─────────
+
+export interface RescheduleProposalEmailInput extends AppointmentEmailInput {
+  proposedDate: string;
+  proposedTimeSlot: string;
+  acceptUrl: string;
+  declineUrl: string;
+}
+
+export async function sendAppointmentRescheduleProposalEmail(env: Env, input: RescheduleProposalEmailInput): Promise<boolean> {
+  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return false;
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: env.EMAIL_FROM,
+        to: [input.visitorEmail],
+        subject: `New time proposed for your appointment — Ref ${input.referenceCode}`,
+        html: rescheduleProposalHtml(input),
+        text: rescheduleProposalText(input),
+      }),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+function rescheduleProposalText(i: RescheduleProposalEmailInput): string {
+  return [
+    `Hello ${i.visitorName},`,
+    '',
+    `${i.officerName}'s office has proposed a new time for your appointment (Ref: ${i.referenceCode}).`,
+    '',
+    `  Original : ${i.appointmentDate} at ${i.timeSlot}`,
+    `  Proposed : ${i.proposedDate} at ${i.proposedTimeSlot}`,
+    '',
+    `Accept:  ${i.acceptUrl}`,
+    `Decline: ${i.declineUrl}`,
+    '',
+    `— Office of the Head of the Civil Service`,
+  ].join('\n');
+}
+
+function rescheduleProposalHtml(i: RescheduleProposalEmailInput): string {
+  const name = escapeHtml(i.visitorName);
+  const officer = escapeHtml(`${i.officerName}${i.officerTitle ? ` — ${i.officerTitle}` : ''}`);
+  const ref = escapeHtml(i.referenceCode);
+  const acceptUrl = escapeHtml(i.acceptUrl);
+  const declineUrl = escapeHtml(i.declineUrl);
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;background:#F8F9FA;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
+  <div style="max-width:520px;margin:0 auto;padding:24px 16px;">
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+      <div style="background:#1B3A5C;color:#fff;padding:24px;text-align:center;">
+        <h1 style="margin:0;font-size:16px;font-weight:700;">New Time Proposed</h1>
+        <p style="margin:4px 0 0;font-size:12px;opacity:.75;">Office of the Head of the Civil Service, Ghana</p>
+      </div>
+      <div style="height:3px;background:linear-gradient(90deg,#CE1126 33%,#FCD116 33% 66%,#006B3F 66%);"></div>
+      <div style="padding:28px 24px;">
+        <p style="margin:0 0 18px;font-size:15px;">Hello <strong>${name}</strong>,</p>
+        <p style="margin:0 0 20px;font-size:14px;color:#374151;">${officer} has proposed a new time for your appointment (Ref: <strong style="font-family:monospace;">${ref}</strong>):</p>
+        <table role="presentation" style="width:100%;border-collapse:collapse;background:#FFFBEB;border-radius:12px;margin:0 0 20px;border:1px solid #FDE68A;">
+          <tr><td style="padding:12px 16px 4px;font-size:11px;color:#92400E;text-transform:uppercase;letter-spacing:.5px;">Original</td></tr>
+          <tr><td style="padding:0 16px 10px;font-size:14px;color:#78350F;text-decoration:line-through;">${escapeHtml(i.appointmentDate)} at ${escapeHtml(i.timeSlot)}</td></tr>
+          <tr><td style="padding:0 16px 4px;font-size:11px;color:#92400E;text-transform:uppercase;letter-spacing:.5px;border-top:1px solid #FDE68A;">Proposed</td></tr>
+          <tr><td style="padding:0 16px 14px;font-size:15px;font-weight:600;color:#78350F;">${escapeHtml(i.proposedDate)} at ${escapeHtml(i.proposedTimeSlot)}</td></tr>
+        </table>
+        <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 20px;"><tr>
+          <td style="padding-right:8px;"><a href="${acceptUrl}" style="display:block;padding:13px 0;text-align:center;font-size:14px;font-weight:600;color:#fff;text-decoration:none;border-radius:12px;background:#1A4D2E;">Accept new time</a></td>
+          <td style="padding-left:8px;"><a href="${declineUrl}" style="display:block;padding:13px 0;text-align:center;font-size:14px;font-weight:600;color:#7F1D1D;text-decoration:none;border-radius:12px;background:#FEF2F2;border:1px solid #FECACA;">Decline</a></td>
+        </tr></table>
+        <p style="margin:0;font-size:12px;color:#9CA3AF;">Each link works once — your first response is what counts.</p>
+      </div>
+      <div style="padding:14px 24px;border-top:1px solid #E5E7EB;text-align:center;font-size:11px;color:#9CA3AF;">Office of the Head of the Civil Service</div>
+    </div>
+  </div>
+</body></html>`;
+}
+
 function appointmentConfirmedText(i: AppointmentEmailInput): string {
   return [
     `Hello ${i.visitorName},`,

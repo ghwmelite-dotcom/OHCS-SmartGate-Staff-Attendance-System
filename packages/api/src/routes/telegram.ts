@@ -3,9 +3,12 @@ import type { Env } from '../types';
 import {
   sendTelegramMessage, parseCommand,
   answerCallbackQuery, editMessageText, editMessageCaption, parseArrivalCallback,
+  parseAppointmentRespondCallback,
   ARRIVAL_ACTIONS, type ArrivalAction,
   AVAILABILITY_STATUSES, type AvailabilityStatus,
 } from '../services/telegram';
+import { respondToProposal } from '../services/appointment-reschedule';
+import { escapeHtml } from '../lib/html';
 import { recordAudit, systemActor } from '../services/audit';
 import { timingSafeEqualStrings } from '../services/auth';
 
@@ -42,7 +45,8 @@ export async function telegramWebhook(c: Context<{ Bindings: Env }>) {
   // Inline-keyboard taps arrive as callback_query updates — handle before messages.
   const cb = body.callback_query;
   if (cb?.data && cb.message) {
-    await handleArrivalCallback(c, cb);
+    if (cb.data.startsWith('appt-respond:')) await handleAppointmentRespondCallback(c, cb);
+    else await handleArrivalCallback(c, cb);
     return c.json({ ok: true });
   }
 
@@ -116,6 +120,41 @@ export async function telegramAttendanceWebhook(c: Context<{ Bindings: Env }>) {
 }
 
 type Ctx = Context<{ Bindings: Env }>;
+
+// Visitor tapped Accept/Decline on a reschedule proposal (spec 2026-08-03).
+// The tap must come from the visitor's own linked chat — forwarded keyboards
+// keep working buttons, so verify `from` against the binding before acting.
+// Every callback gets an answer so Telegram stops retrying; first response
+// wins inside respondToProposal's guarded UPDATE.
+async function handleAppointmentRespondCallback(c: Ctx, cb: ArrivalCallbackQuery): Promise<void> {
+  const parsed = parseAppointmentRespondCallback(cb.data ?? '');
+  if (!parsed) return;
+  const answer = (text: string) =>
+    answerCallbackQuery({ token: c.env.TELEGRAM_BOT_TOKEN, callbackQueryId: cb.id, text });
+
+  try {
+    const linkedChat = await c.env.KV.get(`telegram-visitor:${parsed.appointmentId}`);
+    const fromId = String(cb.from?.id ?? '');
+    if (!linkedChat || fromId !== linkedChat) {
+      await answer('This proposal isn’t for you.');
+      return;
+    }
+
+    const { outcome } = await respondToProposal(c.env, { id: parsed.appointmentId }, parsed.action);
+    if (outcome === 'not_found') {
+      await answer('This appointment could not be found.');
+    } else if (outcome === 'already_handled') {
+      await answer('Already handled — this proposal was responded to.');
+    } else if (outcome === 'accepted') {
+      await answer('Accepted — your appointment is confirmed.');
+    } else {
+      await answer('Declined — the office has been notified.');
+    }
+  } catch (err) {
+    console.error('[Telegram] Appointment respond callback failed:', err);
+    await answer('Something went wrong — please try again.');
+  }
+}
 
 // Host tapped an arrival-alert inline button (spec §4). First response wins;
 // every callback gets an answer so Telegram stops retrying — failures are logged, never fatal.
@@ -218,6 +257,25 @@ async function handleStart(c: Ctx, chatId: number, args: string): Promise<void> 
       await sendTelegramMessage({
         chatId: String(chatId),
         text: `✅ <b>Linked!</b>\n\n${row?.name ?? 'You'} will now receive visitor arrival alerts${row?.dir ? ` for ${row.dir}` : ''}.`,
+        token: c.env.TELEGRAM_BOT_TOKEN,
+      });
+      return;
+    }
+    // Visitor appointment-link token (spec 2026-08-03) — minted into
+    // visit-link:* by POST /appointments/public/book; binds the visitor's chat
+    // to their appointment so proposals and updates can reach them.
+    const appointmentId = await c.env.KV.get(`visit-link:${args}`);
+    if (appointmentId) {
+      await c.env.KV.put(`telegram-visitor:${appointmentId}`, String(chatId));
+      await c.env.KV.delete(`visit-link:${args}`);
+      const appt = await c.env.DB.prepare(
+        `SELECT o.name AS officer_name
+         FROM appointments a JOIN officers o ON o.id = a.officer_id
+         WHERE a.id = ?`
+      ).bind(appointmentId).first<{ officer_name: string }>();
+      await sendTelegramMessage({
+        chatId: String(chatId),
+        text: `✅ <b>Linked!</b>\n\nYou'll get updates about your appointment with ${escapeHtml(appt?.officer_name ?? 'your host')} here.`,
         token: c.env.TELEGRAM_BOT_TOKEN,
       });
       return;

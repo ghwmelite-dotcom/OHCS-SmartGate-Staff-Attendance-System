@@ -88,7 +88,8 @@ describe('survey wiring guards', () => {
     const idx = readFileSync(join(ROUTES_DIR, '../db/migrations-index.ts'), 'utf8');
     // The additive-only convention puts new migrations LAST; visitor-surveys
     // held that slot until migration-visitors-idempotency.sql (2026-08-01
-    // VMS audit fixes, Commit D) appended after it.
-    expect(idx).toMatch(/\{ filename: 'migration-visitor-surveys\.sql', sql: visitorSurveys \},\s*\{ filename: 'migration-visitors-idempotency\.sql', sql: visitorsIdempotency \},\s*\];/);
+    // VMS audit fixes, Commit D) and migration-appointments-reschedule.sql
+    // (2026-08-03 reschedule proposals) appended after it.
+    expect(idx).toMatch(/\{ filename: 'migration-visitor-surveys\.sql', sql: visitorSurveys \},\s*\{ filename: 'migration-visitors-idempotency\.sql', sql: visitorsIdempotency \},\s*\{ filename: 'migration-appointments-reschedule\.sql', sql: appointmentsReschedule \},\s*\];/);
   });
 });

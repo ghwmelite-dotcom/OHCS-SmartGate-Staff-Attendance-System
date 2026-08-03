@@ -22,6 +22,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 import { toast } from '@/stores/toast';
+import { formatProposedSlot } from '@/lib/appointment-slot';
 import {
   api,
   appointmentsApi,
@@ -65,6 +66,11 @@ const STATUS_CONFIG: Record<string, { label: string; cls: string; icon: React.Re
     label: 'Pending',
     cls: 'bg-amber-50 text-amber-700 border border-amber-200',
     icon: <Clock className="h-3 w-3" />,
+  },
+  reschedule_proposed: {
+    label: 'Proposed — awaiting visitor',
+    cls: 'bg-amber-50 text-amber-700 border border-amber-200',
+    icon: <CalendarClock className="h-3 w-3" />,
   },
   confirmed: {
     label: 'Confirmed',
@@ -314,6 +320,150 @@ function DeclineModal({
   );
 }
 
+/* ---- Propose-reschedule modal ---- */
+
+function tomorrowIso(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function ProposeModal({
+  appointment,
+  onClose,
+  onSuccess,
+}: {
+  appointment: AppointmentRecord;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [date, setDate] = useState('');
+  const [slot, setSlot] = useState('');
+  const [slots, setSlots] = useState<string[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [slotsError, setSlotsError] = useState<string | null>(null);
+
+  function handleDateChange(value: string) {
+    setDate(value);
+    setSlot('');
+    setSlots([]);
+    setSlotsError(null);
+    if (!value) return;
+    setSlotsLoading(true);
+    appointmentsApi
+      .publicSlots(appointment.officer_id, value)
+      .then((res) => setSlots(res.data?.slots ?? []))
+      .catch((err) =>
+        setSlotsError(err instanceof Error ? err.message : 'Could not load slots.')
+      )
+      .finally(() => setSlotsLoading(false));
+  }
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      appointmentsApi.propose(appointment.id, {
+        proposed_date: date,
+        proposed_time_slot: slot,
+      }),
+    onSuccess: () => {
+      toast.success('Proposal sent to visitor');
+      onSuccess();
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to send proposal');
+    },
+  });
+
+  return (
+    <Modal
+      title="Propose New Time"
+      onClose={onClose}
+      icon={<CalendarClock className="h-4 w-4 text-amber-600" />}
+    >
+      <div className="space-y-4">
+        <p className="text-[14px] text-muted">
+          Propose a different time for{' '}
+          <span className="font-semibold text-foreground">{appointment.visitor_name}</span>'s
+          appointment with{' '}
+          <span className="font-semibold text-foreground">{appointment.officer_name}</span>{' '}
+          (currently {appointment.appointment_date} at {appointment.time_slot}). The visitor can
+          accept or decline the proposal.
+        </p>
+
+        <FormField label="Proposed date">
+          <input
+            type="date"
+            min={tomorrowIso()}
+            value={date}
+            onChange={(e) => handleDateChange(e.target.value)}
+            className={inputCls}
+          />
+        </FormField>
+
+        {date && (
+          <FormField label="Proposed slot" error={slotsError ?? undefined}>
+            {slotsLoading ? (
+              <div className="grid grid-cols-3 gap-2">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-10 rounded-xl bg-border animate-pulse" />
+                ))}
+              </div>
+            ) : slotsError ? null : slots.length === 0 ? (
+              <p className="text-[13px] text-muted bg-background rounded-xl border border-border px-3.5 py-2.5">
+                No slots available for this date. Please try another day.
+              </p>
+            ) : (
+              <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                {slots.map((s) => {
+                  const isSelected = slot === s;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setSlot(s)}
+                      className={cn(
+                        'h-10 rounded-xl text-[13px] font-semibold border transition-all',
+                        isSelected
+                          ? 'bg-primary text-white border-primary'
+                          : 'bg-surface text-foreground border-border hover:border-primary/50'
+                      )}
+                    >
+                      {s}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </FormField>
+        )}
+
+        {mutation.isError && (
+          <p className="text-danger text-[13px]">
+            {mutation.error instanceof Error ? mutation.error.message : 'Failed to send proposal'}
+          </p>
+        )}
+
+        <div className="flex justify-end gap-3 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-11 px-5 text-[14px] text-muted hover:text-foreground transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => mutation.mutate()}
+            disabled={!date || !slot || mutation.isPending}
+            className="h-11 px-6 bg-amber-500 text-white text-[14px] font-semibold rounded-xl hover:opacity-90 transition-all disabled:opacity-50 shadow-lg shadow-amber-500/15"
+          >
+            {mutation.isPending ? 'Sending…' : 'Confirm Proposal'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /* ---- Cancel confirm modal ---- */
 
 function CancelModal({
@@ -379,14 +529,17 @@ function CancelModal({
 type QueueAction =
   | { type: 'confirm'; appt: AppointmentRecord }
   | { type: 'decline'; appt: AppointmentRecord }
+  | { type: 'propose'; appt: AppointmentRecord }
   | { type: 'cancel'; appt: AppointmentRecord };
 
 function AppointmentCard({
   appt,
+  slotDurationMins,
   onAction,
   onComplete,
 }: {
   appt: AppointmentRecord;
+  slotDurationMins?: number;
   onAction: (action: QueueAction) => void;
   onComplete: (id: string) => void;
 }) {
@@ -406,7 +559,14 @@ function AppointmentCard({
             {appt.visitor_email && <span>{appt.visitor_email}</span>}
           </div>
         </div>
-        <StatusBadge status={appt.status} />
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <StatusBadge status={appt.status} />
+          {appt.status === 'reschedule_proposed' && appt.proposed_date && appt.proposed_time_slot && (
+            <span className="text-[11px] font-medium text-amber-700">
+              → {formatProposedSlot(appt.proposed_date, appt.proposed_time_slot, slotDurationMins)}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Purpose */}
@@ -469,6 +629,13 @@ function AppointmentCard({
           >
             <CheckCircle2 className="h-3.5 w-3.5" />
             Confirm
+          </button>
+          <button
+            onClick={() => onAction({ type: 'propose', appt })}
+            className="inline-flex items-center gap-1.5 h-9 px-4 bg-amber-50 text-amber-700 text-[13px] font-semibold rounded-xl hover:bg-amber-100 transition-all border border-amber-200"
+          >
+            <CalendarClock className="h-3.5 w-3.5" />
+            Propose
           </button>
           <button
             onClick={() => onAction({ type: 'decline', appt })}
@@ -536,6 +703,12 @@ function QueueView({ bookableOfficers }: { bookableOfficers: BookableOfficerReco
 
   const appointments = data?.data?.appointments ?? [];
 
+  const slotDurationByOfficer = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const o of bookableOfficers) map[o.officer_id] = o.slot_duration_mins;
+    return map;
+  }, [bookableOfficers]);
+
   return (
     <div className="space-y-5">
       {/* Filter row */}
@@ -548,6 +721,7 @@ function QueueView({ bookableOfficers }: { bookableOfficers: BookableOfficerReco
           >
             <option value="">All Statuses</option>
             <option value="pending">Pending</option>
+            <option value="reschedule_proposed">Proposed</option>
             <option value="confirmed">Confirmed</option>
             <option value="declined">Declined</option>
             <option value="cancelled">Cancelled</option>
@@ -606,6 +780,7 @@ function QueueView({ bookableOfficers }: { bookableOfficers: BookableOfficerReco
             <AppointmentCard
               key={appt.id}
               appt={appt}
+              slotDurationMins={slotDurationByOfficer[appt.officer_id]}
               onAction={setAction}
               onComplete={(id) => completeMutation.mutate(id)}
             />
@@ -627,6 +802,17 @@ function QueueView({ bookableOfficers }: { bookableOfficers: BookableOfficerReco
       )}
       {action?.type === 'decline' && (
         <DeclineModal
+          appointment={action.appt}
+          onClose={() => setAction(null)}
+          onSuccess={() => {
+            setAction(null);
+            queryClient.invalidateQueries({ queryKey: ['appointments-admin'] });
+            refetch();
+          }}
+        />
+      )}
+      {action?.type === 'propose' && (
+        <ProposeModal
           appointment={action.appt}
           onClose={() => setAction(null)}
           onSuccess={() => {

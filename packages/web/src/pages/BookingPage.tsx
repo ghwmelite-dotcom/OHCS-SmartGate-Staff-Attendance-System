@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { CheckCircle2, Copy, Check, Loader2, ChevronRight, ChevronLeft } from 'lucide-react';
+import { CheckCircle2, Copy, Check, Loader2, ChevronRight, ChevronLeft, Send } from 'lucide-react';
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -40,6 +40,7 @@ interface BookingSuccess {
   directorate_wing?: string | null;
   appointment_date: string;
   time_slot: string;
+  telegram_link_url?: string | null;
 }
 
 /* ── Zod schema for Step 3 ───────────────────────────────────────────────── */
@@ -231,7 +232,7 @@ export function BookingPage() {
         }),
       });
       const data = (await res.json()) as {
-        data?: { reference_code?: string };
+        data?: { reference_code?: string; telegram_link_url?: string | null };
         error?: { message: string; code?: string };
       };
       if (!res.ok) {
@@ -257,6 +258,7 @@ export function BookingPage() {
         directorate_wing: booking.officer.directorate_wing,
         appointment_date: booking.date,
         time_slot: booking.timeSlot,
+        telegram_link_url: data.data?.telegram_link_url ?? null,
       });
     } catch {
       setSubmitError('Something went wrong. Please try again.');
@@ -832,6 +834,25 @@ function SuccessScreen({
             {copied ? <Check size={16} /> : <Copy size={16} />}
           </button>
         </div>
+
+        {/* Telegram updates opt-in (only when the API issued a deep link) */}
+        {success.telegram_link_url && (
+          <div className="mt-4">
+            <a
+              href={success.telegram_link_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-white text-sm transition-all duration-200 hover:opacity-90 active:scale-95 shadow-sm"
+              style={{ background: '#229ED9' }}
+            >
+              <Send size={16} />
+              Get updates on Telegram
+            </a>
+            <p className="text-xs text-gray-500 mt-2 max-w-xs mx-auto leading-relaxed">
+              Tap Start in Telegram and we'll send your appointment updates there — proposals, confirmations, everything.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Appointment summary */}

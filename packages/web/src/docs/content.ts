@@ -390,6 +390,15 @@ export const DOC_SECTIONS: DocSection[] = [
         summary: 'Superadmin/admin manage appointments in the Admin portal tab; reception, directors (scoped to their own directorate) and CD/HoS (org-wide) get a read-only day view under Appointments.',
         details: ['Action endpoints stay admin/superadmin/approver-delegates only — the day view shows no actions to oversight roles'],
       },
+      {
+        name: 'Reschedule proposals (Telegram)',
+        status: 'live',
+        summary: 'Approvers can counter-propose a new date/slot on a pending appointment; the visitor accepts or declines on Telegram (email fallback when unlinked). Accept confirms the new slot; decline closes the request with a rebook invite.',
+        details: [
+          'Booking success page offers a "Get updates on Telegram" deep link so updates (proposals, confirmations) arrive in the bot',
+          'Proposed appointments show a "Proposed — awaiting visitor" chip with the proposed slot until the visitor responds',
+        ],
+      },
     ],
   },
   {

@@ -62,12 +62,16 @@ export async function sendTelegramMessage(params: SendMessageParams): Promise<bo
 // Photo variant — arrival alerts carry the visitor's kiosk photo so the host
 // can recognise (and sanity-check) who is waiting. Caption rides the same
 // HTML text; Telegram caps captions at 1024 chars. reply_markup works too.
-export async function sendTelegramPhoto({ chatId, photo, caption, token, replyMarkup }: {
+// photoType/photoName default to the visitor-photo JPEG; the appointment
+// reschedule flow sends a PNG QR instead.
+export async function sendTelegramPhoto({ chatId, photo, caption, token, replyMarkup, photoType = 'image/jpeg', photoName = 'visitor.jpg' }: {
   chatId: string;
   photo: ArrayBuffer;
   caption: string;
   token: string;
   replyMarkup?: InlineKeyboardMarkup;
+  photoType?: string;
+  photoName?: string;
 }): Promise<TelegramSendResult> {
   try {
     const form = new FormData();
@@ -75,7 +79,7 @@ export async function sendTelegramPhoto({ chatId, photo, caption, token, replyMa
     form.append('caption', caption.slice(0, 1024));
     form.append('parse_mode', 'HTML');
     if (replyMarkup) form.append('reply_markup', JSON.stringify(replyMarkup));
-    form.append('photo', new Blob([photo], { type: 'image/jpeg' }), 'visitor.jpg');
+    form.append('photo', new Blob([photo], { type: photoType }), photoName);
     const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: form });
     if (!res.ok) {
       console.warn(JSON.stringify({ kind: 'notify', channel: 'telegram', ok: false, detail: String(res.status) }));
@@ -191,6 +195,26 @@ export function parseArrivalCallback(data: string): { visitId: string; action: A
   const m = data.match(/^va:([^:]+):(coming_down|waiting_area|reschedule)$/);
   if (!m) return null;
   return { visitId: m[1]!, action: m[2]! as ArrivalAction };
+}
+
+// Appointment reschedule responses (spec 2026-08-03) — the visitor's Accept /
+// Decline taps on a proposed new slot. `appt-respond:` prefix keeps the
+// callback ≤ 64 bytes (13 + 32-char id + 1 + 7).
+export type AppointmentRespondAction = 'accept' | 'decline';
+
+export function parseAppointmentRespondCallback(data: string): { appointmentId: string; action: AppointmentRespondAction } | null {
+  const m = data.match(/^appt-respond:([^:]+):(accept|decline)$/);
+  if (!m) return null;
+  return { appointmentId: m[1]!, action: m[2]! as AppointmentRespondAction };
+}
+
+export function buildAppointmentRespondKeyboard(appointmentId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[
+      { text: '✅ Accept', callback_data: `appt-respond:${appointmentId}:accept` },
+      { text: '❌ Decline', callback_data: `appt-respond:${appointmentId}:decline` },
+    ]],
+  };
 }
 
 export function formatVisitorArrivalMessage(visitor: {

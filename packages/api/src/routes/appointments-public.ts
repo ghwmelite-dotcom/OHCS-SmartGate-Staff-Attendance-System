@@ -6,6 +6,7 @@ import { success, created, notFound, error } from '../lib/response';
 import { rateLimit } from '../lib/rate-limit';
 import { escapeHtml } from '../lib/html';
 import { sendTelegramMessage } from '../services/telegram';
+import { respondToProposal, rebookUrl } from '../services/appointment-reschedule';
 import { performCheckIn } from '../services/check-in';
 import { normalizeKioskPhone, KIOSK_USER_ID } from './kiosk';
 
@@ -388,11 +389,24 @@ appointmentsPublicRoutes.post('/book', zValidator('json', BookSchema), async (c)
     }
   } catch { /* non-fatal: appointment_approvers table may not exist yet */ }
 
+  // Visitor Telegram deep-link (spec 2026-08-03): the booking-success page
+  // turns this into a "Get updates on Telegram" button. Bots can't DM
+  // strangers, so the visitor's own tap is what binds their chat — the
+  // one-time KV token (24h) is consumed by the /start visit-link branch.
+  let telegramLinkUrl: string | null = null;
+  const botUsername = c.env.TELEGRAM_BOT_USERNAME;
+  if (botUsername && botUsername !== 'REPLACE_WITH_BOT_USERNAME') {
+    const linkToken = crypto.randomUUID().replace(/-/g, '');
+    await c.env.KV.put(`visit-link:${linkToken}`, apptId, { expirationTtl: 86_400 });
+    telegramLinkUrl = `https://t.me/${botUsername}?start=${linkToken}`;
+  }
+
   return created(c, {
     reference_code: referenceCode,
     appointment_date: body.appointment_date,
     time_slot: body.time_slot,
     officer_name: config.officer_name,
+    telegram_link_url: telegramLinkUrl,
   });
 });
 
@@ -560,4 +574,81 @@ appointmentsPublicRoutes.post('/arrive', zValidator('json', ArriveSchema), async
     time_slot: appointment.time_slot,
     visit: checkIn.visit,
   });
+});
+
+// ─── Route: GET /respond/:code/:action ───────────────────────────────────────
+
+// Public one-shot verdict links from the reschedule-proposal email (unlinked
+// visitors — spec 2026-08-03). Same transitions as the Telegram appt-respond
+// callback, keyed by reference code; both share respondToProposal's guarded
+// UPDATE so first response wins across channels. Returns a small branded HTML
+// page (the visitor followed a link in a mail client, not an API client) with
+// every interpolated value escaped. The guessed code itself is NEVER reflected.
+// Rate limit mirrors /ref.
+function respondPage(title: string, bodyHtml: string): string {
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} — OHCS SmartGate</title></head>
+<body style="margin:0;background:#F8F9FA;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
+  <div style="max-width:480px;margin:0 auto;padding:32px 16px;">
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+      <div style="background:#1A4D2E;color:#fff;padding:20px;text-align:center;">
+        <h1 style="margin:0;font-size:16px;font-weight:700;">${title}</h1>
+        <p style="margin:4px 0 0;font-size:12px;opacity:.75;">Office of the Head of the Civil Service, Ghana</p>
+      </div>
+      <div style="height:3px;background:linear-gradient(90deg,#CE1126 33%,#FCD116 33% 66%,#006B3F 66%);"></div>
+      <div style="padding:24px;">${bodyHtml}</div>
+      <div style="padding:12px 24px;border-top:1px solid #E5E7EB;text-align:center;font-size:11px;color:#9CA3AF;">Office of the Head of the Civil Service</div>
+    </div>
+  </div>
+</body></html>`;
+}
+
+const RESPOND_ACTIONS = new Set(['accept', 'decline']);
+
+appointmentsPublicRoutes.get('/respond/:code/:action', async (c) => {
+  const clientIP = c.req.header('CF-Connecting-IP') ?? 'unknown';
+  const rl = await rateLimit(c.env, `appt-respond:${clientIP}`, 20, 60);
+  if (!rl.allowed) {
+    c.header('Retry-After', String(rl.retryAfter));
+    return error(c, 'RATE_LIMITED', 'Too many requests. Please try again shortly.', 429);
+  }
+
+  const code = c.req.param('code');
+  const action = c.req.param('action');
+  if (!RESPOND_ACTIONS.has(action)) {
+    return c.html(respondPage('Link not recognised', '<p style="margin:0;font-size:14px;color:#374151;">This response link is not valid. Please use the exact links from your email.</p>'), 404);
+  }
+
+  const { outcome, appt } = await respondToProposal(c.env, { refCode: code }, action as 'accept' | 'decline');
+
+  if (outcome === 'not_found') {
+    return c.html(respondPage('Appointment not found', '<p style="margin:0;font-size:14px;color:#374151;">We couldn&#39;t find an appointment for this link. It may have been removed — please contact the office or book a new appointment.</p>'), 404);
+  }
+
+  if (outcome === 'already_handled') {
+    return c.html(respondPage('Already responded', '<p style="margin:0;font-size:14px;color:#374151;">This proposal has already been responded to — your first response is the one that counts. If you think this is wrong, please contact the office.</p>'));
+  }
+
+  const p = [
+    ['Visitor', escapeHtml(appt!.visitor_name)],
+    ['Officer', escapeHtml(appt!.officer_name)],
+    ['Date', escapeHtml(appt!.appointment_date)],
+    ['Time', escapeHtml(appt!.time_slot)],
+    ['Reference', `<span style="font-family:monospace;font-weight:700;letter-spacing:2px;">${escapeHtml(appt!.reference_code)}</span>`],
+  ];
+  const rows = p.map(([k, v]) => `<tr><td style="padding:6px 12px 6px 0;font-size:12px;color:#6B7280;vertical-align:top;">${k}</td><td style="padding:6px 0;font-size:14px;color:#111827;">${v}</td></tr>`).join('');
+  const detailTable = `<table role="presentation" style="border-collapse:collapse;margin:0 0 16px;">${rows}</table>`;
+
+  if (outcome === 'accepted') {
+    return c.html(respondPage(
+      'Appointment confirmed',
+      `<p style="margin:0 0 16px;font-size:14px;color:#374151;">Thank you — your appointment is <strong style="color:#1A4D2E;">confirmed</strong> for the proposed time:</p>${detailTable}<p style="margin:0;font-size:13px;color:#6B7280;">Show the reference code at the reception kiosk when you arrive.</p>`,
+    ));
+  }
+
+  const rebook = escapeHtml(rebookUrl(c.env));
+  return c.html(respondPage(
+    'Appointment declined',
+    `<p style="margin:0 0 16px;font-size:14px;color:#374151;">No problem — the proposed time has been declined and the office has been notified.</p>${detailTable}<p style="margin:0;font-size:13px;color:#6B7280;">You&#39;re welcome to <a href="${rebook}" style="color:#1A4D2E;">request a new slot</a> whenever suits you.</p>`,
+  ));
 });

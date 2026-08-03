@@ -176,6 +176,7 @@ export interface AppointmentRecord {
   appointment_date: string; time_slot: string; status: string;
   reference_code: string; approved_by?: string; approved_at?: string;
   decline_reason?: string; approver_notes?: string; visit_id?: string;
+  proposed_date?: string | null; proposed_time_slot?: string | null;
   created_at: string; updated_at: string;
   officer_name: string; officer_title?: string; directorate_name: string;
   approved_by_name?: string;
@@ -235,6 +236,12 @@ export const appointmentsApi = {
     request<{ ok: boolean }>(`/appointments/admin/${id}/cancel`, { method: 'PATCH', body: JSON.stringify({}) }),
   complete: (id: string) =>
     request<{ ok: boolean }>(`/appointments/admin/${id}/complete`, { method: 'PATCH', body: JSON.stringify({}) }),
+  propose: (id: string, data: { proposed_date: string; proposed_time_slot: string }) =>
+    request<{ ok: boolean }>(`/appointments/admin/${id}/propose`, { method: 'PATCH', body: JSON.stringify(data) }),
+  publicSlots: (officerId: string, date: string) =>
+    request<{ slots: string[] }>(
+      `/appointments/public/slots?officer_id=${encodeURIComponent(officerId)}&date=${encodeURIComponent(date)}`
+    ),
   getBookableOfficers: () =>
     request<{ bookable_officers: BookableOfficerRecord[] }>('/appointments/admin/setup/bookable-officers'),
   upsertBookableOfficer: (data: UpsertBookableOfficer) =>
