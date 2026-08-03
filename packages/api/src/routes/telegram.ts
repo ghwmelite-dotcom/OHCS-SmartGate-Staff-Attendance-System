@@ -145,10 +145,21 @@ async function handleAppointmentRespondCallback(c: Ctx, cb: ArrivalCallbackQuery
       await answer('This appointment could not be found.');
     } else if (outcome === 'already_handled') {
       await answer('Already handled — this proposal was responded to.');
-    } else if (outcome === 'accepted') {
-      await answer('Accepted — your appointment is confirmed.');
     } else {
-      await answer('Declined — the office has been notified.');
+      await answer(outcome === 'accepted'
+        ? 'Accepted — your appointment is confirmed.'
+        : 'Declined — the office has been notified.');
+      // Retire the buttons: edit the proposal message to record the verdict
+      // (editMessageText drops the keyboard when reply_markup is omitted).
+      const msg = cb.message;
+      if (msg?.chat) {
+        await editMessageText({
+          token: c.env.TELEGRAM_BOT_TOKEN,
+          chatId: String(msg.chat.id),
+          messageId: msg.message_id,
+          text: `${msg.text ?? ''}\n\n— ${outcome === 'accepted' ? '✅ Accepted' : '❌ Declined'}`,
+        }).catch((err) => console.error('[Telegram] proposal keyboard drop failed:', err));
+      }
     }
   } catch (err) {
     console.error('[Telegram] Appointment respond callback failed:', err);

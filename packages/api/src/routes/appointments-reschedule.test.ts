@@ -500,6 +500,25 @@ describe('Telegram appt-respond callback — accept', () => {
     expect(String((answers[1]![1] as RequestInit).body)).toContain('lready');
   });
 
+  it('drops the proposal keyboard at verdict — edits the original message with the outcome', async () => {
+    const { env, store, db } = makeEnv();
+    seedOfficer(db);
+    seedAppointment(db, { status: 'reschedule_proposed', proposedDate: tomorrowStr(), proposedSlot: '09:30' });
+    store.set('telegram-visitor:a1', '999');
+    const fetchMock = stubFetch();
+
+    await doCallback(env, 'appt-respond:a1:accept');
+
+    const edits = callsTo(fetchMock, 'editMessageText');
+    expect(edits).toHaveLength(1);
+    const payload = JSON.parse(String((edits[0]![1] as RequestInit).body)) as { chat_id: string | number; message_id: number; text: string };
+    expect(String(payload.chat_id)).toBe('999');
+    expect(payload.message_id).toBe(5);
+    expect(payload.text).toContain('✅ Accepted');
+    // No reply_markup in the edit — Telegram removes the keyboard when it is omitted.
+    expect('reply_markup' in payload).toBe(false);
+  });
+
   it('accept from a non-proposed status answers "already handled"', async () => {
     const { env, store, db } = makeEnv();
     seedOfficer(db);
