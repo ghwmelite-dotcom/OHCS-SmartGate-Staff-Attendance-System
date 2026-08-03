@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/auth';
-import { UserRound, X, Check, Phone, Mail, Lock } from 'lucide-react';
+import { UserRound, X, Check, Phone, Mail, Lock, Send } from 'lucide-react';
+import { getTelegramStatus, createTelegramLinkToken, type TelegramStatus } from '@/lib/telegramClient';
 
 function roleLabel(role: string): string {
   return role.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
@@ -21,6 +22,39 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
   const [pin, setPin] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Telegram reminders — a PERMANENT entry point: unlike the clock-page banner
+  // it never consults the 14-day snooze key. Status re-checks on window focus
+  // so returning from Telegram flips the section to Connected.
+  const [telegram, setTelegram] = useState<TelegramStatus | null>(null);
+  const [tgBusy, setTgBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const s = await getTelegramStatus();
+        if (!cancelled) setTelegram(s);
+      } catch { /* best-effort — section falls back to the connect affordance */ }
+    };
+    void check();
+    const onFocus = () => { void check(); };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
+
+  async function connectTelegram() {
+    setTgBusy(true);
+    try {
+      const { url } = await createTelegramLinkToken();
+      window.location.assign(url);
+    } catch {
+      setTgBusy(false);
+    }
+  }
 
   if (!user) return null;
 
@@ -136,6 +170,28 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
                   {status === 'loading' ? 'Saving...' : 'Save Changes'}
                 </button>
               </form>
+
+              {/* Telegram reminders — always visible, independent of the banner snooze */}
+              <div className="mt-6 pt-5 border-t border-gray-100">
+                <p className="text-[12px] font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  <span className="flex items-center gap-1.5"><Send className="h-3.5 w-3.5" /> Telegram reminders</span>
+                </p>
+                {telegram?.linked ? (
+                  <p className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-700">
+                    <Check className="h-4 w-4" /> Connected — reminders arrive on Telegram
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-[13px] text-gray-500 mb-2.5">
+                      Get clock-in/out reminders on Telegram — works even with the app closed.
+                    </p>
+                    <button type="button" onClick={connectTelegram} disabled={tgBusy || telegram === null}
+                      className="w-full h-11 bg-[#1A4D2E] text-white rounded-xl font-bold text-[14px] hover:brightness-110 disabled:opacity-50 transition-all">
+                      {tgBusy ? 'Connecting…' : 'Connect Telegram'}
+                    </button>
+                  </>
+                )}
+              </div>
             </>
           )}
         </div>

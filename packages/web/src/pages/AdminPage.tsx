@@ -22,6 +22,7 @@ import {
   Power,
   KeyRound,
   Search,
+  Send,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -41,6 +42,7 @@ interface UserRecord {
   last_login_at: string | null;
   created_at: string;
   user_type?: string | null;
+  telegram_linked?: boolean;
 }
 
 const ROLES = [
@@ -456,6 +458,15 @@ function UsersTab() {
                             {user.name.charAt(0)}
                           </div>
                           <span className="text-[15px] font-semibold text-foreground">{user.name}</span>
+                          <span
+                            className={cn(
+                              'inline-flex items-center justify-center h-6 w-6 rounded-lg shrink-0',
+                              user.telegram_linked ? 'bg-emerald-50 text-emerald-600' : 'bg-border/50 text-muted-foreground/50'
+                            )}
+                            title={user.telegram_linked ? 'Telegram reminders linked' : 'Not linked'}
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                          </span>
                         </div>
                       </td>
                       <td className="px-6 py-4">

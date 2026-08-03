@@ -30,7 +30,15 @@ userRoutes.get('/', async (c) => {
      ORDER BY u.created_at DESC`
   ).all();
 
-  return success(c, results.results ?? []);
+  // Telegram-reminder adoption flag per row (KV telegram-user:<id> → chatId).
+  const rows = await Promise.all(
+    (results.results ?? []).map(async (u) => ({
+      ...(u as Record<string, unknown>),
+      telegram_linked: (await c.env.KV.get(`telegram-user:${(u as { id: string }).id}`)) !== null,
+    }))
+  );
+
+  return success(c, rows);
 });
 
 // Count officers who have a staff_id but no matching Staff Attendance account.
