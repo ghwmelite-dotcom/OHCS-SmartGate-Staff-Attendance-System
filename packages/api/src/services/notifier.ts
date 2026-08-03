@@ -8,13 +8,13 @@ import { visitorPhotoKey } from '../lib/photo-key';
 
 const PERSONAL_CATEGORIES = ['personal_visit'];
 
-const PUSH_WHITELIST = new Set(['visitor_arrival', 'clock_reminder', 'clock_out_reminder', 'late_clock_alert', 'monthly_report_ready', 'absence_notice', 'checkout_sweep', 'sla_breach', 'watchlist_alert', 'survey_low_rating']);
+const PUSH_WHITELIST = new Set(['visitor_arrival', 'clock_reminder', 'clock_out_reminder', 'late_clock_alert', 'monthly_report_ready', 'absence_notice', 'checkout_sweep', 'sla_breach', 'watchlist_alert', 'survey_low_rating', 'clock_in_confirmation', 'clock_out_confirmation']);
 
 // Telegram delivery from the sendTypedNotification funnel is restricted to the
 // staff clock reminders — visitor_arrival and watchlist_alert already send
 // Telegram through their own dedicated paths (sendArrivalAlert /
 // notifyTelegramAdminChat), so whitelisting them here would double-fire.
-const TELEGRAM_WHITELIST = new Set(['clock_reminder', 'clock_out_reminder']);
+const TELEGRAM_WHITELIST = new Set(['clock_reminder', 'clock_out_reminder', 'clock_in_confirmation', 'clock_out_confirmation']);
 
 // Branded staff-PWA origin; mirrors services/email.ts. env.STAFF_APP_URL wins
 // when set (wrangler.toml [vars] sets it in both prod and dev).

@@ -79,6 +79,14 @@ function newDb(): SqliteDb {
       presence_method TEXT, presence_token_window TEXT, risk_score INTEGER, risk_factors TEXT,
       risk_disposition TEXT
     );
+    CREATE TABLE notifications (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL,
+      title TEXT NOT NULL, body TEXT NOT NULL, visit_id TEXT, read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    );
+    CREATE TABLE push_subscriptions (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, endpoint TEXT, p256dh TEXT, auth TEXT
+    );
   `);
   return db;
 }
@@ -130,6 +138,30 @@ function makeApp() {
 
 const FAKE_EXEC_CTX = { waitUntil: () => {}, passThroughOnException: () => {} };
 
+/** Collecting execution context — lets tests await waitUntil fanout. */
+function makeCtx() {
+  const pending: Promise<unknown>[] = [];
+  return {
+    ctx: {
+      waitUntil: (p: Promise<unknown>) => { pending.push(p.catch(() => {})); },
+      passThroughOnException: () => {},
+    },
+    drain: () => Promise.all(pending),
+  };
+}
+
+function clockInWithCtx(env: Env, ctx: { waitUntil: (p: Promise<unknown>) => void; passThroughOnException: () => void }, type: 'clock_in' | 'clock_out' = 'clock_in') {
+  return makeApp().request('/c', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, ...INSIDE }),
+  }, env, ctx as never);
+}
+
+function notifRows(db: SqliteDb): Array<Record<string, unknown>> {
+  return db.prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at, type').all('u1') as Array<Record<string, unknown>>;
+}
+
 // A point well inside the OHCS polygon.
 const INSIDE = { latitude: 5.55257, longitude: -0.19742, accuracy: 10 };
 
@@ -156,6 +188,56 @@ function clockRows(db: SqliteDb): Array<Record<string, unknown>> {
 }
 
 /* ---------- tests ---------- */
+
+describe('POST /clock — delivery confirmations (one-shot, real state changes only)', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(NOW)); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('clock-in fires exactly one in-app confirmation notification', async () => {
+    const { env, db } = makeEnv();
+    const ctx = makeCtx();
+    const res = await clockInWithCtx(env, ctx.ctx as never);
+    expect(res.status).toBe(200);
+    await ctx.drain();
+
+    const rows = notifRows(db);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.type).toBe('clock_in_confirmation');
+    expect(String(rows[0]!.title)).toContain('Clocked in');
+    expect(String(rows[0]!.body)).toContain('07:00');
+  });
+
+  it('clock-out confirmation carries the day duration', async () => {
+    const { env, db } = makeEnv();
+    db.prepare("INSERT INTO clock_records (id, user_id, type, timestamp) VALUES ('ci-seed', 'u1', 'clock_in', '2026-08-03T07:00:00.000Z')").run();
+    vi.setSystemTime(new Date('2026-08-03T16:00:00.000Z'));
+
+    const ctx = makeCtx();
+    const res = await clockInWithCtx(env, ctx.ctx as never, 'clock_out');
+    expect(res.status).toBe(200);
+    await ctx.drain();
+
+    const rows = notifRows(db);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.type).toBe('clock_out_confirmation');
+    expect(String(rows[0]!.body)).toContain('9h 0m today');
+  });
+
+  it('a deduped resubmit stays silent — no second confirmation', async () => {
+    const { env, db } = makeEnv();
+    const first = makeCtx();
+    expect((await clockInWithCtx(env, first.ctx as never)).status).toBe(200);
+    await first.drain();
+
+    const second = makeCtx();
+    const res = await clockInWithCtx(env, second.ctx as never);
+    expect(res.status).toBe(400); // ALREADY_CLOCKED
+    await second.drain();
+
+    const rows = notifRows(db).filter((r) => r.type === 'clock_in_confirmation');
+    expect(rows).toHaveLength(1);
+  });
+});
 
 describe('POST /clock — post-insert best-effort', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(NOW)); });

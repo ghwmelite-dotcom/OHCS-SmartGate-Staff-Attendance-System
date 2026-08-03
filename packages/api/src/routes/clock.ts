@@ -4,6 +4,7 @@ import type { AuthenticationResponseJSON } from '@simplewebauthn/types';
 import type { Env, SessionData } from '../types';
 import { success, error } from '../lib/response';
 import { sendLateClockAlert } from '../services/reminders';
+import { sendTypedNotification } from '../services/notifier';
 import { getAppSettings, hhmmToMinutes } from '../services/settings';
 import { verifyClockWebAuthnAssertion, verifyClockPin } from '../services/clock-reauth';
 import { devLog, devError } from '../lib/log';
@@ -715,6 +716,40 @@ clockRoutes.post('/', async (c) => {
   const user = await c.env.DB.prepare(
     'SELECT name, staff_id, current_streak, longest_streak FROM users WHERE id = ?'
   ).bind(session.userId).first<{ name: string; staff_id: string; current_streak: number; longest_streak: number }>();
+
+  // One-shot delivery confirmation — fires ONLY on a real state change: both
+  // idempotency-dedupe paths return before this point, so retries and offline
+  // replays stay silent. Channels: in-app bell + web push + Telegram
+  // (TELEGRAM_WHITELIST arm handles the per-entity sign-off).
+  {
+    const timeFmt = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+    let confirmTitle: string;
+    let confirmBody: string;
+    if (type === 'clock_in') {
+      confirmTitle = 'Clocked in ✅';
+      confirmBody = `You clocked in at ${timeFmt}. Have a great day!`;
+    } else {
+      const inRec = await c.env.DB.prepare(
+        `SELECT timestamp FROM clock_records WHERE user_id = ? AND type = 'clock_in' AND ${clockEffectiveDateSql('clock_records')} = ? ORDER BY timestamp ASC LIMIT 1`
+      ).bind(session.userId, effectiveDate).first<{ timestamp: string }>();
+      let durText = '';
+      if (inRec) {
+        const mins = Math.max(0, Math.round((Date.now() - new Date(inRec.timestamp).getTime()) / 60000));
+        durText = ` — ${Math.floor(mins / 60)}h ${mins % 60}m today`;
+      }
+      confirmTitle = 'Clocked out ✅';
+      confirmBody = `You clocked out at ${timeFmt}${durText}. See you tomorrow!`;
+    }
+    c.executionCtx.waitUntil(
+      sendTypedNotification(c.env, {
+        userId: session.userId,
+        type: type === 'clock_in' ? 'clock_in_confirmation' : 'clock_out_confirmation',
+        title: confirmTitle,
+        body: confirmBody,
+        url: '/',
+      }).catch((err) => devError(c.env, '[clock] confirmation notify failed', err))
+    );
+  }
 
   devLog(c.env, `[CLOCK] ${user?.name} (${user?.staff_id}) — ${type} liveness=${livenessDecision ?? 'none'} reauth=${reauthMethod ?? 'none'} presence=${presenceMethod ?? 'off'}`);
 

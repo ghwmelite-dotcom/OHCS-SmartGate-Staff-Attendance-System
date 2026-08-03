@@ -77,6 +77,16 @@ describe('sendTypedNotification — telegram delivery arm', () => {
     expect(arg.text).toContain('OHCS Attendance');
   });
 
+  it('sends Telegram for a clock confirmation with a KV-linked chat', async () => {
+    const env = makeEnv(new Map([['telegram-user:u1', 'chat-123']]));
+    await sendTypedNotification(env, { ...base, type: 'clock_in_confirmation', title: 'Clocked in ✅' });
+    expect(sendTelegramMessageMock).toHaveBeenCalledTimes(1);
+    const arg = sendTelegramMessageMock.mock.calls[0][0] as { chatId: string; text: string };
+    expect(arg.chatId).toBe('chat-123');
+    expect(arg.text).toContain('Hi <b>Kwame</b>');
+    expect(arg.text).toContain('FIN Attendance');
+  });
+
   it('does NOT send Telegram for visitor_arrival (already sent via its own path)', async () => {
     const env = makeEnv(new Map([['telegram-user:u1', 'chat-123']]));
     await sendTypedNotification(env, { ...base, type: 'visitor_arrival' });
