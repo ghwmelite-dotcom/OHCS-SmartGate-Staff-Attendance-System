@@ -124,7 +124,7 @@ export function AdminPage() {
 
   // Tab visibility:
   // - superadmin: all tabs
-  // - admin: NSS only (everything else hidden — they cannot manage system users)
+  // - admin: Attendance + NSS + Appointments (they cannot manage system users)
   // - other roles: shouldn't reach this page (Sidebar gates the link), but render NSS as a safe default if they do
   const tabs = useMemo<{ value: AdminTab; label: string }[]>(() => {
     if (isSuperadmin) {
@@ -139,6 +139,7 @@ export function AdminPage() {
       ];
     }
     return [
+      { value: 'attendance', label: 'Attendance' },
       { value: 'nss', label: 'NSS & Interns' },
       { value: 'appointments', label: 'Appointments' },
     ];
@@ -188,7 +189,7 @@ export function AdminPage() {
           </h1>
           <p className="text-[15px] text-muted mt-0.5">
             {isAdmin
-              ? 'NSS personnel oversight'
+              ? 'Attendance & NSS oversight'
               : 'Manage users, directorates, and officers'}
           </p>
         </div>
@@ -214,7 +215,7 @@ export function AdminPage() {
 
       {activeTab === 'users' && isSuperadmin && <UsersTab />}
       {activeTab === 'org' && isSuperadmin && <DirectoratesTab />}
-      {activeTab === 'attendance' && isSuperadmin && <AttendanceTab />}
+      {activeTab === 'attendance' && <AttendanceTab />}
       {activeTab === 'nss' && <NssTab />}
       {activeTab === 'import' && isSuperadmin && <BulkImportTab />}
       {activeTab === 'audit' && isSuperadmin && <AuditLogTab />}

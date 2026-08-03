@@ -244,6 +244,94 @@ attendanceRoutes.get('/records', async (c) => {
   return success(c, results.results ?? []);
 });
 
+// Range export — one row per user × day across a span (plan 2026-08-03
+// attendance-range-export). Powers the web AttendanceTab range CSV/PDF
+// exports; single-date /records (with embedded photos) is unchanged.
+//
+// Implementation: users CROSS JOIN a recursive date CTE, LEFT JOINing the
+// day's clock-in / clock-out rows by the shared effective-date expression and
+// the latest applicable absence notice (same correlated subquery as /records).
+// Chosen over JS assembly so the population rule, effective-date attribution
+// and latest-notice-wins logic stay byte-identical to /records in one query;
+// a year × ~160 users ≈ 58k rows is well inside D1's .all() comfort zone.
+attendanceRoutes.get('/export', async (c) => {
+  if (!requireOversight(c)) return error(c, 'FORBIDDEN', 'Admin or director access required', 403);
+  const scoped = await oversightScope(c);
+  if (scoped instanceof Response) return scoped;
+
+  const from = c.req.query('from');
+  const to = c.req.query('to');
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  if (!from || !to || !DATE_RE.test(from) || !DATE_RE.test(to)) {
+    return error(c, 'BAD_DATE', 'from and to are required, YYYY-MM-DD', 400);
+  }
+  if (from > to) {
+    return error(c, 'BAD_RANGE', 'from must be on or before to', 400);
+  }
+  // Inclusive day count; ISO strings parse as UTC midnight so the diff is exact.
+  const spanDays = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+  if (spanDays > 366) {
+    return error(c, 'BAD_RANGE', 'Date range too large (max 366 days)', 400);
+  }
+
+  // A director's resolved scope overrides any client-passed directorate_id.
+  const directorateId = scoped ?? c.req.query('directorate_id');
+  // Exports default to the whole population ('all') — analysis wants everyone;
+  // an explicit segment goes through the same parser as /records.
+  const rawSegment = c.req.query('user_type');
+  const segment: UserTypeSegment = rawSegment === undefined ? 'all' : parseUserTypeSegment(rawSegment);
+  const settings = await getAppSettings(c.env);
+  const lateAfter = toSqlTime(settings.late_threshold_time);
+  const endAt = toSqlTime(settings.work_end_time);
+
+  const ciDate = clockEffectiveDateSql('ci');
+  const coDate = clockEffectiveDateSql('co');
+
+  // Population mirrors /records past-date semantics, extended to notices:
+  // active users appear on every day of the span; deactivated users appear
+  // only on days they clocked in or had a covering absence notice.
+  let sql = `WITH RECURSIVE days(d) AS (
+               SELECT ? UNION ALL SELECT DATE(d, '+1 day') FROM days WHERE d < ?
+             )
+             SELECT days.d as date, u.id as user_id, u.name,
+                    COALESCE(u.staff_id, u.nss_number, u.intern_code) as identifier,
+                    dir.abbreviation as directorate_abbr,
+                    ci.timestamp as clock_in_time, co.timestamp as clock_out_time,
+                    CASE WHEN ci.timestamp IS NOT NULL AND TIME(ci.timestamp) > ? THEN 1 ELSE 0 END as is_late,
+                    CASE WHEN co.timestamp IS NOT NULL AND TIME(co.timestamp) < ? THEN 1 ELSE 0 END as is_early_departure,
+                    ci.presence_method as presence_method,
+                    a.reason as absence_reason, a.note as absence_note,
+                    CASE WHEN ci.photo_url IS NOT NULL THEN 1 ELSE 0 END as has_photo
+             FROM days
+             CROSS JOIN users u
+             LEFT JOIN directorates dir ON u.directorate_id = dir.id
+             LEFT JOIN clock_records ci ON ci.user_id = u.id AND ci.type = 'clock_in' AND ${ciDate} = days.d
+             LEFT JOIN clock_records co ON co.user_id = u.id AND co.type = 'clock_out' AND ${coDate} = days.d
+             LEFT JOIN absence_notices a ON a.id = (
+               SELECT a2.id FROM absence_notices a2
+               WHERE a2.user_id = u.id
+                 AND a2.notice_date <= days.d AND days.d < COALESCE(a2.expected_return_date, DATE(a2.notice_date, '+1 day'))
+               ORDER BY a2.created_at DESC LIMIT 1
+             )
+             WHERE (u.is_active = 1 OR ci.id IS NOT NULL OR a.id IS NOT NULL)`;
+  const params: unknown[] = [from, to, lateAfter, endAt];
+
+  const exportClause = userTypeClause(segment, 'u');
+  if (exportClause) {
+    sql += ` AND ${exportClause}`;
+  }
+
+  if (directorateId) {
+    sql += ' AND u.directorate_id = ?';
+    params.push(directorateId);
+  }
+
+  sql += ' ORDER BY days.d ASC, u.name ASC';
+
+  const results = await c.env.DB.prepare(sql).bind(...params).all();
+  return success(c, results.results ?? []);
+});
+
 // Risk-score distribution — the shadow-phase calibration instrument (spec §4:
 // bands, histogram, per-directorate breakdown, top factors by frequency).
 // Aggregates in JS, mirroring /clock/admin/liveness-metrics. ?days default 14, clamp 1-30.

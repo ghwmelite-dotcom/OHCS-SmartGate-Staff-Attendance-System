@@ -4,8 +4,8 @@ import { LivenessMetricsWidget } from './LivenessMetricsWidget';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, resolvePhotoUrl, type Directorate } from '@/lib/api';
 import { cn, formatTime, formatDate } from '@/lib/utils';
-import { downloadCSV } from '@/lib/csv';
-import { generateAttendancePdf, type AttendanceSegment } from '@/lib/pdf';
+import { downloadCSV, generateAttendanceRangeCSV, hasPhotoYN, formatCsvCell, type AttendanceExportRow } from '@/lib/csv';
+import { generateAttendancePdf, generateAttendanceRangePdf, type AttendanceSegment } from '@/lib/pdf';
 import { useAuthStore } from '@/stores/auth';
 import { SettingsModal, type AppSettings } from './SettingsModal';
 import {
@@ -70,6 +70,41 @@ function loadStoredSegment(): AttendanceSegment {
   }
 }
 
+type RangeMode = 'today' | 'week' | 'month' | 'year' | 'custom';
+
+// Local-calendar YYYY-MM-DD — toISOString would skew a day near midnight.
+function toIsoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Week = Monday–Sunday of the current week; month = current calendar month;
+// year = Jan 1–today. Custom needs both endpoints and from ≤ to — null keeps
+// the export query disabled until the inputs are coherent.
+function computeRange(mode: RangeMode, customFrom: string, customTo: string): { from: string; to: string } | null {
+  const now = new Date();
+  if (mode === 'week') {
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return { from: toIsoDate(monday), to: toIsoDate(sunday) };
+  }
+  if (mode === 'month') {
+    return {
+      from: toIsoDate(new Date(now.getFullYear(), now.getMonth(), 1)),
+      to: toIsoDate(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+    };
+  }
+  if (mode === 'year') {
+    return { from: `${now.getFullYear()}-01-01`, to: toIsoDate(now) };
+  }
+  if (mode === 'custom') {
+    if (!customFrom || !customTo || customFrom > customTo) return null;
+    return { from: customFrom, to: customTo };
+  }
+  return null;
+}
+
 export function AttendanceTab() {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   const [dirFilter, setDirFilter] = useState('');
@@ -88,6 +123,14 @@ export function AttendanceTab() {
   const queryClient = useQueryClient();
   const [clearingUserId, setClearingUserId] = useState<string | null>(null);
   const [dispositionClockId, setDispositionClockId] = useState<string | null>(null);
+  const [rangeMode, setRangeMode] = useState<RangeMode>('today');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const isRangeMode = rangeMode !== 'today';
+  const range = useMemo(
+    () => (isRangeMode ? computeRange(rangeMode, customFrom, customTo) : null),
+    [isRangeMode, rangeMode, customFrom, customTo],
+  );
 
   function setSegment(next: AttendanceSegment) {
     setSegmentState(next);
@@ -158,6 +201,7 @@ export function AttendanceTab() {
   const { data: overviewData } = useQuery({
     queryKey: ['attendance', 'today', selectedDate, segment],
     queryFn: () => api.get<TodayOverview>(`/attendance/today?user_type=${segment}&date=${selectedDate}`),
+    enabled: !isRangeMode,
   });
 
   const { data: recordsData, isLoading } = useQuery({
@@ -167,11 +211,25 @@ export function AttendanceTab() {
       if (dirFilter) url += `&directorate_id=${dirFilter}`;
       return api.get<AttendanceRecord[]>(url);
     },
+    enabled: !isRangeMode,
   });
 
   const { data: dirData } = useQuery({
     queryKey: ['attendance', 'by-directorate', selectedDate, segment],
     queryFn: () => api.get<DirBreakdown[]>(`/attendance/by-directorate?date=${selectedDate}&user_type=${segment}`),
+    enabled: !isRangeMode,
+  });
+
+  // Range modes (week/month/year/custom) hit the user×day export endpoint —
+  // flat rows, one per active user per day in the span.
+  const { data: exportData, isLoading: exportLoading } = useQuery({
+    queryKey: ['attendance', 'export', range?.from, range?.to, dirFilter, segment],
+    enabled: isRangeMode && range !== null,
+    queryFn: () => {
+      let url = `/attendance/export?from=${range!.from}&to=${range!.to}&user_type=${segment}`;
+      if (dirFilter) url += `&directorate_id=${dirFilter}`;
+      return api.get<AttendanceExportRow[]>(url);
+    },
   });
 
   const { data: dirsData } = useQuery({
@@ -193,6 +251,24 @@ export function AttendanceTab() {
   const settings = settingsData?.data ?? null;
 
   const isToday = selectedDate === new Date().toISOString().slice(0, 10);
+
+  // Flat range rows, newest day first, names alphabetical within a day.
+  const rangeRows = useMemo(() => {
+    const rows = exportData?.data ?? [];
+    return [...rows].sort((a, b) => b.date.localeCompare(a.date) || a.name.localeCompare(b.name));
+  }, [exportData]);
+
+  // Range mode: search stays client-side; risk chips are hidden (the export
+  // rows carry no risk fields).
+  const filteredRangeRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rangeRows;
+    return rangeRows.filter(r =>
+      r.name.toLowerCase().includes(q) ||
+      (r.identifier ?? '').toLowerCase().includes(q) ||
+      (r.directorate_abbr ?? '').toLowerCase().includes(q)
+    );
+  }, [rangeRows, search]);
 
   const filteredRecords = useMemo(() => {
     // Risk chips filter client-side — the payload is a single day's rows.
@@ -224,13 +300,21 @@ export function AttendanceTab() {
     const parts: string[] = [];
     const q = search.trim().replace(/\s+/g, ' ');
     if (q) parts.push(`search '${q}'`);
-    if (riskFilter !== 'all') parts.push(`risk: ${riskFilter}`);
+    // Risk chips are hidden in range mode — don't stamp a stale choice.
+    if (!isRangeMode && riskFilter !== 'all') parts.push(`risk: ${riskFilter}`);
     return parts.length > 0 ? parts.join(', ') : null;
   }
 
   function exportAttendanceCSV() {
+    const note = activeFiltersNote();
+    if (isRangeMode) {
+      if (!range) return;
+      const csv = generateAttendanceRangeCSV(rangeRows, note ? `# filters: ${note}` : undefined);
+      downloadCSV(csv, `OHCS-${segmentFilenameSlug()}-${range.from}-to-${range.to}.csv`);
+      return;
+    }
     const source = records; // full register, not the on-screen filter
-    const headers = ['Name', 'Staff ID', 'Directorate', 'Clock In', 'Clock Out', 'Late', 'Left Early', 'Streak', 'Photo URL'];
+    const headers = ['Name', 'Staff ID', 'Directorate', 'Clock In', 'Clock Out', 'Late', 'Left Early', 'Streak', 'Has Photo'];
     const rows = source.map(r => [
       r.name,
       r.staff_id ?? '',
@@ -240,21 +324,38 @@ export function AttendanceTab() {
       r.is_late ? 'Yes' : 'No',
       r.is_early_departure ? 'Yes' : 'No',
       String(r.current_streak),
-      resolvePhotoUrl(r.clock_in_photo) ?? '',
+      hasPhotoYN(r.clock_in_photo),
     ]);
-    const note = activeFiltersNote();
     const csv = [
       ...(note ? [`# filters: ${note}`] : []),
-      ...[headers, ...rows].map(row => row.map(c => `"${c}"`).join(',')),
+      ...[headers, ...rows].map(row => row.map(formatCsvCell).join(',')),
     ].join('\n');
     downloadCSV(csv, `OHCS-${segmentFilenameSlug()}-${selectedDate}.csv`);
   }
 
   async function exportAttendancePDF() {
-    if (!overview || pdfExporting) return;
+    if (pdfExporting) return;
+    const note = activeFiltersNote();
     setPdfExporting(true);
     try {
-      const note = activeFiltersNote();
+      if (isRangeMode) {
+        if (!range) return;
+        const dirLabel = dirFilter
+          ? (directorates.find(d => d.id === dirFilter)?.abbreviation ?? undefined)
+          : undefined;
+        // Sync builder — no photo fetches in range mode.
+        const doc = generateAttendanceRangePdf({
+          from: range.from,
+          to: range.to,
+          rows: rangeRows,
+          segment,
+          directorateLabel: dirLabel,
+          filtersNote: note ?? undefined,
+        });
+        doc.save(`OHCS-${segmentFilenameSlug()}-${range.from}-to-${range.to}.pdf`);
+        return;
+      }
+      if (!overview) return;
       const doc = await generateAttendancePdf(selectedDate, records, overview, segment, note ?? undefined);
       doc.save(`OHCS-${segmentFilenameSlug()}-${selectedDate}.pdf`);
     } finally {
@@ -280,26 +381,74 @@ export function AttendanceTab() {
 
       <LivenessMetricsWidget />
 
-      {/* Staff / NSS / Interns / All segment pill */}
-      <SegmentToggle value={segment} onChange={setSegment} />
+      {/* Staff / NSS / Interns / All segment pill + range pills */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SegmentToggle value={segment} onChange={setSegment} />
+        <div className="inline-flex items-center gap-1 bg-surface rounded-xl border border-border p-1" role="group" aria-label="Date range">
+          {([['today', 'Today'], ['week', 'This week'], ['month', 'This month'], ['year', 'This year'], ['custom', 'Custom']] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setRangeMode(key)}
+              aria-pressed={rangeMode === key}
+              className={cn(
+                'h-8 px-3 rounded-lg text-[12px] font-semibold transition-colors duration-200',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
+                rangeMode === key ? 'bg-primary/10 text-primary' : 'text-muted hover:text-foreground',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Date picker + export */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Calendar className="h-5 w-5 text-primary" />
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={e => setSelectedDate(e.target.value)}
-            className="h-10 px-3 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          />
-          {!isToday && (
-            <button
-              onClick={() => setSelectedDate(new Date().toISOString().slice(0, 10))}
-              className="h-10 px-4 text-[13px] font-medium text-primary border border-primary/20 rounded-xl hover:bg-primary/5 transition-all"
-            >
-              Today
-            </button>
+          {isRangeMode && rangeMode === 'custom' ? (
+            <>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={e => setCustomFrom(e.target.value)}
+                aria-label="From date"
+                className="h-10 px-3 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+              <span className="text-[12px] text-muted">to</span>
+              <input
+                type="date"
+                value={customTo}
+                onChange={e => setCustomTo(e.target.value)}
+                aria-label="To date"
+                className="h-10 px-3 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+              {!range && (
+                <span className="text-[12px] text-warning">Pick a valid from → to span (max 366 days)</span>
+              )}
+            </>
+          ) : isRangeMode && range ? (
+            <span className="text-[13px] font-medium text-foreground">
+              {formatDate(range.from + 'T00:00:00Z')} → {formatDate(range.to + 'T00:00:00Z')}
+            </span>
+          ) : (
+            <>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="h-10 px-3 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+              {!isToday && (
+                <button
+                  onClick={() => setSelectedDate(new Date().toISOString().slice(0, 10))}
+                  className="h-10 px-4 text-[13px] font-medium text-primary border border-primary/20 rounded-xl hover:bg-primary/5 transition-all"
+                >
+                  Today
+                </button>
+              )}
+            </>
           )}
           {settings && (
             <button
@@ -319,14 +468,15 @@ export function AttendanceTab() {
         <div className="flex items-center gap-2">
           <button
             onClick={exportAttendanceCSV}
-            className="inline-flex items-center gap-2 h-10 px-4 bg-surface text-foreground text-[13px] font-medium rounded-xl border border-border hover:border-accent/40 transition-all"
+            disabled={isRangeMode && !range}
+            className="inline-flex items-center gap-2 h-10 px-4 bg-surface text-foreground text-[13px] font-medium rounded-xl border border-border hover:border-accent/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download className="h-4 w-4 text-accent-warm" />
             Export CSV
           </button>
           <button
             onClick={exportAttendancePDF}
-            disabled={pdfExporting || !overview}
+            disabled={pdfExporting || (isRangeMode ? !range : !overview)}
             className="inline-flex items-center gap-2 h-10 px-4 bg-surface text-foreground text-[13px] font-medium rounded-xl border border-border hover:border-accent/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {pdfExporting ? (
@@ -339,8 +489,8 @@ export function AttendanceTab() {
         </div>
       </div>
 
-      {/* Overview cards */}
-      {overview && (
+      {/* Overview cards (single-date only) */}
+      {overview && !isRangeMode && (
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
           <StatCard icon={<Users className="h-4 w-4" />} label="Total Staff" value={overview.total_staff} color="primary" />
           <StatCard icon={<CheckCircle2 className="h-4 w-4" />} label="Clocked In" value={overview.clocked_in} color="success" />
@@ -352,8 +502,8 @@ export function AttendanceTab() {
         </div>
       )}
 
-      {/* Directorate breakdown */}
-      {dirBreakdown.length > 0 && (
+      {/* Directorate breakdown (single-date only) */}
+      {dirBreakdown.length > 0 && !isRangeMode && (
         <div className="bg-surface rounded-2xl border border-border shadow-sm p-5">
           <div className="flex items-center gap-2 mb-4">
             <Building2 className="h-4 w-4 text-primary" />
@@ -402,11 +552,13 @@ export function AttendanceTab() {
           <div className="flex items-center gap-2.5">
             <Clock className="h-4.5 w-4.5 text-primary" />
             <h3 className="text-base font-bold text-foreground" style={{ fontFamily: 'var(--font-display)' }}>
-              Attendance Records — {formatDate(selectedDate + 'T00:00:00Z')}
+              {isRangeMode && range
+                ? `Attendance Records — ${formatDate(range.from + 'T00:00:00Z')} → ${formatDate(range.to + 'T00:00:00Z')}`
+                : `Attendance Records — ${formatDate(selectedDate + 'T00:00:00Z')}`}
             </h3>
             {search && (
               <span className="text-[12px] text-muted">
-                · {filteredRecords.length} match{filteredRecords.length === 1 ? '' : 'es'}
+                · {isRangeMode ? filteredRangeRows.length : filteredRecords.length} match{(isRangeMode ? filteredRangeRows.length : filteredRecords.length) === 1 ? '' : 'es'}
               </span>
             )}
           </div>
@@ -447,6 +599,8 @@ export function AttendanceTab() {
                 <option key={d.id} value={d.id}>{d.abbreviation}</option>
               ))}
             </select>
+            {/* Risk chips: single-date only — export rows carry no risk fields */}
+            {!isRangeMode && (
             <div className="inline-flex items-center gap-1 bg-surface rounded-xl border border-border p-1" role="group" aria-label="Risk filter">
               {([['all', 'All'], ['flagged', 'Flagged'], ['high', 'High-risk']] as const).map(([key, label]) => (
                 <button
@@ -464,10 +618,102 @@ export function AttendanceTab() {
                 </button>
               ))}
             </div>
+            )}
           </div>
         </div>
 
-        {isLoading ? (
+        {isRangeMode ? (
+          !range ? (
+            <div className="p-10 text-center text-[14px] text-muted">Pick a valid date range to load records</div>
+          ) : exportLoading ? (
+            <div className="p-10 text-center text-[14px] text-muted">Loading records...</div>
+          ) : rangeRows.length === 0 ? (
+            <div className="p-10 text-center text-[14px] text-muted">No attendance records for this range</div>
+          ) : filteredRangeRows.length === 0 ? (
+            <div className="p-10 text-center text-[14px] text-muted">
+              No records match “{search}”.{' '}
+              <button onClick={() => setSearch('')} className="text-primary hover:underline">Clear search</button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-background/50">
+                    <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Date</th>
+                    <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Staff</th>
+                    <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">ID</th>
+                    <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Dir</th>
+                    <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Clock In</th>
+                    <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Clock Out</th>
+                    <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Status</th>
+                    <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Presence</th>
+                    <th className="text-left px-5 py-3 text-[12px] font-semibold text-muted uppercase tracking-wide">Photo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {filteredRangeRows.map(r => (
+                    <tr key={`${r.date}-${r.user_id}`} className="hover:bg-background-warm/50 transition-colors">
+                      <td className="px-5 py-3 text-[13px] text-muted whitespace-nowrap">{formatDate(r.date + 'T00:00:00Z')}</td>
+                      <td className="px-5 py-3">
+                        <button onClick={() => setMonthlyUser({ id: r.user_id, name: r.name })}
+                          className="text-[15px] font-semibold text-primary hover:underline text-left">
+                          {r.name}
+                        </button>
+                      </td>
+                      <td className="px-5 py-3 text-[14px] font-mono text-muted">{r.identifier ?? '—'}</td>
+                      <td className="px-5 py-3">
+                        {r.directorate_abbr ? (
+                          <span className="inline-flex items-center h-6 px-2 text-[10px] font-bold bg-primary/8 text-primary rounded-lg">
+                            {r.directorate_abbr}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-5 py-3">
+                        {r.clock_in_time ? (
+                          <span className={cn('text-[14px] font-medium', r.is_late ? 'text-danger' : 'text-success')}>
+                            {formatTime(r.clock_in_time)}
+                          </span>
+                        ) : (
+                          <span className="text-[14px] text-muted-foreground italic">Absent</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className={cn('text-[14px]', r.is_early_departure ? 'text-warning font-medium' : 'text-foreground')}>
+                            {r.clock_out_time ? formatTime(r.clock_out_time) : '—'}
+                          </span>
+                          {r.is_early_departure ? (
+                            <span className="inline-flex items-center h-5 px-1.5 text-[10px] font-bold rounded-md bg-warning/10 text-warning">
+                              Early
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3">
+                        <div className="flex flex-col items-start gap-0.5">
+                          {!r.clock_in_time ? (
+                            <span className="inline-flex items-center h-6 px-2.5 text-[10px] font-bold rounded-full bg-danger/10 text-danger">Absent</span>
+                          ) : r.is_late ? (
+                            <span className="inline-flex items-center h-6 px-2.5 text-[10px] font-bold rounded-full bg-warning/10 text-warning">Late</span>
+                          ) : (
+                            <span className="inline-flex items-center h-6 px-2.5 text-[10px] font-bold rounded-full bg-success/10 text-success">On Time</span>
+                          )}
+                          {r.absence_reason && (
+                            <span className="text-[11px] text-muted" title={r.absence_note ?? undefined}>
+                              {r.absence_reason}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3 text-[13px] text-muted">{r.presence_method ?? '—'}</td>
+                      <td className="px-5 py-3 text-[13px] text-muted">{hasPhotoYN(r.has_photo)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : isLoading ? (
           <div className="p-10 text-center text-[14px] text-muted">Loading records...</div>
         ) : records.length === 0 ? (
           <div className="p-10 text-center text-[14px] text-muted">No attendance records for this date</div>

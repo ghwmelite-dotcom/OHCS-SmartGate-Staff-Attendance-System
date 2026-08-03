@@ -4,7 +4,7 @@
 // Statuses: 'live' = in production · 'shadow' = shipped dark (record-only
 // mode, not enforced) · 'design' = spec exists, not built.
 
-export const DOCS_LAST_UPDATED = '2026-08-02';
+export const DOCS_LAST_UPDATED = '2026-08-03';
 
 export type DocStatus = 'live' | 'shadow' | 'design';
 
@@ -167,6 +167,17 @@ export const DOC_SECTIONS: DocSection[] = [
           'Routing chain: directorates.head_officer_id → director-role users of the entity → superadmins as fallback only; the submitter is excluded at every step, and an unreachable head falls through',
           'The head receives in-app + push, plus Telegram via the main bot when their officer record is linked (heads are assigned per entity in Admin → Org entities)',
           'Clock-reminder suppression ends the morning of the return date — nudges resume the day the officer is expected back',
+        ],
+      },
+      {
+        name: 'Attendance range export',
+        status: 'live',
+        summary: 'The Admin attendance register gains range pills (This week / This month / This year / Custom) beside the single-date view, backed by GET /attendance/export — one flat row per user × day with late/early flags, presence method, absence notice and a has_photo flag. Range CSV carries all contract columns; range PDF is a summary-header tabular report (no photos by design).',
+        details: [
+          'Week = Monday–Sunday, month = current calendar month, year = Jan 1–today; custom spans are capped at 366 days (400 BAD_RANGE)',
+          'Today keeps the single-date /records register untouched; its CSV photo column is now Has Photo (Y/N) instead of a URL',
+          'Risk chips are single-date only — export rows carry no risk fields; search and directorate filter still apply to ranges',
+          'The Attendance tab is open to the admin role (settings view-only; clear-test-records stays superadmin-only)',
         ],
       },
     ],
@@ -429,7 +440,7 @@ export const DOC_SECTIONS: DocSection[] = [
       {
         name: 'The six roles',
         status: 'live',
-        summary: 'superadmin (everything) · admin (NSS/interns, appointments, analytics — no user management) · receptionist (front desk) · it (support) · director (analytics + FYI alerts) · staff (self-service attendance).',
+        summary: 'superadmin (everything) · admin (attendance register + range export, NSS/interns, appointments, analytics — no user management) · receptionist (front desk) · it (support) · director (analytics + FYI alerts) · staff (self-service attendance).',
         details: ['Route guards use requireRole; nav hides what the role cannot use'],
       },
       {
