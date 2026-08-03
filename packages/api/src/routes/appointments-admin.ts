@@ -6,7 +6,7 @@ import { success, error, notFound } from '../lib/response';
 import { resolveDirectorateScope, DIRECTORATE_SCOPE_NONE } from '../lib/directorate-scope';
 import { sendTelegramMessage, buildAppointmentRespondKeyboard } from '../services/telegram';
 import { sendAppointmentConfirmedEmail, sendAppointmentDeclinedEmail, sendAppointmentRescheduleProposalEmail } from '../services/email';
-import { notifyAppointmentApprovers } from '../services/appointment-reschedule';
+import { notifyAppointmentApprovers, sendAppointmentConfirmationTelegram, sendAppointmentDeclineTelegram } from '../services/appointment-reschedule';
 import { escapeHtml } from '../lib/html';
 import { performCheckIn } from '../services/check-in';
 import { findOrCreateAppointmentVisitor } from './appointments-public';
@@ -301,13 +301,15 @@ appointmentsAdminRoutes.patch(
     const { approver_notes } = c.req.valid('json');
 
     const appt = await c.env.DB.prepare(
-      `SELECT a.*, o.telegram_chat_id
+      `SELECT a.*, o.telegram_chat_id, o.name AS officer_name, o.title AS officer_title,
+              d.name AS directorate_name
        FROM appointments a
        JOIN officers o ON o.id = a.officer_id
+       JOIN directorates d ON d.id = o.directorate_id
        WHERE a.id = ?`,
     )
       .bind(id)
-      .first<AppointmentAdminRow & OfficerTelegramRow>();
+      .first<AppointmentAdminRow & OfficerTelegramRow & { officer_name: string; officer_title: string | null; directorate_name: string }>();
 
     if (!appt) return notFound(c, 'Appointment');
 
@@ -375,6 +377,21 @@ appointmentsAdminRoutes.patch(
       }));
     }
 
+    // Telegram visitor (if they linked at booking) — confirmation + QR photo.
+    {
+      const visitorChatId = await c.env.KV.get(`telegram-visitor:${id}`);
+      if (visitorChatId) {
+        c.executionCtx.waitUntil(sendAppointmentConfirmationTelegram(c.env, {
+          chatId: visitorChatId,
+          officerName: appt.officer_name,
+          directorateName: appt.directorate_name,
+          date: appt.appointment_date,
+          slot: appt.time_slot,
+          ref: appt.reference_code,
+        }));
+      }
+    }
+
     return success(c, { ok: true });
   },
 );
@@ -436,6 +453,20 @@ appointmentsAdminRoutes.patch(
         referenceCode: appt.reference_code,
         declineReason: decline_reason,
       }));
+    }
+
+    // Telegram visitor (if they linked at booking) — decline + reason.
+    {
+      const visitorChatId = await c.env.KV.get(`telegram-visitor:${id}`);
+      if (visitorChatId) {
+        c.executionCtx.waitUntil(sendAppointmentDeclineTelegram(c.env, {
+          chatId: visitorChatId,
+          officerName: appt.officer_name,
+          date: appt.appointment_date,
+          slot: appt.time_slot,
+          reason: decline_reason,
+        }));
+      }
     }
 
     return success(c, { ok: true });

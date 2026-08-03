@@ -106,6 +106,8 @@ function makeEnv() {
   const db = newDb();
   const env = {
     TELEGRAM_BOT_TOKEN: 't',
+    RESEND_API_KEY: 're_test',
+    EMAIL_FROM: 'OHCS SmartGate <no-reply@ohcsghana.org>',
     ENVIRONMENT: 'test',
     KV: kv(store),
     DB: d1(db),
@@ -168,6 +170,71 @@ function seedAppointment(
     opts.status ?? 'confirmed',
   );
 }
+
+/* ---------- PATCH /:id/confirm + /:id/decline — visitor delivery ---------- */
+
+describe('PATCH /:id/confirm — visitor delivery (telegram + email fields)', () => {
+  it('emails with officer/directorate populated and telegrams the linked visitor with QR photo', async () => {
+    const { env, db, store } = makeEnv();
+    seedOfficer(db);
+    seedAppointment(db, { status: 'pending' });
+    db.prepare("UPDATE appointments SET visitor_email = 'ama@example.com' WHERE id = 'a1'").run();
+    store.set('telegram-visitor:a1', '999');
+    const fetchMock = stubTelegramFetch();
+
+    const { ctx, pending } = makeExecCtx();
+    const res = await makeApp().request('/admin/a1/confirm', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    }, env, ctx);
+    expect(res.status).toBe(200);
+    await Promise.allSettled(pending);
+
+    // Email (Resend) must carry real officer/directorate — never "undefined".
+    const emailCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes('resend'));
+    expect(emailCalls.length).toBeGreaterThan(0);
+    const emailPayload = emailCalls.map(([, i]) => String((i as { body?: string }).body)).join('\n');
+    expect(emailPayload).toContain('Dr. Mensah');
+    expect(emailPayload).not.toContain('undefined');
+
+    // Linked visitor gets the Telegram confirmation with the ref code…
+    const tgTexts = fetchMock.mock.calls
+      .filter(([u]) => String(u).includes('sendMessage'))
+      .map(([, i]) => String((i as { body?: string }).body));
+    const visitorText = tgTexts.find((b) => b.includes('999'));
+    expect(visitorText).toBeTruthy();
+    expect(visitorText).toContain('ABC234');
+    // …and a QR photo (best-effort).
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('sendPhoto'))).toBe(true);
+  });
+});
+
+describe('PATCH /:id/decline — telegram to linked visitor', () => {
+  it('sends the decline with reason to the linked visitor chat', async () => {
+    const { env, db, store } = makeEnv();
+    seedOfficer(db);
+    seedAppointment(db, { status: 'pending' });
+    store.set('telegram-visitor:a1', '999');
+    const fetchMock = stubTelegramFetch();
+
+    const { ctx, pending } = makeExecCtx();
+    const res = await makeApp().request('/admin/a1/decline', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decline_reason: 'Schedule conflict this week' }),
+    }, env, ctx);
+    expect(res.status).toBe(200);
+    await Promise.allSettled(pending);
+
+    const tgTexts = fetchMock.mock.calls
+      .filter(([u]) => String(u).includes('sendMessage'))
+      .map(([, i]) => String((i as { body?: string }).body));
+    const visitorText = tgTexts.find((b) => b.includes('999'));
+    expect(visitorText).toBeTruthy();
+    expect(visitorText).toContain('Schedule conflict this week');
+  });
+});
 
 /* ---------- PATCH /:id/complete — visits pipeline ---------- */
 

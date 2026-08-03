@@ -47,6 +47,50 @@ export async function qrPng(payload: string): Promise<ArrayBuffer | null> {
   }
 }
 
+// Visitor-facing Telegram for straight confirm/decline actions (the
+// reschedule-verdict path has its own copy inline). escapeHtml on every
+// interpolated value; QR photo is best-effort after the text lands.
+export async function sendAppointmentConfirmationTelegram(
+  env: Env,
+  opts: { chatId: string; officerName: string; directorateName: string; date: string; slot: string; ref: string },
+): Promise<void> {
+  try {
+    await sendTelegramMessage({
+      chatId: opts.chatId,
+      text: `✅ <b>Appointment confirmed</b>\n\nOfficer: ${escapeHtml(opts.officerName)}\nOffice: ${escapeHtml(opts.directorateName)}\nDate: ${escapeHtml(opts.date)} at ${escapeHtml(opts.slot)}\nRef: <code>${escapeHtml(opts.ref)}</code>\n\nShow this code (or the QR below) at the reception kiosk.`,
+      token: env.TELEGRAM_BOT_TOKEN,
+    });
+    const png = await qrPng(opts.ref);
+    if (png) {
+      await sendTelegramPhoto({
+        chatId: opts.chatId,
+        photo: png,
+        caption: `Your appointment QR — Ref <code>${escapeHtml(opts.ref)}</code>`,
+        token: env.TELEGRAM_BOT_TOKEN,
+        photoType: 'image/png',
+        photoName: 'appointment-qr.png',
+      });
+    }
+  } catch (err) {
+    console.error('[Appointments] confirmation telegram failed:', err);
+  }
+}
+
+export async function sendAppointmentDeclineTelegram(
+  env: Env,
+  opts: { chatId: string; officerName: string; date: string; slot: string; reason: string },
+): Promise<void> {
+  try {
+    await sendTelegramMessage({
+      chatId: opts.chatId,
+      text: `❌ <b>Appointment declined</b>\n\nUnfortunately your appointment with ${escapeHtml(opts.officerName)} on ${escapeHtml(opts.date)} at ${escapeHtml(opts.slot)} was declined.\nReason: ${escapeHtml(opts.reason)}\n\nYou're welcome to book another time.`,
+      token: env.TELEGRAM_BOT_TOKEN,
+    });
+  } catch (err) {
+    console.error('[Appointments] decline telegram failed:', err);
+  }
+}
+
 interface ApproverRow {
   user_id: string;
   telegram_chat_id: string | null;
