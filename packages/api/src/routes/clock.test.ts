@@ -72,7 +72,11 @@ function newDb(): SqliteDb {
     INSERT INTO users (id, name, email, role, staff_id) VALUES ('u1', 'Ama Serwaa', 'ama@ohcs.gov.gh', 'staff', '896239');
     CREATE TABLE clock_records (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL,
-      timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+      -- The route INSERT omits timestamp, so this default is what rows get.
+      -- Pinned to the fake "now" (NOW below): strftime('now') would use real
+      -- wall-clock, which drifts from vi.setSystemTime and silently breaks
+      -- the effective-date duplicate check on any day except 2026-08-03.
+      timestamp TEXT NOT NULL DEFAULT '2026-08-03T07:00:00.000Z',
       latitude REAL, longitude REAL, within_geofence INTEGER NOT NULL DEFAULT 0,
       photo_url TEXT, device_info TEXT, idempotency_key TEXT,
       reauth_method TEXT, liveness_challenge TEXT, liveness_decision TEXT, liveness_signature TEXT,
