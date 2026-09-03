@@ -332,18 +332,19 @@ export function ClockPage() {
     // Warm MediaPipe WASM in parallel with geolocation
     void import('../lib/liveness/mediapipeRunner');
 
-    // Deep-link prefill: a token stashed from the display QR's URL
-    // (?presence=…) counts as the scan step already done. A fresh in-app scan
-    // always wins — the stash only fills an empty slot.
+    // DISABLED 2026-09-03 (product request): the presence-QR scan step is
+    // skipped — the flow goes straight from tap to GPS + liveness. The scan
+    // phase UI below is intentionally left intact (it is also the landing
+    // spot for a PRESENCE_REQUIRED bounce-back if enforce mode is ever on).
+    // To re-enable: delete the unconditional resolveScan() below and restore
+    // `if (deeplink) { …; resolveScan(); } else { setPhase('scan'); }`.
     const deeplink = consumePresenceDeeplink(presenceTokenRef.current);
     if (deeplink) {
       presenceTokenRef.current = deeplink.token;
       capturedAtRef.current = new Date(deeplink.at).toISOString();
-      // Scan already resolved → show the acquiring state until the fix lands.
-      resolveScan();
-    } else {
-      setPhase('scan');
     }
+    // setPhase('scan'); // ← re-enable to restore the scan-first step
+    resolveScan();
 
     // Watch for the first fix that is good enough to trust (≤15m), or settle
     // for the best reading we've seen after 20s. Tight target because the
@@ -733,9 +734,10 @@ export function ClockPage() {
             </div>
           )}
 
-          {/* SCAN — presence QR on the reception display (skippable; enforce
-              mode rejects a skipped submit with PRESENCE_REQUIRED and lands
-              back here with the reception override-PIN control). The typed
+          {/* SCAN — presence QR on the reception display. CURRENTLY SKIPPED
+              (2026-09-03, product request): startClock() resolves the scan
+              step immediately, so this phase is only reachable via the
+              PRESENCE_REQUIRED bounce-back in enforce mode. The typed
               6-digit code is the shared-device path for officers without a
               phone clocking in on the display itself. */}
           {phase === 'scan' && (

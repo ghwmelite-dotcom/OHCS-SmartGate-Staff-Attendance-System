@@ -105,9 +105,9 @@ export const DOC_SECTIONS: DocSection[] = [
       {
         name: 'Scan-first clock flow',
         status: 'live',
-        summary: 'One tap runs the full pipeline: presence scan first (GPS warming in parallel), geofence check, liveness challenge, biometric/PIN re-auth, submit.',
+        summary: 'One tap runs the full pipeline: geofence check (GPS from the moment of the tap), liveness challenge, biometric/PIN re-auth, submit. The presence-QR scan step is temporarily skipped (2026-09-03, product request) — the scanner UI is intact and re-activates with one line; it also still serves as the landing spot for a PRESENCE_REQUIRED bounce-back if enforce mode is enabled.',
         details: [
-          'Scan step and GPS rendezvous via refs — whichever finishes first waits on the other',
+          'GPS acquires from the tap; the flow proceeds to liveness as soon as a trustworthy fix lands',
           'Failures surface as plain-language screens (poor GPS, outside geofence, wrong PIN)',
           'Optimistic Today card updates before the server confirms',
         ],
