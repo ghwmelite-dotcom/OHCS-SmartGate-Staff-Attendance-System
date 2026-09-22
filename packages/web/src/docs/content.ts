@@ -4,7 +4,7 @@
 // Statuses: 'live' = in production · 'shadow' = shipped dark (record-only
 // mode, not enforced) · 'design' = spec exists, not built.
 
-export const DOCS_LAST_UPDATED = '2026-08-03';
+export const DOCS_LAST_UPDATED = '2026-09-22';
 
 export type DocStatus = 'live' | 'shadow' | 'design';
 
@@ -36,6 +36,16 @@ export const DOC_SECTIONS: DocSection[] = [
     color: '#1A4D8B',
     icon: 'layers',
     features: [
+      {
+        name: 'Personal attendance on VMS home',
+        status: 'live',
+        summary: 'Every signed-in user sees their own clock-in/out status and recent attendance above their role-specific VMS dashboard.',
+        details: [
+          'Session-scoped /clock/my-status and /clock/my-history?days=14; account-partitioned query caches.',
+          'Refreshes every minute while open, on focus/reconnect, or manually. Times use Africa/Accra. Offline events appear after Staff Attendance syncs.',
+          'Read-only: clock actions remain in Staff Attendance. Missing records do not imply absence. Ordinary staff do not load visitor-operation queries.',
+        ],
+      },
       {
         name: 'Two PWAs, one Worker API',
         status: 'live',

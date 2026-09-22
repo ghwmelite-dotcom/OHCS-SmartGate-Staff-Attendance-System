@@ -22,7 +22,8 @@ import { ReportsPage } from './pages/ReportsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { AppLayout } from './components/layout/AppLayout';
 import { useAuthStore } from './stores/auth';
-import { isOversightUser } from './lib/roles';
+import { hasRoleAccess, isOversightUser, MODULE_ROLES } from './lib/roles';
+import { PersonalAttendance } from './components/PersonalAttendance';
 import { OfflineBanner } from './components/OfflineBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -36,11 +37,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// Role-aware home: directors and CD/HoS get the read-only oversight Overview;
-// everyone else keeps the reception Dashboard (spec 2026-08-02-oversight-roles).
+// Personal attendance first; operational modules retain their existing gates.
 function HomePage() {
   const user = useAuthStore((s) => s.user);
-  return isOversightUser(user?.role, user?.display_role) ? <OverviewPage /> : <DashboardPage />;
+  if (!user) return null;
+  return <div className="space-y-8">
+    <PersonalAttendance key={user.id} userId={user.id} name={user.name} />
+    {isOversightUser(user.role, user.display_role) ? <OverviewPage /> :
+      hasRoleAccess(user.role, MODULE_ROLES.visits, user.directorate_abbr) ? <DashboardPage /> : null}
+  </div>;
 }
 
 export function App() {

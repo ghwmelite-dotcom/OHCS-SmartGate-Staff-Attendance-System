@@ -1,4 +1,4 @@
-const CACHE_NAME = 'smartgate-v7';
+const CACHE_NAME = 'smartgate-v8';
 const OFFLINE_URL = '/offline.html';
 const QUEUE_DB = 'ohcs-queue';
 const QUEUE_DB_VERSION = 1;
