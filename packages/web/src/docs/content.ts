@@ -37,6 +37,14 @@ export const DOC_SECTIONS: DocSection[] = [
     icon: 'layers',
     features: [
       {
+        name: 'Chatbot visibility on staff dashboards',
+        status: 'live',
+        summary: 'The chatbot is hidden on normal staff dashboards. Existing operational-role access and assistant capabilities remain unchanged.',
+        details: [
+          'UI-only visibility rule: ordinary staff see neither the chat button nor its panel. RCU reception-parity staff retain their existing operational access.',
+        ],
+      },
+      {
         name: 'Personal attendance on VMS home',
         status: 'live',
         summary: 'Every signed-in user sees their own clock-in/out status and recent attendance above their role-specific VMS dashboard.',

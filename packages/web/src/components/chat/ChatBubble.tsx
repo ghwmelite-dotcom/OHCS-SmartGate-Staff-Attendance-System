@@ -1,9 +1,14 @@
 import { useChatStore } from '@/stores/chat';
 import { MessageCircle, X } from 'lucide-react';
 import { ChatPanel } from './ChatPanel';
+import { useAuthStore } from '@/stores/auth';
+import { hasRoleAccess, MODULE_ROLES } from '@/lib/roles';
 
 export function ChatBubble() {
   const { isOpen, toggle } = useChatStore();
+  const user = useAuthStore((s) => s.user);
+  // Normal staff have a personal dashboard, not the operational assistant.
+  if (!hasRoleAccess(user?.role, MODULE_ROLES.visits, user?.directorate_abbr)) return null;
 
   return (
     <>

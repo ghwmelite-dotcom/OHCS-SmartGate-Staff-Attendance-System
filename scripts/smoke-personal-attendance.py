@@ -75,11 +75,15 @@ with sync_playwright() as p:
         settings = page.locator('header').get_by_role('button', name='Settings', exact=True).locator('..').locator('div').last.bounding_box()
         assert settings and settings['x'] >= 0 and settings['x'] + settings['width'] <= width, settings
         page.get_by_role('button', name='Settings', exact=True).click()
-        page.get_by_role('button', name='Open assistant', exact=True).click()
-        chat = page.get_by_placeholder('Ask a question...').locator('..').locator('..')
-        box = chat.bounding_box()
-        assert box and box['x'] >= 0 and box['x'] + box['width'] <= width and box['y'] >= 0, box
-        page.get_by_role('button', name='Close assistant', exact=True).click()
+        if role == 'staff':
+            expect(page.get_by_role('button', name='Open assistant', exact=True)).to_have_count(0)
+            expect(page.get_by_placeholder('Ask a question...')).to_have_count(0)
+        else:
+            page.get_by_role('button', name='Open assistant', exact=True).click()
+            chat = page.get_by_placeholder('Ask a question...').locator('..').locator('..')
+            box = chat.bounding_box()
+            assert box and box['x'] >= 0 and box['x'] + box['width'] <= width and box['y'] >= 0, box
+            page.get_by_role('button', name='Close assistant', exact=True).click()
         if width < 1024:
             page.get_by_role('button', name='More', exact=True).click()
             expect(page.get_by_role('button', name='Sign Out', exact=True)).to_be_visible()
