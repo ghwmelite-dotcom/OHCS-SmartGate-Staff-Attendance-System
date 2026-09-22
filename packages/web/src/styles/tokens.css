@@ -3,6 +3,7 @@
 @theme {
   /* Ghana Government Prestige Palette */
   --color-primary: #1A4D2E;
+  --color-primary-ink: #1A4D2E;
   --color-primary-light: #256B3E;
   --color-primary-dark: #0F2E1B;
   --color-primary-deep: #071A0F;
@@ -192,6 +193,7 @@
 
 /* ---- Dark Mode ---- */
 .dark {
+  --color-primary-ink: #8FD3A6;
   --color-background: #0F1410;
   --color-background-warm: #141A15;
   --color-surface: #1A211B;

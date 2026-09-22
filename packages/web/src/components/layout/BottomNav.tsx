@@ -80,7 +80,7 @@ export function BottomNav() {
       {/* More menu overlay */}
       {showMore && (
         <div className="fixed inset-0 z-40 lg:hidden" onClick={() => setShowMore(false)}>
-          <div className="absolute bottom-[68px] left-3 right-3 bg-surface rounded-2xl border border-border shadow-2xl overflow-hidden animate-fade-in-up"
+          <div className="absolute bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] max-h-[calc(100dvh-9rem-env(safe-area-inset-bottom,0px))] overflow-y-auto left-3 right-3 bg-surface rounded-2xl border border-border shadow-2xl animate-fade-in-up"
             onClick={e => e.stopPropagation()}
           >
             {/* Gold accent */}
@@ -97,7 +97,7 @@ export function BottomNav() {
                   className={({ isActive }) => cn(
                     'flex items-center gap-3 px-4 py-3 rounded-xl text-[15px] font-medium transition-all',
                     isActive
-                      ? 'bg-primary/10 text-primary'
+                      ? 'bg-primary/10 text-primary-ink'
                       : 'text-foreground hover:bg-background'
                   )}
                 >
@@ -117,7 +117,7 @@ export function BottomNav() {
                       className={({ isActive }) => cn(
                         'flex items-center gap-3 px-4 py-3 rounded-xl text-[15px] font-medium transition-all',
                         isActive
-                          ? 'bg-primary/10 text-primary'
+                          ? 'bg-primary/10 text-primary-ink'
                           : 'text-foreground hover:bg-background'
                       )}
                     >
@@ -142,7 +142,7 @@ export function BottomNav() {
       )}
 
       {/* Bottom navigation bar */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-surface border-t border-border safe-area-bottom">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-surface border-t border-border safe-area-bottom">
         <div className="flex items-center justify-around h-[64px] px-2">
           {mainItems.map(item => (
             <NavLink
@@ -151,7 +151,7 @@ export function BottomNav() {
               end={item.to === '/'}
               className={({ isActive }) => cn(
                 'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-all relative',
-                isActive ? 'text-primary' : 'text-muted'
+                isActive ? 'text-primary-ink' : 'text-muted'
               )}
             >
               {({ isActive }) => (
@@ -159,10 +159,10 @@ export function BottomNav() {
                   {isActive && (
                     <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-[3px] rounded-b-full bg-accent" />
                   )}
-                  <item.icon className={cn('h-[22px] w-[22px]', isActive && 'text-primary')} />
+                  <item.icon className={cn('h-[22px] w-[22px]', isActive && 'text-primary-ink')} />
                   <span className={cn(
                     'text-[11px] font-medium',
-                    isActive ? 'text-primary font-semibold' : 'text-muted'
+                    isActive ? 'text-primary-ink font-semibold' : 'text-muted'
                   )}>
                     {item.label}
                   </span>
@@ -173,10 +173,11 @@ export function BottomNav() {
 
           {/* More button */}
           <button
+            aria-expanded={showMore}
             onClick={() => setShowMore(!showMore)}
             className={cn(
               'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-all relative',
-              (showMore || isMoreActive) ? 'text-primary' : 'text-muted'
+              (showMore || isMoreActive) ? 'text-primary-ink' : 'text-muted'
             )}
           >
             {isMoreActive && !showMore && (
@@ -188,7 +189,7 @@ export function BottomNav() {
             }
             <span className={cn(
               'text-[11px] font-medium',
-              (showMore || isMoreActive) ? 'text-primary font-semibold' : 'text-muted'
+              (showMore || isMoreActive) ? 'text-primary-ink font-semibold' : 'text-muted'
             )}>
               More
             </span>

@@ -41,6 +41,7 @@ export const DOC_SECTIONS: DocSection[] = [
         status: 'live',
         summary: 'Every signed-in user sees their own clock-in/out status and recent attendance above their role-specific VMS dashboard.',
         details: [
+          'Small-screen layout: compact theme selector, side-by-side clock tiles, viewport-contained panels and safe-area-aware navigation; existing desktop layout retained.',
           'Session-scoped /clock/my-status and /clock/my-history?days=14; account-partitioned query caches.',
           'Refreshes every minute while open, on focus/reconnect, or manually. Times use Africa/Accra. Offline events appear after Staff Attendance syncs.',
           'Read-only: clock actions remain in Staff Attendance. Missing records do not imply absence. Ordinary staff do not load visitor-operation queries.',

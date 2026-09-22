@@ -66,7 +66,8 @@ export function NotificationBell() {
     <div className="relative" ref={panelRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative h-9 w-9 flex items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-background transition-colors"
+        className="relative h-11 w-11 flex items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-background transition-colors"
+        aria-expanded={isOpen}
         aria-label="Notifications"
       >
         <Bell className="h-[18px] w-[18px]" />
@@ -78,7 +79,7 @@ export function NotificationBell() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-80 bg-surface rounded-xl border border-border shadow-lg z-50 overflow-hidden">
+        <div className="fixed left-3 right-3 top-[calc(4rem+env(safe-area-inset-top,0px))] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 max-h-[calc(100dvh-9rem)] overflow-y-auto bg-surface rounded-xl border border-border shadow-lg z-50">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
             <div className="flex items-center gap-3">

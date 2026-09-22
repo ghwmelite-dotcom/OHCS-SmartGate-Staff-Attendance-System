@@ -22,12 +22,13 @@ export function SettingsMenu() {
         type="button"
         onClick={() => setOpen(v => !v)}
         aria-label="Settings"
-        className="h-9 w-9 rounded-lg flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+        aria-expanded={open}
+        className="h-11 w-11 rounded-lg flex items-center justify-center text-muted hover:text-foreground hover:bg-background transition-colors"
       >
         <Settings className="h-4 w-4" />
       </button>
       {open && (
-        <div className="absolute right-0 top-11 z-30 bg-white rounded-xl shadow-xl border border-gray-200 w-64 max-w-[calc(100vw-16px)] p-3 space-y-2">
+        <div className="fixed left-3 right-3 top-[calc(4rem+env(safe-area-inset-top,0px))] sm:absolute sm:left-auto sm:right-0 sm:top-12 z-30 bg-surface text-foreground rounded-xl shadow-xl border border-border sm:w-64 p-3 space-y-2">
           <InstallButton />
           <PushToggle />
         </div>

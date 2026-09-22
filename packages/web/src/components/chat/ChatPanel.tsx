@@ -43,7 +43,7 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="fixed bottom-24 right-6 z-50 w-[370px] h-[520px] bg-surface rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden animate-fade-in-up">
+    <div className="fixed bottom-[calc(8.5rem+env(safe-area-inset-bottom,0px))] left-3 right-3 sm:left-auto sm:right-6 sm:w-[370px] h-[520px] max-h-[calc(100dvh-13rem-env(safe-area-inset-bottom,0px))] lg:bottom-24 z-50 bg-surface rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden animate-fade-in-up">
       {/* Header */}
       <div className="px-4 py-3.5 flex items-center gap-3 shrink-0" style={{
         background: 'linear-gradient(135deg, #1A4D2E, #0F2E1B)',
@@ -143,13 +143,14 @@ export function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask a question..."
-          className="flex-1 h-10 px-3.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/15 focus:border-primary transition-all"
+          className="min-w-0 flex-1 h-11 px-3.5 rounded-xl border border-border bg-background text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary/15 focus:border-primary transition-all"
           disabled={isLoading}
         />
         <button
           type="submit"
           disabled={!input.trim() || isLoading}
-          className="h-10 w-10 bg-primary text-white rounded-xl flex items-center justify-center hover:bg-primary-light transition-all disabled:opacity-40 shrink-0 shadow-sm"
+          aria-label="Send message"
+          className="h-11 w-11 bg-primary text-white rounded-xl flex items-center justify-center hover:bg-primary-light transition-all disabled:opacity-40 shrink-0 shadow-sm"
         >
           <Send className="h-4 w-4" />
         </button>

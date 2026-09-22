@@ -31,7 +31,7 @@ export function AppLayout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-dvh overflow-hidden">
       {/* Desktop (lg+): collapsible sidebar */}
       <div className="hidden lg:block">
         <Sidebar />
@@ -39,7 +39,7 @@ export function AppLayout() {
 
       <div className="flex flex-col flex-1 overflow-hidden min-w-0">
         <Header onOpenWizard={() => setWizardOpen(true)} />
-        <main className="flex-1 overflow-auto bg-background bg-kente p-4 md:p-6 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] lg:pb-6">
+        <main className="min-h-0 flex-1 overflow-auto bg-background bg-kente p-3 sm:p-4 md:p-6 pb-[calc(10rem+env(safe-area-inset-bottom,0px))] lg:pb-6">
           <Outlet />
         </main>
       </div>
@@ -48,7 +48,7 @@ export function AppLayout() {
       <BottomNav />
 
       {/* Chat bubble — positioned above bottom nav on mobile */}
-      <div className="lg:bottom-6 bottom-20 fixed right-6 z-30">
+      <div className="fixed right-3 sm:right-6 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] lg:bottom-6 z-30">
         <ChatBubble />
       </div>
 
