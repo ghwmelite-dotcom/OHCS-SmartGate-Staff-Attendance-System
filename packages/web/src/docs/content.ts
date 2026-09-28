@@ -549,7 +549,10 @@ export const DOC_SECTIONS: DocSection[] = [
         name: 'Deploy pipeline',
         status: 'live',
         summary: 'Push to main runs typecheck + tests, deploys the Worker and both Pages, then smoke-checks the API (kiosk status canary).',
-        details: ['CI curls the workers.dev host — bot protection 403s the branded domain from CI'],
+        details: [
+          'CI curls the workers.dev host — bot protection 403s the branded domain from CI',
+          'Expected HTTP 4xx errors (including malformed login JSON) return a JSON client-error response without Telegram incident alerts; unexpected server failures still alert admins',
+        ],
       },
       {
         name: 'Nightly maintenance',

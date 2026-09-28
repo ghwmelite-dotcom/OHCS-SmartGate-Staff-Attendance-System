@@ -1,7 +1,25 @@
 import type { Context } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import { alertAdminError } from '../lib/error-alert';
 
 export function errorHandler(err: Error, c: Context) {
+  // Expected request failures are not server incidents. Match Hono's typed
+  // exception, not message text or SyntaxError (which can be an internal bug).
+  if (err instanceof HTTPException && err.status >= 400 && err.status < 500) {
+    const headers = new Headers(err.getResponse().headers);
+    headers.delete('Content-Length');
+    headers.set('Content-Type', 'application/json; charset=UTF-8');
+    const responseHeaders: Record<string, string> = {};
+    headers.forEach((value, name) => { responseHeaders[name] = value; });
+    return c.newResponse(JSON.stringify({
+      data: null,
+      error: {
+        code: err.status === 400 ? 'BAD_REQUEST' : 'REQUEST_ERROR',
+        message: err.status === 400 ? 'Invalid request body or parameters' : 'Request could not be accepted',
+      },
+    }), err.status, responseHeaders);
+  }
+
   console.error(`[ERROR] ${err.message}`, err.stack);
 
   // Fire-and-forget Telegram alert (prod-only, throttled, PII-free — never
