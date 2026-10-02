@@ -44,6 +44,8 @@ interface NssTodayRow {
   nss_end_date: string | null;
   clock_in_at: string | null;
   clock_out_at: string | null;
+  clock_out_self_reported?: number;
+  clock_out_submitted_at?: string | null;
   is_late: number;
   user_type: string;
   intern_code: string | null;
@@ -678,6 +680,7 @@ function TodayStatusCell({ row, active }: { row: NssTodayRow | undefined; active
       <span className="inline-flex items-center gap-1 text-[13px] text-foreground">
         <span className="text-muted">In {inTime} · Out</span>
         <span className="font-medium">{formatTime(row.clock_out_at)}</span>
+        {!!row.clock_out_self_reported && <span className="text-xs text-muted-foreground">Self-reported · Submitted {row.clock_out_submitted_at ? formatTime(row.clock_out_submitted_at) : '—'}</span>}
       </span>
     );
   }

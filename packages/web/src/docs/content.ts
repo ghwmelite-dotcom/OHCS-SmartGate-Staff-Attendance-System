@@ -4,7 +4,7 @@
 // Statuses: 'live' = in production · 'shadow' = shipped dark (record-only
 // mode, not enforced) · 'design' = spec exists, not built.
 
-export const DOCS_LAST_UPDATED = '2026-09-22';
+export const DOCS_LAST_UPDATED = '2026-10-02';
 
 export type DocStatus = 'live' | 'shadow' | 'design';
 
@@ -105,7 +105,7 @@ export const DOC_SECTIONS: DocSection[] = [
         status: 'live',
         summary: 'A fleet of scheduled jobs keeps the system tidy and the right people informed.',
         details: [
-          'Clock nudge ladder: clock-in nudges every 30 min 08:00–11:00, clock-out nudges 17:00/17:30 — per-user, stop the moment the officer complies',
+          'Clock nudge ladder: clock-in nudges every 30 min 08:00–11:00, clock-out nudges every 30 min 15:30–17:00 — per-user, stop after a recorded clock-out',
           'Push opt-in banner after login (14-day snooze) so nudges reach phones even with the app closed',
           'Telegram adoption surfaces: linked badge per user in Admin → Users (telegram_linked on GET /users) and a permanent Connect Telegram section in the staff PWA Profile sheet — independent of the connect banner\'s 14-day snooze',
           'Daily/weekly/monthly/yearly summaries · NSS end-of-service · SLA escalation every 15 min (8–17, Mon–Fri) · auto-checkout sweep 17:15 weekdays',
@@ -121,6 +121,19 @@ export const DOC_SECTIONS: DocSection[] = [
     color: '#1A7A3A',
     icon: 'fingerprint',
     features: [
+      {
+        name: 'Self-reported clock-out (pending rollout)',
+        status: 'design',
+        summary: 'Prepared for rollout: Already left the office? records a same-day departure without GPS, QR or camera, with mandatory PIN/passkey verification. Production migration approval is pending.',
+        details: [
+          'POST /clock/self-report-out requires an open attendance day, owned verification prompt and idempotency key',
+          'Departure must be today, after clock-in and no later than server time; previous-day corrections stay with admin',
+          'Reported departure and server submission are stored separately; admin records and CSV/PDF label Self-reported',
+          'This records a declaration, not approval for early leave or proof of on-site presence',
+          'Evening nudges stay at 15:30–17:00 and explain the fallback; later reminder audience queries exclude completed departures',
+          'Release gate: apply migration-clock-self-reported.sql before deploying consumers; mark this card live after verified rollout',
+        ],
+      },
       {
         name: 'Scan-first clock flow',
         status: 'live',

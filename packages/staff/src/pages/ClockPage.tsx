@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { startAuthentication } from '@simplewebauthn/browser';
 import { FirstLoginPinPrompt } from '@/components/FirstLoginPinPrompt';
+import { SelfReportedClockOut } from '@/components/SelfReportedClockOut';
 import { BottomNav } from '@/components/BottomNav';
 import { AbsenceNoticeButton } from '@/components/AbsenceNoticeButton';
 import { LetterReveal } from '@/components/LetterReveal';
@@ -43,6 +44,8 @@ interface ClockStatus {
   clocked_out: boolean;
   clock_in_time: string | null;
   clock_out_time: string | null;
+  clock_out_self_reported?: boolean;
+  attendance_date?: string;
   streak: number;
   longest_streak: number;
 }
@@ -680,6 +683,7 @@ export function ClockPage() {
               )} style={{ fontFamily: "'Playfair Display', serif" }}>
                 {status?.clock_out_time ? formatTime(status.clock_out_time) : '--:--'}
               </p>
+              {status?.clock_out_self_reported && <p className="text-xs text-muted">Self-reported</p>}
             </div>
           </div>
         </div>
@@ -711,6 +715,7 @@ export function ClockPage() {
                   Clock Out
                 </MagneticButton>
               )}
+              {canClockOut && status?.attendance_date && <SelfReportedClockOut attendanceDate={status.attendance_date} onRecorded={() => { void queryClient.invalidateQueries({ queryKey: ['clock-status'] }); }} />}
               {!canClockIn && !canClockOut && (
                 <div className="text-center py-8">
                   <CheckCircle2 className="h-12 w-12 text-success mx-auto mb-3" />

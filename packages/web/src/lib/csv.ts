@@ -72,6 +72,8 @@ export interface AttendanceExportRow {
   directorate_abbr: string | null;
   clock_in_time: string | null;
   clock_out_time: string | null;
+  clock_out_self_reported?: number;
+  clock_out_submitted_at?: string | null;
   is_late: number;
   is_early_departure: number;
   presence_method: string | null;
@@ -95,6 +97,7 @@ export function generateAttendanceRangeCSV(rows: AttendanceExportRow[], note?: s
   const headers = [
     'Date', 'Name', 'Identifier', 'Directorate', 'Clock In', 'Clock Out',
     'Late', 'Left Early', 'Presence Method', 'Absence Reason', 'Absence Note', 'Has Photo',
+    'Clock Out Method', 'Clock Out Submitted At (UTC)',
   ];
   const data = rows.map(r => [
     r.date,
@@ -109,6 +112,8 @@ export function generateAttendanceRangeCSV(rows: AttendanceExportRow[], note?: s
     r.absence_reason ?? '',
     r.absence_note ?? '',
     hasPhotoYN(r.has_photo),
+    r.clock_out_self_reported ? 'Self-reported' : r.clock_out_time ? 'On-site' : '',
+    r.clock_out_submitted_at ?? '',
   ]);
   const lines: string[][] = note ? [[note], headers, ...data] : [headers, ...data];
   return lines.map(row => row.map(formatCsvCell).join(',')).join('\n');

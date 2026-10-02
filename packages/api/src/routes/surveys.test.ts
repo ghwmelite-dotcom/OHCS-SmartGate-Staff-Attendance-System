@@ -90,6 +90,6 @@ describe('survey wiring guards', () => {
     // held that slot until migration-visitors-idempotency.sql (2026-08-01
     // VMS audit fixes, Commit D) and migration-appointments-reschedule.sql
     // (2026-08-03 reschedule proposals) appended after it.
-    expect(idx).toMatch(/\{ filename: 'migration-visitor-surveys\.sql', sql: visitorSurveys \},\s*\{ filename: 'migration-visitors-idempotency\.sql', sql: visitorsIdempotency \},\s*\{ filename: 'migration-appointments-reschedule\.sql', sql: appointmentsReschedule \},\s*\];/);
+    expect(idx).toMatch(/\{ filename: 'migration-visitor-surveys\.sql', sql: visitorSurveys \},\s*\{ filename: 'migration-visitors-idempotency\.sql', sql: visitorsIdempotency \},\s*\{ filename: 'migration-appointments-reschedule\.sql', sql: appointmentsReschedule \},\s*\{ filename: 'migration-clock-self-reported\.sql', sql: clockSelfReported \},\s*\];/);
   });
 });

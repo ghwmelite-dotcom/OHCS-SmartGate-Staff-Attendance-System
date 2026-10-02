@@ -29,7 +29,7 @@ export function PersonalAttendance({ userId, name }: { userId: string; name: str
           {[
             { title: 'Today · Ghana time', value: status.isPending ? 'Loading…' : label, Icon: Clock },
             { title: 'Clock in', value: status.isPending ? 'Loading…' : attendanceTime(today?.clock_in_time ?? null), Icon: LogIn },
-            { title: 'Clock out', value: status.isPending ? 'Loading…' : attendanceTime(today?.clock_out_time ?? null), Icon: LogOut },
+            { title: today?.clock_out_self_reported ? 'Clock out · Self-reported' : 'Clock out', value: status.isPending ? 'Loading…' : attendanceTime(today?.clock_out_time ?? null), Icon: LogOut },
           ].map(({ title, value, Icon }, index) => <div key={title} className={`min-w-0 rounded-xl border border-border bg-surface p-3 sm:p-4 ${index === 0 ? 'col-span-2 sm:col-span-1' : ''}`}>
             <p className="flex items-center gap-2 text-xs font-medium text-muted"><Icon aria-hidden="true" className="h-4 w-4 text-primary-ink" />{title}</p>
             <p className="mt-2 sm:mt-3 text-xl font-semibold tabular-nums text-foreground">{value}</p>
@@ -50,7 +50,8 @@ export function PersonalAttendance({ userId, name }: { userId: string; name: str
               <time dateTime={day.date} className="text-sm font-medium text-foreground">{day.label}</time>
               <div className="flex flex-wrap gap-2">{day.records.map((event) => <span key={event.id} className="inline-flex items-center gap-2 rounded-lg bg-primary/5 px-3 py-2 text-sm text-foreground">
                 {event.type === 'clock_in' ? <LogIn aria-hidden="true" className="h-4 w-4 text-primary-ink" /> : <LogOut aria-hidden="true" className="h-4 w-4 text-muted" />}
-                {event.type === 'clock_in' ? 'In' : 'Out'} <time dateTime={event.timestamp} className="font-semibold tabular-nums">{attendanceTime(event.timestamp)}</time>
+                {event.type === 'clock_in' ? 'In' : 'Out'} <time dateTime={event.reported_departure_at ?? event.timestamp} className="font-semibold tabular-nums">{attendanceTime(event.reported_departure_at ?? event.timestamp)}</time>
+                {event.reported_departure_at && <span className="text-xs">Self-reported · Submitted {attendanceTime(event.timestamp)}</span>}
               </span>)}</div>
             </li>)}
           </ul>

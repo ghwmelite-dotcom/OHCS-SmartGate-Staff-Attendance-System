@@ -157,7 +157,7 @@ attendanceRoutes.get('/today', async (c) => {
     // Early departure = clocked out before work_end_time
     c.env.DB.prepare(
       `SELECT COUNT(DISTINCT cr.user_id) as count FROM clock_records cr
-       WHERE cr.type = 'clock_out' AND ${crDate} = ? AND TIME(cr.timestamp) < ? ${userTypeJoinSql} ${clockScopeSql}`
+       WHERE cr.type = 'clock_out' AND ${crDate} = ? AND TIME(COALESCE(cr.reported_departure_at, cr.timestamp)) < ? ${userTypeJoinSql} ${clockScopeSql}`
     ).bind(...withScope([date, endAt])).first<{ count: number }>(),
   ]);
 
@@ -199,7 +199,8 @@ attendanceRoutes.get('/records', async (c) => {
 
   let sql = `SELECT u.id as user_id, u.name, u.staff_id, u.role, u.user_type,
                     d.abbreviation as directorate_abbr,
-                    ci.timestamp as clock_in_time, co.timestamp as clock_out_time,
+                    ci.timestamp as clock_in_time, COALESCE(co.reported_departure_at, co.timestamp) as clock_out_time,
+                    co.timestamp as clock_out_submitted_at, (co.reported_departure_at IS NOT NULL) as clock_out_self_reported,
                     ci.photo_url as clock_in_photo,
                     ci.reauth_method as clock_in_reauth_method,
                     co.reauth_method as clock_out_reauth_method,
@@ -213,7 +214,7 @@ attendanceRoutes.get('/records', async (c) => {
                     ci.id as clock_in_id,
                     a.reason as absence_reason, a.note as absence_note,
                     CASE WHEN TIME(ci.timestamp) > ? THEN 1 ELSE 0 END as is_late,
-                    CASE WHEN co.timestamp IS NOT NULL AND TIME(co.timestamp) < ? THEN 1 ELSE 0 END as is_early_departure,
+                    CASE WHEN co.timestamp IS NOT NULL AND TIME(COALESCE(co.reported_departure_at, co.timestamp)) < ? THEN 1 ELSE 0 END as is_early_departure,
                     u.current_streak
              FROM users u
              LEFT JOIN directorates d ON u.directorate_id = d.id
@@ -296,9 +297,10 @@ attendanceRoutes.get('/export', async (c) => {
              SELECT days.d as date, u.id as user_id, u.name,
                     COALESCE(u.staff_id, u.nss_number, u.intern_code) as identifier,
                     dir.abbreviation as directorate_abbr,
-                    ci.timestamp as clock_in_time, co.timestamp as clock_out_time,
+                    ci.timestamp as clock_in_time, COALESCE(co.reported_departure_at, co.timestamp) as clock_out_time,
+                    co.timestamp as clock_out_submitted_at, (co.reported_departure_at IS NOT NULL) as clock_out_self_reported,
                     CASE WHEN ci.timestamp IS NOT NULL AND TIME(ci.timestamp) > ? THEN 1 ELSE 0 END as is_late,
-                    CASE WHEN co.timestamp IS NOT NULL AND TIME(co.timestamp) < ? THEN 1 ELSE 0 END as is_early_departure,
+                    CASE WHEN co.timestamp IS NOT NULL AND TIME(COALESCE(co.reported_departure_at, co.timestamp)) < ? THEN 1 ELSE 0 END as is_early_departure,
                     ci.presence_method as presence_method,
                     a.reason as absence_reason, a.note as absence_note,
                     CASE WHEN ci.photo_url IS NOT NULL THEN 1 ELSE 0 END as has_photo
@@ -478,7 +480,8 @@ attendanceRoutes.get('/user/:userId/monthly', async (c) => {
   // same attribution rule as /records, /today and /by-directorate.
   const effDate = clockEffectiveDateSql('clock_records');
   const records = await c.env.DB.prepare(
-    `SELECT ${effDate} as date, type, TIME(timestamp) as time
+    `SELECT ${effDate} as date, type, TIME(COALESCE(reported_departure_at, timestamp)) as time,
+       timestamp as submitted_at, (reported_departure_at IS NOT NULL) as self_reported
      FROM clock_records WHERE user_id = ? AND strftime('%Y-%m', ${effDate}) = ?
      ORDER BY timestamp`
   ).bind(userId, month).all();
@@ -491,14 +494,18 @@ attendanceRoutes.get('/user/:userId/monthly', async (c) => {
   const lateAfter = toSqlTime(settings.late_threshold_time);
 
   // Group by date
-  const days: Record<string, { clock_in?: string; clock_out?: string; is_late: boolean }> = {};
-  for (const r of (records.results ?? []) as Array<{ date: string; type: string; time: string }>) {
+  const days: Record<string, { clock_in?: string; clock_out?: string; clock_out_self_reported?: number; clock_out_submitted_at?: string; is_late: boolean }> = {};
+  for (const r of (records.results ?? []) as Array<{ date: string; type: string; time: string; submitted_at: string; self_reported: number }>) {
     if (!days[r.date]) days[r.date] = { is_late: false };
     if (r.type === 'clock_in') {
       days[r.date]!.clock_in = r.time;
       days[r.date]!.is_late = r.time > lateAfter;
     }
-    if (r.type === 'clock_out') days[r.date]!.clock_out = r.time;
+    if (r.type === 'clock_out') {
+      days[r.date]!.clock_out = r.time;
+      days[r.date]!.clock_out_self_reported = r.self_reported;
+      days[r.date]!.clock_out_submitted_at = r.submitted_at;
+    }
   }
 
   const totalDays = Object.keys(days).length;

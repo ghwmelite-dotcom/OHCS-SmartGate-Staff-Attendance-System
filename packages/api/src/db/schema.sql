@@ -240,6 +240,7 @@ CREATE TABLE IF NOT EXISTS clock_records (
     -- pre-existing rows and whenever risk_fusion_mode = 0 reads as "unscored".
     risk_score       INTEGER,
     risk_factors     TEXT,  -- JSON array of {name, condition, weight, detail}
+    reported_departure_at TEXT,
     risk_disposition TEXT
       CHECK (risk_disposition IN ('dismissed','escalated') OR risk_disposition IS NULL),
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))

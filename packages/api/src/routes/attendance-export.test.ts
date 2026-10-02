@@ -79,7 +79,7 @@ function newDb(): SqliteDb {
     CREATE TABLE clock_records (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL,
       timestamp TEXT NOT NULL, photo_url TEXT, device_info TEXT,
-      presence_method TEXT
+      presence_method TEXT, reported_departure_at TEXT
     );
     CREATE TABLE absence_notices (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, reason TEXT NOT NULL,
@@ -205,6 +205,13 @@ async function getExport(env: Env, query = '', session: SessionData = admin): Pr
 }
 
 const SPAN = `?from=${FROM}&to=${TO}`;
+
+it('range export preserves self-reported departure and submission independently', async () => {
+  const { env, db } = makeEnv();
+  db.prepare("UPDATE clock_records SET reported_departure_at = ?, timestamp = ? WHERE user_id = 'u2' AND type = 'clock_out'").run(`${D1}T14:15:00.000Z`, `${D1}T17:30:00.000Z`);
+  const rows = await getExport(env, SPAN);
+  expect(rows.find(r => r.user_id === 'u2' && r.date === D1)).toMatchObject({ clock_out_time: `${D1}T14:15:00.000Z`, clock_out_submitted_at: `${D1}T17:30:00.000Z`, clock_out_self_reported: 1, is_early_departure: 1 });
+});
 
 /** Find the single row for a user on a date (fails the test if not exactly one). */
 function rowFor(rows: ExportRow[], userId: string, date: string): ExportRow {

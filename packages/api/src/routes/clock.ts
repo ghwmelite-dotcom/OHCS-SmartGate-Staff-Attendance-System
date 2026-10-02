@@ -19,8 +19,10 @@ import { ALL_CHALLENGES, verifyLivenessBurst, getReviewCount, incrementReviewCou
 import type { LivenessChallenge, LivenessSignature } from '../services/liveness/types';
 import { computeRiskScore, riskBand, isBlockable, BLOCK_THRESHOLD, type RiskInput, type RiskFactor } from '../services/risk-score';
 import { sha256Hex } from '../db/migrations-index';
+import { selfReportedClockOutRoutes } from './self-reported-clockout';
 
 export const clockRoutes = new Hono<{ Bindings: Env; Variables: { session: SessionData } }>();
+clockRoutes.route('/self-report-out', selfReportedClockOutRoutes);
 
 // OHCS building footprint (Office of The Head of the Civil Service, Accra).
 // The TRUE building outline (~34m × 76m), replacing an earlier ~5m × 7m patch
@@ -244,8 +246,8 @@ clockRoutes.post('/', async (c) => {
   // Idempotency check — return existing record immediately (before geofence re-validation)
   if (idempotency_key) {
     const existing = await c.env.DB.prepare(
-      "SELECT id, type, timestamp FROM clock_records WHERE user_id = ? AND idempotency_key = ? LIMIT 1"
-    ).bind(session.userId, idempotency_key).first<{ id: string; type: string; timestamp: string }>();
+      "SELECT id, type, timestamp, within_geofence, reported_departure_at FROM clock_records WHERE user_id = ? AND idempotency_key = ? LIMIT 1"
+    ).bind(session.userId, idempotency_key).first<{ id: string; type: string; timestamp: string; within_geofence: number; reported_departure_at: string | null }>();
     if (existing) {
       return success(c, {
         id: existing.id,
@@ -253,7 +255,8 @@ clockRoutes.post('/', async (c) => {
         timestamp: existing.timestamp,
         user_name: session.name,
         staff_id: '',
-        within_geofence: true,
+        within_geofence: !!existing.within_geofence,
+        reported_departure_at: existing.reported_departure_at,
         distance_meters: 0,
         streak: 0,
         longest_streak: 0,
@@ -592,7 +595,9 @@ clockRoutes.post('/', async (c) => {
         (id, user_id, type, latitude, longitude, within_geofence, idempotency_key,
          reauth_method, liveness_challenge, liveness_decision, liveness_signature,
          presence_method, presence_token_window, risk_score, risk_factors, device_info)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       WHERE NOT EXISTS (SELECT 1 FROM clock_records WHERE user_id = ? AND type = ?
+         AND ${clockEffectiveDateSql('clock_records')} = ?)`
     ).bind(
       id,
       session.userId,
@@ -612,7 +617,19 @@ clockRoutes.post('/', async (c) => {
       // device_info was never written before this; it is JSON only when a
       // validated capture date exists, NULL otherwise. No other reader exists.
       capturedDate ? JSON.stringify({ capturedDate }) : null,
+      session.userId, type, effectiveDate,
     ).run();
+    const inserted = await c.env.DB.prepare('SELECT id FROM clock_records WHERE id = ?').bind(id).first();
+    if (!inserted) {
+      const replay = idempotency_key ? await c.env.DB.prepare(
+        'SELECT id, type, timestamp, within_geofence, reported_departure_at FROM clock_records WHERE user_id = ? AND idempotency_key = ?'
+      ).bind(session.userId, idempotency_key).first<{ id: string; type: string; timestamp: string; within_geofence: number; reported_departure_at: string | null }>() : null;
+      if (replay) return success(c, {
+        ...replay, within_geofence: !!replay.within_geofence, deduplicated: true,
+        user_name: session.name, staff_id: '', distance_meters: 0, streak: 0, longest_streak: 0,
+      });
+      return error(c, 'ALREADY_CLOCKED', 'This clock event has already been recorded.', 409);
+    }
   } catch (e) {
     // Idempotency-key race: a concurrent clock request with the same
     // (user_id, idempotency_key) won the insert. Re-read and return the
@@ -621,8 +638,8 @@ clockRoutes.post('/', async (c) => {
     const msg = e instanceof Error ? e.message : String(e);
     if (idempotency_key && /UNIQUE/i.test(msg) && /idempotency_key/i.test(msg)) {
       const existing = await c.env.DB.prepare(
-        "SELECT id, type, timestamp FROM clock_records WHERE user_id = ? AND idempotency_key = ? LIMIT 1"
-      ).bind(session.userId, idempotency_key).first<{ id: string; type: string; timestamp: string }>();
+        "SELECT id, type, timestamp, within_geofence, reported_departure_at FROM clock_records WHERE user_id = ? AND idempotency_key = ? LIMIT 1"
+      ).bind(session.userId, idempotency_key).first<{ id: string; type: string; timestamp: string; within_geofence: number; reported_departure_at: string | null }>();
       if (existing) {
         return success(c, {
           id: existing.id,
@@ -630,7 +647,8 @@ clockRoutes.post('/', async (c) => {
           timestamp: existing.timestamp,
           user_name: session.name,
           staff_id: '',
-          within_geofence: true,
+          within_geofence: !!existing.within_geofence,
+          reported_departure_at: existing.reported_departure_at,
           distance_meters: 0,
           streak: 0,
           longest_streak: 0,
@@ -797,7 +815,7 @@ clockRoutes.get('/my-status', async (c) => {
   const today = new Date().toISOString().slice(0, 10);
 
   const records = await c.env.DB.prepare(
-    `SELECT type, timestamp FROM clock_records WHERE user_id = ? AND DATE(timestamp) = ? ORDER BY timestamp`
+    `SELECT type, timestamp, reported_departure_at FROM clock_records WHERE user_id = ? AND ${clockEffectiveDateSql('clock_records')} = ? ORDER BY timestamp`
   ).bind(session.userId, today).all();
 
   const user = await c.env.DB.prepare(
@@ -813,7 +831,10 @@ clockRoutes.get('/my-status', async (c) => {
     clocked_in: !!clockIn,
     clocked_out: !!clockOut,
     clock_in_time: clockIn ? (clockIn as Record<string, unknown>).timestamp : null,
-    clock_out_time: clockOut ? (clockOut as Record<string, unknown>).timestamp : null,
+    clock_out_time: clockOut ? (clockOut.reported_departure_at ?? clockOut.timestamp) : null,
+    clock_out_self_reported: !!clockOut?.reported_departure_at,
+    clock_out_submitted_at: clockOut?.timestamp ?? null,
+    attendance_date: today,
     streak: user?.current_streak ?? 0,
     longest_streak: user?.longest_streak ?? 0,
   });
@@ -919,7 +940,7 @@ clockRoutes.get('/my-history', async (c) => {
   const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
 
   const records = await c.env.DB.prepare(
-    `SELECT id, type, timestamp, within_geofence, photo_url
+    `SELECT id, type, timestamp, reported_departure_at, within_geofence, photo_url
      FROM clock_records WHERE user_id = ? AND DATE(timestamp) >= ?
      ORDER BY timestamp DESC`
   ).bind(session.userId, from).all();

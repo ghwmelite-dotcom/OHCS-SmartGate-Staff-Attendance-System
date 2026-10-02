@@ -32,6 +32,8 @@ interface AttendanceRecord {
   directorate_abbr: string | null;
   clock_in_time: string | null;
   clock_out_time: string | null;
+  clock_out_self_reported?: number;
+  clock_out_submitted_at?: string | null;
   clock_in_photo: string | null;
   clock_in_reauth_method: 'webauthn' | 'pin' | null;
   clock_out_reauth_method: 'webauthn' | 'pin' | null;
@@ -314,7 +316,7 @@ export function AttendanceTab() {
       return;
     }
     const source = records; // full register, not the on-screen filter
-    const headers = ['Name', 'Staff ID', 'Directorate', 'Clock In', 'Clock Out', 'Late', 'Left Early', 'Streak', 'Has Photo'];
+    const headers = ['Name', 'Staff ID', 'Directorate', 'Clock In', 'Clock Out', 'Late', 'Left Early', 'Streak', 'Has Photo', 'Clock Out Method', 'Clock Out Submitted At (UTC)'];
     const rows = source.map(r => [
       r.name,
       r.staff_id ?? '',
@@ -325,6 +327,8 @@ export function AttendanceTab() {
       r.is_early_departure ? 'Yes' : 'No',
       String(r.current_streak),
       hasPhotoYN(r.clock_in_photo),
+      r.clock_out_self_reported ? 'Self-reported' : r.clock_out_time ? 'On-site' : '',
+      r.clock_out_submitted_at ?? '',
     ]);
     const csv = [
       ...(note ? [`# filters: ${note}`] : []),
@@ -681,6 +685,7 @@ export function AttendanceTab() {
                         <div className="flex items-center gap-2">
                           <span className={cn('text-[14px]', r.is_early_departure ? 'text-warning font-medium' : 'text-foreground')}>
                             {r.clock_out_time ? formatTime(r.clock_out_time) : '—'}
+                            {!!r.clock_out_self_reported && <span className="block text-xs text-muted-foreground">Self-reported · Submitted {r.clock_out_submitted_at ? formatTime(r.clock_out_submitted_at) : '—'}</span>}
                           </span>
                           {r.is_early_departure ? (
                             <span className="inline-flex items-center h-5 px-1.5 text-[10px] font-bold rounded-md bg-warning/10 text-warning">
@@ -784,6 +789,7 @@ export function AttendanceTab() {
                         <div className="flex items-center gap-2">
                           <span className={cn('text-[14px]', r.is_early_departure ? 'text-warning font-medium' : 'text-foreground')}>
                             {r.clock_out_time ? formatTime(r.clock_out_time) : '—'}
+                            {!!r.clock_out_self_reported && <span className="block text-xs text-muted-foreground">Self-reported · Submitted {r.clock_out_submitted_at ? formatTime(r.clock_out_submitted_at) : '—'}</span>}
                           </span>
                           {r.is_early_departure ? (
                             <span className="inline-flex items-center h-5 px-1.5 text-[10px] font-bold rounded-md bg-warning/10 text-warning">
@@ -1015,7 +1021,7 @@ function MonthlyReportModal({ userId, userName, onClose }: { userId: string; use
       total_days_present: number;
       late_days: number;
       on_time_days: number;
-      daily_records: Record<string, { clock_in?: string; clock_out?: string; is_late: boolean }>;
+      daily_records: Record<string, { clock_in?: string; clock_out?: string; clock_out_self_reported?: number; clock_out_submitted_at?: string; is_late: boolean }>;
     }>(`/attendance/user/${userId}/monthly?month=${month}`),
   });
 
@@ -1076,7 +1082,7 @@ function MonthlyReportModal({ userId, userName, onClose }: { userId: string; use
                     <tr key={date}>
                       <td className="py-2 text-[14px] text-foreground">{formatDate(date + 'T00:00:00Z')}</td>
                       <td className="py-2 text-[14px] text-foreground">{rec.clock_in ?? '—'}</td>
-                      <td className="py-2 text-[14px] text-foreground">{rec.clock_out ?? '—'}</td>
+                      <td className="py-2 text-[14px] text-foreground">{rec.clock_out ?? '—'}{!!rec.clock_out_self_reported && <span className="block text-xs text-muted-foreground">Self-reported · Submitted {rec.clock_out_submitted_at ? formatTime(rec.clock_out_submitted_at) : '—'}</span>}</td>
                       <td className="py-2">
                         <span className={cn(
                           'text-[11px] font-bold px-2 py-0.5 rounded-full',

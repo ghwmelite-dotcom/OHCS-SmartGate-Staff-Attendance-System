@@ -83,7 +83,11 @@ describe('buildClockOutMessage', () => {
   it('soft leave-time nudge before 17:00, firmer at the 17:00 close slot', () => {
     expect(buildClockOutMessage(930, 'Kofi').title).toContain('Heading out'); // 15:30
     expect(buildClockOutMessage(990, 'Kofi').title).toContain('Heading out'); // 16:30
-    expect(buildClockOutMessage(1020, 'Kofi').title).toContain('Still showing'); // 17:00
+    expect(buildClockOutMessage(1020, 'Kofi').title).toContain('clock-out is still missing'); // 17:00
+    for (const slot of [930, 960, 990, 1020]) {
+      expect(buildClockOutMessage(slot, 'Kofi').body).toContain('Already left the office?');
+      expect(buildClockOutMessage(slot, 'Kofi').body).toContain('departure time');
+    }
   });
 });
 
@@ -174,6 +178,13 @@ describe('buildClockInNudgeQuery', () => {
 });
 
 describe('buildClockOutNudgeQuery', () => {
+  it('stops later nudges after a self-reported departure', () => {
+    const db = newDb(); seedUsers(db);
+    db.exec('ALTER TABLE clock_records ADD COLUMN reported_departure_at TEXT');
+    db.prepare('INSERT INTO clock_records (user_id, type, timestamp, reported_departure_at) VALUES (?, ?, ?, ?)')
+      .run('u2', 'clock_out', `${DAY}T15:40:00.000Z`, `${DAY}T14:15:00.000Z`);
+    expect(db.prepare(buildClockOutNudgeQuery()).all(DAY, DAY, DAY, DAY)).toHaveLength(0);
+  });
   it('targets users clocked in but not out', () => {
     const db = newDb();
     seedUsers(db);

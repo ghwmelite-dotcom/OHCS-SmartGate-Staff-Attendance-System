@@ -100,19 +100,23 @@ describe('hasPhotoYN', () => {
 });
 
 describe('generateAttendanceRangeCSV', () => {
+  it('labels self-reports and keeps the submission timestamp', () => {
+    const csv = generateAttendanceRangeCSV([{ ...exportRow, clock_out_self_reported: 1, clock_out_submitted_at: '2026-08-03T16:00:00.000Z' }]);
+    expect(csv).toContain('"Self-reported","2026-08-03T16:00:00.000Z"');
+  });
   it('emits all contract columns in order', () => {
     const csv = generateAttendanceRangeCSV([exportRow]);
     const header = csv.split('\n')[0]!;
     expect(header).toBe(
-      '"Date","Name","Identifier","Directorate","Clock In","Clock Out","Late","Left Early","Presence Method","Absence Reason","Absence Note","Has Photo"',
+      '"Date","Name","Identifier","Directorate","Clock In","Clock Out","Late","Left Early","Presence Method","Absence Reason","Absence Note","Has Photo","Clock Out Method","Clock Out Submitted At (UTC)"',
     );
   });
 
   it('maps has_photo 1/0 to Y/N in the Has Photo column', () => {
     const withPhoto = generateAttendanceRangeCSV([exportRow]).split('\n')[1]!;
-    expect(withPhoto.endsWith(',"Y"')).toBe(true);
+    expect(withPhoto.split(',')[11]).toBe('"Y"');
     const without = generateAttendanceRangeCSV([{ ...exportRow, has_photo: 0 }]).split('\n')[1]!;
-    expect(without.endsWith(',"N"')).toBe(true);
+    expect(without.split(',')[11]).toBe('"N"');
   });
 
   it('renders absent rows with Absent in/out, empty absence fields when null', () => {

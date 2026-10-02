@@ -59,6 +59,7 @@ import usersDisplayRole from './migration-users-display-role.sql';
 import visitorSurveys from './migration-visitor-surveys.sql';
 import visitorsIdempotency from './migration-visitors-idempotency.sql';
 import appointmentsReschedule from './migration-appointments-reschedule.sql';
+import clockSelfReported from './migration-clock-self-reported.sql';
 
 export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-applied-migrations.sql', sql: appliedMigrations },
@@ -122,6 +123,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-visitor-surveys.sql', sql: visitorSurveys },
   { filename: 'migration-visitors-idempotency.sql', sql: visitorsIdempotency },
   { filename: 'migration-appointments-reschedule.sql', sql: appointmentsReschedule },
+  { filename: 'migration-clock-self-reported.sql', sql: clockSelfReported },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {

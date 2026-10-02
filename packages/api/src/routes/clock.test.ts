@@ -21,6 +21,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { clockRoutes } from './clock';
 import type { Env, SessionData } from '../types';
+import { hashPin } from '../services/auth';
+import * as audit from '../services/audit';
+import migration from '../db/migration-clock-self-reported.sql';
 
 /* ---------- fakes ---------- */
 
@@ -66,7 +69,7 @@ function newDb(): SqliteDb {
       VALUES (1, '08:00', '08:30', '17:00');
     CREATE TABLE users (
       id TEXT PRIMARY KEY, name TEXT, email TEXT, role TEXT, user_type TEXT DEFAULT 'staff',
-      staff_id TEXT, is_active INTEGER NOT NULL DEFAULT 1,
+      staff_id TEXT, pin_hash TEXT, is_active INTEGER NOT NULL DEFAULT 1,
       current_streak INTEGER NOT NULL DEFAULT 0, longest_streak INTEGER NOT NULL DEFAULT 0
     );
     INSERT INTO users (id, name, email, role, staff_id) VALUES ('u1', 'Ama Serwaa', 'ama@ohcs.gov.gh', 'staff', '896239');
@@ -81,7 +84,7 @@ function newDb(): SqliteDb {
       photo_url TEXT, device_info TEXT, idempotency_key TEXT,
       reauth_method TEXT, liveness_challenge TEXT, liveness_decision TEXT, liveness_signature TEXT,
       presence_method TEXT, presence_token_window TEXT, risk_score INTEGER, risk_factors TEXT,
-      risk_disposition TEXT
+      risk_disposition TEXT, reported_departure_at TEXT
     );
     CREATE TABLE notifications (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL,
@@ -192,6 +195,107 @@ function clockRows(db: SqliteDb): Array<Record<string, unknown>> {
 }
 
 /* ---------- tests ---------- */
+
+describe('self-reported clock-out', () => {
+  const now = '2026-08-03T16:00:00.000Z';
+  beforeEach(() => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date(now));
+    vi.spyOn(audit, 'recordAudit').mockResolvedValue();
+  });
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+  async function fixture() {
+    const f = makeEnv();
+    f.db.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(await hashPin('123456'), 'u1');
+    f.db.exec("CREATE UNIQUE INDEX idem ON clock_records(user_id,idempotency_key) WHERE idempotency_key IS NOT NULL");
+    f.db.prepare('INSERT INTO clock_records(id,user_id,type,timestamp) VALUES (?,?,?,?)').run('in', 'u1', 'clock_in', `${TODAY}T08:00:00.000Z`);
+    const prompt = crypto.randomUUID(); seedPrompt(f.store, prompt);
+    const body = { prompt_id: prompt, idempotency_key: crypto.randomUUID(), pin: '123456', departure_at: `${TODAY}T14:15:00.000Z` };
+    const submit = (extra: Record<string, unknown> = {}) => makeApp().request('/c/self-report-out', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, ...extra }),
+    }, f.env, FAKE_EXEC_CTX);
+    return { ...f, body, submit };
+  }
+  it('retains both times, records no location/liveness, returns honest staff status and audit', async () => {
+    const f = await fixture();
+    expect((await f.submit()).status).toBe(200);
+    const row = clockRows(f.db).find(r => r.type === 'clock_out');
+    expect(row).toMatchObject({ timestamp: now, reported_departure_at: f.body.departure_at, within_geofence: 0, latitude: null, longitude: null, liveness_decision: null, reauth_method: 'pin' });
+    const status = await makeApp().request('/c/my-status', {}, f.env);
+    expect(await status.json()).toMatchObject({ data: { clocked_out: true, clock_out_time: f.body.departure_at, clock_out_submitted_at: now, clock_out_self_reported: true } });
+    expect(audit.recordAudit).toHaveBeenCalledOnce();
+  });
+  it('uses server time for Just left', async () => {
+    const f = await fixture();
+    const res = await f.submit({ departure_at: undefined });
+    expect(await res.json()).toMatchObject({ data: { timestamp: now, reported_departure_at: now } });
+  });
+  it.each([
+    ['missing PIN', { pin: undefined }, 403],
+    ['wrong PIN', { pin: '000000' }, 403],
+    ['before clock-in', { departure_at: `${TODAY}T07:59:00.000Z` }, 400],
+    ['future', { departure_at: `${TODAY}T16:01:00.000Z` }, 400],
+    ['previous day', { departure_at: `${YESTERDAY}T14:15:00.000Z` }, 400],
+    ['invalid date', { departure_at: 'not a date' }, 400],
+    ['different user field', { user_id: 'someone-else' }, 400],
+    ['fake geofence evidence', { within_geofence: true }, 400],
+    ['malformed passkey', { webauthn_assertion: { id: 'fake' } }, 400],
+  ])('rejects %s without inserting', async (_label, extra, code) => {
+    const f = await fixture();
+    expect((await f.submit(extra)).status).toBe(code);
+    expect(clockRows(f.db)).toHaveLength(1);
+  });
+  it('requires today clock-in', async () => {
+    const f = await fixture(); f.db.exec("DELETE FROM clock_records");
+    expect((await f.submit()).status).toBe(400);
+  });
+  it.each(['expired', 'another user'])('rejects %s prompt', async (kind) => {
+    const f = await fixture();
+    f.store.set(`clock-prompt:${f.body.prompt_id}`, JSON.stringify({ userId: kind === 'expired' ? 'u1' : 'u2', expiresAt: kind === 'expired' ? 0 : Date.now() + 60000 }));
+    expect((await f.submit()).status).toBe(400);
+  });
+  it('returns the original result after a lost response, despite consumed prompt', async () => {
+    const f = await fixture(); expect((await f.submit()).status).toBe(200);
+    const retry = await f.submit();
+    expect(await retry.json()).toMatchObject({ data: { timestamp: now, reported_departure_at: f.body.departure_at, deduplicated: true } });
+    expect(clockRows(f.db)).toHaveLength(2);
+  });
+  it('never relabels a self-report as geofence verified on normal-route replay', async () => {
+    const f = await fixture(); expect((await f.submit()).status).toBe(200);
+    const replay = await clockIn(f.env, { type: 'clock_out', idempotency_key: f.body.idempotency_key });
+    expect(await replay.json()).toMatchObject({ data: { within_geofence: false, reported_departure_at: f.body.departure_at } });
+  });
+  it('excludes duplicate keys and normal clock-out races', async () => {
+    const f = await fixture();
+    const results = await Promise.all([f.submit(), f.submit({ idempotency_key: crypto.randomUUID() })]);
+    expect(results.map(r => r.status).sort()).toEqual([200, 409]);
+    expect((await clockIn(f.env, { type: 'clock_out' })).status).toBe(400);
+    expect(clockRows(f.db)).toHaveLength(2);
+  });
+  it('honours the PIN attempt cap even with normal enforcement disabled', async () => {
+    const f = await fixture(); f.store.set(`clock-pin-attempts:u1:${TODAY}`, '5');
+    expect((await f.submit()).status).toBe(429);
+  });
+  it('permits only one departure when normal and self-report requests compete', async () => {
+    const f = await fixture();
+    const results = await Promise.all([f.submit(), clockIn(f.env, { type: 'clock_out' })]);
+    expect(results.filter(r => r.status === 200)).toHaveLength(1);
+    expect(clockRows(f.db).filter(r => r.type === 'clock_out')).toHaveLength(1);
+  });
+  it('does not turn prompt cleanup failure into lost attendance', async () => {
+    const f = await fixture();
+    const original = f.env.KV.delete.bind(f.env.KV);
+    vi.spyOn(f.env.KV, 'delete').mockImplementation(async key => { if (key.startsWith('clock-prompt:')) throw new Error('unavailable'); await original(key); });
+    expect((await f.submit()).status).toBe(200);
+    expect(clockRows(f.db)).toHaveLength(2);
+  });
+  it('migration preserves existing data with a null declaration', () => {
+    const { DatabaseSync } = require('node:sqlite');
+    const db: SqliteDb = new DatabaseSync(':memory:');
+    db.exec("CREATE TABLE clock_records(id TEXT, timestamp TEXT); INSERT INTO clock_records VALUES ('legacy','2026-08-03T17:00:00Z')");
+    db.exec(migration);
+    expect(db.prepare('SELECT * FROM clock_records').get()).toEqual({ id: 'legacy', timestamp: '2026-08-03T17:00:00Z', reported_departure_at: null });
+  });
+});
 
 describe('POST /clock — delivery confirmations (one-shot, real state changes only)', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(NOW)); });

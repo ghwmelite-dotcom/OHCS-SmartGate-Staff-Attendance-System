@@ -165,6 +165,8 @@ interface AttendanceRow {
   directorate_abbr: string | null;
   clock_in_time: string | null;
   clock_out_time: string | null;
+  clock_out_self_reported?: number;
+  clock_out_submitted_at?: string | null;
   clock_in_photo: string | null;
   is_late: number;
   is_early_departure: number;
@@ -314,7 +316,7 @@ export async function generateAttendancePdf(
       ? new Date(r.clock_in_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
       : 'Absent',
     r.clock_out_time
-      ? `${new Date(r.clock_out_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}${r.is_early_departure ? ' ⚠' : ''}`
+      ? `${new Date(r.clock_out_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}${r.is_early_departure ? ' ⚠' : ''}${r.clock_out_self_reported ? `\nSelf-reported\nSubmitted: ${r.clock_out_submitted_at ?? 'unknown'} (UTC)` : ''}`
       : '—',
     !r.clock_in_time ? 'Absent' : r.is_late ? 'Late' : r.is_early_departure ? 'Left Early' : 'On Time',
     r.current_streak > 0 ? `${r.current_streak}d` : '—',
@@ -663,7 +665,7 @@ export function generateAttendanceRangePdf(opts: AttendanceRangePdfOptions): jsP
     r.identifier ?? '—',
     r.directorate_abbr ?? '—',
     r.clock_in_time ? fmtTime(r.clock_in_time) : 'Absent',
-    r.clock_out_time ? fmtTime(r.clock_out_time) : '—',
+    r.clock_out_time ? `${fmtTime(r.clock_out_time)}${r.clock_out_self_reported ? `\nSelf-reported\nSubmitted: ${r.clock_out_submitted_at ?? 'unknown'} (UTC)` : ''}` : '—',
     !r.clock_in_time ? 'Absent' : r.is_late ? 'Late' : r.is_early_departure ? 'Left Early' : 'On Time',
     r.presence_method ?? '—',
     r.absence_reason ?? '—',

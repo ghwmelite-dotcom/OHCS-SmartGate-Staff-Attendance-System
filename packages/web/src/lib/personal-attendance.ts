@@ -5,8 +5,9 @@ export interface MyClockStatus {
   clocked_out: boolean;
   clock_in_time: string | null;
   clock_out_time: string | null;
+  clock_out_self_reported?: boolean;
 }
-export interface MyClockEvent { id: string; type: 'clock_in' | 'clock_out'; timestamp: string }
+export interface MyClockEvent { id: string; type: 'clock_in' | 'clock_out'; timestamp: string; reported_departure_at?: string | null }
 
 // The account partitions the cache; only the session cookie determines API identity.
 export const personalAttendanceQueries = (id: string) => ({

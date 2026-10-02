@@ -252,6 +252,8 @@ interface NssTodayRow {
   nss_end_date: string | null;
   clock_in_at: string | null;
   clock_out_at: string | null;
+  clock_out_self_reported: number;
+  clock_out_submitted_at: string | null;
   is_late: number;
 }
 
@@ -269,7 +271,8 @@ adminNssRoutes.get('/today', async (c) => {
            d.abbreviation AS directorate_abbr,
            u.nss_end_date,
            ci.timestamp AS clock_in_at,
-           co.timestamp AS clock_out_at,
+           COALESCE(co.reported_departure_at, co.timestamp) AS clock_out_at,
+           co.timestamp AS clock_out_submitted_at, (co.reported_departure_at IS NOT NULL) AS clock_out_self_reported,
            CASE WHEN ci.timestamp IS NOT NULL AND TIME(ci.timestamp) > ? THEN 1 ELSE 0 END AS is_late
     FROM users u
     LEFT JOIN directorates d ON u.directorate_id = d.id

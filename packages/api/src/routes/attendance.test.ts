@@ -75,7 +75,7 @@ function newDb(): SqliteDb {
       timestamp TEXT NOT NULL, photo_url TEXT, device_info TEXT,
       reauth_method TEXT, liveness_decision TEXT, liveness_signature TEXT,
       presence_method TEXT, presence_token_window TEXT, risk_score INTEGER,
-      risk_factors TEXT, risk_disposition TEXT
+      risk_factors TEXT, risk_disposition TEXT, reported_departure_at TEXT
     );
     CREATE TABLE absence_notices (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, reason TEXT NOT NULL,
@@ -197,6 +197,20 @@ async function getToday(env: Env, query = ''): Promise<TodayStats> {
 }
 
 /* ---------- tests ---------- */
+
+describe('self-reported departure reporting', () => {
+  it('uses departure rather than submission for records, early departure stats and monthly history', async () => {
+    const { env, db } = makeEnv();
+    const departure = `${PAST}T14:15:00.000Z`;
+    db.prepare('UPDATE clock_records SET reported_departure_at = ? WHERE id = ?').run(departure, 'co-u2');
+    const rows = await getRecords(env, `?date=${PAST}`);
+    expect(rows.find(r => r.user_id === 'u2')).toMatchObject({ clock_out_time: departure, clock_out_self_reported: 1, clock_out_submitted_at: `${PAST}T17:10:00.000Z`, is_early_departure: 1 });
+    expect(await getToday(env, `?date=${PAST}`)).toMatchObject({ early_departures: 1 });
+    const res = await makeApp().request(`/a/user/u2/monthly?month=${PAST.slice(0, 7)}`, {}, env);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ data: { daily_records: { [PAST]: { clock_out: '14:15:00', clock_out_self_reported: 1, clock_out_submitted_at: `${PAST}T17:10:00.000Z` } } } });
+  });
+});
 
 describe('GET /attendance/records — past-date population', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(NOW)); });

@@ -77,13 +77,13 @@ export function buildClockInMessage(
 export function buildClockOutMessage(slot: number, firstName: string): NudgeMessage {
   if (slot >= EVENING_LAST_SLOT) {
     return {
-      title: 'Still showing as in office',
-      body: `${firstName}, tap to clock out and close your day.`,
+      title: 'Your clock-out is still missing',
+      body: `${firstName}, clock out when you finish. Already left? Open the app and tap "Already left the office?" to record your departure time.`,
     };
   }
   return {
     title: `Heading out, ${firstName}?`,
-    body: "When you leave, don't forget to clock out — one tap does it.",
+    body: 'Clock out when you leave. Already left? Open the app and tap "Already left the office?" to record your departure time.',
   };
 }
 
