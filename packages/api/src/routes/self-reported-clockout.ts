@@ -9,12 +9,13 @@ import { getAppSettings } from '../services/settings';
 import { devError } from '../lib/log';
 import { rateLimit } from '../lib/rate-limit';
 import { recordAudit, auditActorFromContext } from '../services/audit';
+import { sendTypedNotification } from '../services/notifier';
 
 const inputSchema = z.object({
   idempotency_key: z.string().uuid(),
   prompt_id: z.string().uuid(),
   departure_at: z.string().datetime().optional(),
-  pin: z.string().regex(/^\d{6}$/).optional(),
+  pin: z.string().regex(/^\d{4,6}$/).optional(),
   webauthn_assertion: z.object({
     id: z.string().min(1), rawId: z.string(), type: z.literal('public-key'),
     response: z.object({ clientDataJSON: z.string(), authenticatorData: z.string(), signature: z.string(), userHandle: z.string().optional() }),
@@ -100,5 +101,13 @@ selfReportedClockOutRoutes.post('/', async (c) => {
     action: 'clock.self_reported_out', entityType: 'clock_record', entityId: id,
     summary: `Self-reported departure ${departureAt}; submitted ${submittedAt}; reauth ${auth.method}`,
   }).catch(err => devError(c.env, '[clock] self-report audit failed', err)));
+  if (saved.id === id) {
+    const departureTime = new Date(saved.reported_departure_at!).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+    c.executionCtx.waitUntil(sendTypedNotification(c.env, {
+      userId, type: 'clock_out_confirmation', title: 'Clock-out recorded',
+      body: `Your departure at ${departureTime} (Ghana time) was recorded as self-reported. Enjoy your time off.`,
+      url: '/',
+    }).catch(err => devError(c.env, '[clock] self-report confirmation failed', err)));
+  }
   return success(c, { ...saved, self_reported: true, deduplicated: saved.id !== id });
 });

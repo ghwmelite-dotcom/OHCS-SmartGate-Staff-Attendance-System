@@ -756,7 +756,7 @@ clockRoutes.post('/', async (c) => {
         durText = ` — ${Math.floor(mins / 60)}h ${mins % 60}m today`;
       }
       confirmTitle = 'Clocked out ✅';
-      confirmBody = `You clocked out at ${timeFmt}${durText}. See you tomorrow!`;
+      confirmBody = `You clocked out at ${timeFmt}${durText}. Enjoy your time off.`;
     }
     c.executionCtx.waitUntil(
       sendTypedNotification(c.env, {

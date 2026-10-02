@@ -130,6 +130,7 @@ export const DOC_SECTIONS: DocSection[] = [
           'Departure must be today, after clock-in and no later than server time; previous-day corrections stay with admin',
           'Reported departure and server submission are stored separately; admin records and CSV/PDF label Self-reported',
           'This records a declaration, not approval for early leave or proof of on-site presence',
+          'Use your existing attendance login PIN (4–6 digits), not a new PIN. A persistent recorded status and one-shot clock-out confirmation acknowledge success; the sign-off makes no assumption about your next workday',
           'Evening nudges stay at 15:30–17:00 and explain the fallback; later reminder audience queries exclude completed departures',
           'The approved additive migration is verified by CI before deploying the Worker; mismatched schema or migration hashes stop deployment',
         ],

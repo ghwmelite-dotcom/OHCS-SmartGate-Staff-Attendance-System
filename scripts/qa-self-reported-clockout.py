@@ -42,12 +42,18 @@ with sync_playwright() as p:
     page.get_by_role('button', name='Already left the office?').click()
     page.get_by_label('Left earlier today').check()
     page.get_by_label('Departure time (Ghana time)').fill('14:15')
-    page.get_by_label('Your 6-digit PIN').fill('123456')
+    page.get_by_label('Your attendance login PIN').fill('1234')
     page.screenshot(path=str(OUTPUT / 'soft-clockout-mobile-form.png'), full_page=True)
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Horizontal overflow'
     page.get_by_role('button', name='Confirm departure', exact=True).click()
     expect(page.get_by_text('Self-reported', exact=True)).to_be_visible()
     expect(page.get_by_role('button', name='Already left the office?')).to_have_count(0)
+    expect(page.get_by_text('Clock-out recorded', exact=True)).to_be_visible()
+    expect(page.get_by_text('Enjoy your time off.', exact=True)).to_be_visible()
+    expect(page.get_by_text('See you tomorrow', exact=False)).to_have_count(0)
+    page.reload(wait_until='networkidle')
+    expect(page.get_by_text('Clock-out recorded', exact=True)).to_be_visible()
+    expect(page.get_by_text('was recorded as self-reported.', exact=False)).to_be_visible()
     page.screenshot(path=str(OUTPUT / 'soft-clockout-mobile-confirmed.png'), full_page=True)
     assert len(submitted) == 1
     assert not errors, errors

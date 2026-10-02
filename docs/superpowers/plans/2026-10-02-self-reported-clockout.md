@@ -10,6 +10,8 @@
 
 ## Verification and rollout handoff
 
+Corrective release (user-approved): match the 4–6-digit login PIN policy, add one-shot standard confirmation fanout for self-reports, persist completion from attendance status, and replace next-day assumptions with “Enjoy your time off.” Tests: API 578, staff 77, web 116 passed; mobile Chrome verifies 4-digit entry, visible confirmation after form removal and after reload. No new migration or reminder timing change. Device push receipt remains a real-phone check.
+
 - Implemented the separate route and UI; normal location checks and reminder slot constants/crons are unchanged.
 - API, staff and web TypeScript checks passed. Full suites passed: API 572 tests, staff 77, web 116. A subsequent replay-evidence regression also passed (clock route suite now 32 tests).
 - Real SQLite route tests exercise PIN verification, invalid/expired prompts, time bounds, idempotency, competing normal/self-reported requests, truthful replay evidence and additive migration preservation.

@@ -11,3 +11,7 @@ Attendance views, early-departure checks, working-time calculations and exports 
 Keep every reminder cron and slot unchanged: 15:30–17:00. Update evening copy to explain the fallback without implying a missing clock-out proves physical presence. A successful self-report is a clock_out record, so subsequent audience queries exclude it. Already dispatched notifications cannot be recalled.
 
 Rollout requires one additive database column. Prepare and verify locally; production migration requires explicit approval before deploying code that reads the new column. No production changes without that gate.
+
+## Approved corrective release
+
+Accept the existing 4–6-digit login PIN, matching auth policy; do not introduce a separate PIN. Show persistent recorded status from server attendance state, including the self-reported departure time, after the form unmounts and across reloads. Schedule the standard clock_out_confirmation notification only for a newly inserted departure; replay and competing requests must not duplicate it. Notification failure must not undo the saved record. Both normal and self-reported clock-outs use “Enjoy your time off.” rather than predicting the next workday. No schema change or reminder-schedule change is required. Verify PIN compatibility, notification one-shot behavior/failure isolation, and mobile confirmation persistence before the normal main/CI deployment.

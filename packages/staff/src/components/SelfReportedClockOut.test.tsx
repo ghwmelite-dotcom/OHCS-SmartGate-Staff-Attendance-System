@@ -16,7 +16,7 @@ function open() {
   const recorded = vi.fn();
   render(<SelfReportedClockOut attendanceDate="2026-10-02" onRecorded={recorded} />);
   fireEvent.click(screen.getByRole('button', { name: 'Already left the office?' }));
-  fireEvent.change(screen.getByLabelText('Your 6-digit PIN'), { target: { value: '123456' } });
+  fireEvent.change(screen.getByLabelText('Your attendance login PIN'), { target: { value: '1234' } });
   return recorded;
 }
 
@@ -25,7 +25,7 @@ describe('SelfReportedClockOut', () => {
     const recorded = open();
     fireEvent.submit(screen.getByRole('form', { name: 'Record your departure' }));
     await waitFor(() => expect(recorded).toHaveBeenCalledOnce());
-    expect(api.post).toHaveBeenCalledWith('/clock/self-report-out', { idempotency_key: expect.any(String), prompt_id: 'prompt', pin: '123456' });
+    expect(api.post).toHaveBeenCalledWith('/clock/self-report-out', { idempotency_key: expect.any(String), prompt_id: 'prompt', pin: '1234' });
   });
   it('uses Ghana date/time for an earlier departure', async () => {
     const recorded = open();
@@ -49,6 +49,6 @@ describe('SelfReportedClockOut', () => {
   it('cancels without a mutation', () => {
     open(); fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(api.post).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText('Your 6-digit PIN')).toBeNull();
+    expect(screen.queryByLabelText('Your attendance login PIN')).toBeNull();
   });
 });

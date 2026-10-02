@@ -23,6 +23,7 @@ import { clockRoutes } from './clock';
 import type { Env, SessionData } from '../types';
 import { hashPin } from '../services/auth';
 import * as audit from '../services/audit';
+import * as notifier from '../services/notifier';
 import migration from '../db/migration-clock-self-reported.sql';
 
 /* ---------- fakes ---------- */
@@ -201,10 +202,12 @@ describe('self-reported clock-out', () => {
   beforeEach(() => {
     vi.useFakeTimers(); vi.setSystemTime(new Date(now));
     vi.spyOn(audit, 'recordAudit').mockResolvedValue();
+    vi.spyOn(notifier, 'sendTypedNotification').mockResolvedValue();
   });
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
   async function fixture() {
     const f = makeEnv();
+    const ctx = makeCtx();
     f.db.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(await hashPin('123456'), 'u1');
     f.db.exec("CREATE UNIQUE INDEX idem ON clock_records(user_id,idempotency_key) WHERE idempotency_key IS NOT NULL");
     f.db.prepare('INSERT INTO clock_records(id,user_id,type,timestamp) VALUES (?,?,?,?)').run('in', 'u1', 'clock_in', `${TODAY}T08:00:00.000Z`);
@@ -212,9 +215,37 @@ describe('self-reported clock-out', () => {
     const body = { prompt_id: prompt, idempotency_key: crypto.randomUUID(), pin: '123456', departure_at: `${TODAY}T14:15:00.000Z` };
     const submit = (extra: Record<string, unknown> = {}) => makeApp().request('/c/self-report-out', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, ...extra }),
-    }, f.env, FAKE_EXEC_CTX);
-    return { ...f, body, submit };
+    }, f.env, ctx.ctx as never);
+    return { ...f, body, submit, drain: ctx.drain };
   }
+  it.each(['1234', '12345', '123456'])('accepts the existing %s login PIN', async pin => {
+    const f = await fixture();
+    f.db.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(await hashPin(pin), 'u1');
+    expect((await f.submit({ pin })).status).toBe(200);
+  });
+  it('writes one standard confirmation with the departure time and a calendar-neutral sign-off', async () => {
+    vi.mocked(notifier.sendTypedNotification).mockRestore();
+    const f = await fixture();
+    expect((await f.submit()).status).toBe(200);
+    await f.drain();
+    expect((await f.submit()).status).toBe(200);
+    await f.drain();
+    const confirmations = notifRows(f.db).filter(row => row.type === 'clock_out_confirmation');
+    expect(confirmations).toHaveLength(1);
+    expect(confirmations[0]?.body).toContain('14:15');
+    expect(confirmations[0]?.body).toContain('self-reported');
+    expect(confirmations[0]?.body).toContain('Enjoy your time off.');
+    expect(confirmations[0]?.body).not.toContain('tomorrow');
+  });
+  it('keeps a successful clock-out when notification delivery fails', async () => {
+    vi.mocked(notifier.sendTypedNotification).mockRejectedValue(new Error('Push unavailable'));
+    const f = await fixture();
+    expect((await f.submit()).status).toBe(200);
+    await f.drain();
+    expect(clockRows(f.db).filter(row => row.type === 'clock_out')).toHaveLength(1);
+    expect((await f.submit()).status).toBe(200);
+    expect(notifier.sendTypedNotification).toHaveBeenCalledOnce();
+  });
   it('retains both times, records no location/liveness, returns honest staff status and audit', async () => {
     const f = await fixture();
     expect((await f.submit()).status).toBe(200);
@@ -329,6 +360,8 @@ describe('POST /clock — delivery confirmations (one-shot, real state changes o
     expect(rows).toHaveLength(1);
     expect(rows[0]!.type).toBe('clock_out_confirmation');
     expect(String(rows[0]!.body)).toContain('9h 0m today');
+    expect(String(rows[0]!.body)).toContain('Enjoy your time off.');
+    expect(String(rows[0]!.body)).not.toContain('tomorrow');
   });
 
   it('a deduped resubmit stays silent — no second confirmation', async () => {

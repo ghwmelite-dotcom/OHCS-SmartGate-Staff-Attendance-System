@@ -717,12 +717,13 @@ export function ClockPage() {
               )}
               {canClockOut && status?.attendance_date && <SelfReportedClockOut attendanceDate={status.attendance_date} onRecorded={() => { void queryClient.invalidateQueries({ queryKey: ['clock-status'] }); }} />}
               {!canClockIn && !canClockOut && (
-                <div className="text-center py-8">
+                <div className="text-center py-8" role="status">
                   <CheckCircle2 className="h-12 w-12 text-success mx-auto mb-3" />
                   <p className="text-[18px] font-bold text-foreground" style={{ fontFamily: "'Playfair Display', serif" }}>
-                    🎉 You're done for today
+                    Clock-out recorded
                   </p>
-                  <p className="text-[14px] text-muted mt-1">See you tomorrow 👋</p>
+                  {status?.clock_out_self_reported && <p className="text-[14px] text-muted mt-1">Your departure{status.clock_out_time ? ` at ${formatTime(status.clock_out_time)}` : ''} was recorded as self-reported.</p>}
+                  <p className="text-[14px] text-muted mt-1">Enjoy your time off.</p>
                 </div>
               )}
             </div></>
