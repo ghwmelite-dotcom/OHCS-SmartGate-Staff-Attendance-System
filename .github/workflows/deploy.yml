@@ -53,6 +53,13 @@ jobs:
         run: node ../../node_modules/vitest/vitest.mjs run
         working-directory: packages/web
 
+      - name: Test staff
+        run: node ../../node_modules/vitest/vitest.mjs run
+        working-directory: packages/staff
+
+      - name: Test approved migration guard
+        run: node --test scripts/deploy-self-reported-migration.test.mjs
+
   # ───── Deploy (only on push to main / manual; never on PRs) ─────
   deploy:
     name: Build + deploy (Worker + both Pages)
@@ -94,6 +101,12 @@ jobs:
         run: |
           node ../../node_modules/typescript/bin/tsc -b
           node ../../node_modules/vite/bin/vite.js build
+
+      # Explicitly approved 2026-10-02. Run before consumers read the new column.
+      - name: Apply approved self-reported departure migration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node scripts/deploy-self-reported-migration.mjs
 
       # ───── Deploy Worker ─────
       - name: Deploy API Worker

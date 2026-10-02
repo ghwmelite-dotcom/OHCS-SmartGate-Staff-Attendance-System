@@ -122,16 +122,16 @@ export const DOC_SECTIONS: DocSection[] = [
     icon: 'fingerprint',
     features: [
       {
-        name: 'Self-reported clock-out (pending rollout)',
-        status: 'design',
-        summary: 'Prepared for rollout: Already left the office? records a same-day departure without GPS, QR or camera, with mandatory PIN/passkey verification. Production migration approval is pending.',
+        name: 'Self-reported clock-out',
+        status: 'live',
+        summary: 'Already left the office? records a same-day departure without GPS, QR or camera, with mandatory PIN/passkey verification.',
         details: [
           'POST /clock/self-report-out requires an open attendance day, owned verification prompt and idempotency key',
           'Departure must be today, after clock-in and no later than server time; previous-day corrections stay with admin',
           'Reported departure and server submission are stored separately; admin records and CSV/PDF label Self-reported',
           'This records a declaration, not approval for early leave or proof of on-site presence',
           'Evening nudges stay at 15:30–17:00 and explain the fallback; later reminder audience queries exclude completed departures',
-          'Release gate: apply migration-clock-self-reported.sql before deploying consumers; mark this card live after verified rollout',
+          'The approved additive migration is verified by CI before deploying the Worker; mismatched schema or migration hashes stop deployment',
         ],
       },
       {
