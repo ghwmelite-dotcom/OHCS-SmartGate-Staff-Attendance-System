@@ -1,3 +1,4 @@
+import { nssNumberSchema } from '../lib/nss-number';
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
@@ -16,10 +17,6 @@ export const adminNssRoutes = new Hono<{ Bindings: Env; Variables: { session: Se
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-// Accepts the legacy NSS-prefixed format (NSS + 3 letters + 7 digits, e.g.
-// NSSGUE8364724) and the newer NSSA format (4-letter institution code +
-// 12 digits, e.g. GIOT726234454925).
-const NSS_NUMBER_REGEX = /^(?:NSS[A-Z]{3}\d{7}|[A-Z]{4}\d{12})$/;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
@@ -87,11 +84,7 @@ export const PERSONNEL_SELECT_COLUMNS = `
 const createNssSchema = z.object({
   name: z.string().min(1).max(100).trim(),
   email: z.string().email().max(255).toLowerCase().trim(),
-  nss_number: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .regex(NSS_NUMBER_REGEX, 'NSS number must be NSS + 3 letters + 7 digits (e.g. NSSGUE8364724) or the newer 4 letters + 12 digits (e.g. GIOT726234454925)'),
+  nss_number: nssNumberSchema,
   nss_start_date: z.string().refine(isValidIsoDate, 'nss_start_date must be ISO YYYY-MM-DD'),
   nss_end_date: z.string().refine(isValidIsoDate, 'nss_end_date must be ISO YYYY-MM-DD'),
   directorate_id: z.string().min(1, 'directorate_id is required'),
@@ -863,8 +856,8 @@ adminNssRoutes.post('/bulk-import', async (c) => {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       skipped.push({ row: rowNumber, reason: 'invalid email' }); continue;
     }
-    if (!NSS_NUMBER_REGEX.test(nss_number)) {
-      skipped.push({ row: rowNumber, reason: 'nss_number must be NSSXXX0000000 or the newer XXXX000000000000 (e.g. GIOT726234454925)' }); continue;
+    if (!nssNumberSchema.safeParse(nss_number).success) {
+      skipped.push({ row: rowNumber, reason: 'nss_number must be 1–32 characters without control characters' }); continue;
     }
     if (!isValidIsoDate(nss_start_date)) {
       skipped.push({ row: rowNumber, reason: 'nss_start_date must be ISO YYYY-MM-DD' }); continue;

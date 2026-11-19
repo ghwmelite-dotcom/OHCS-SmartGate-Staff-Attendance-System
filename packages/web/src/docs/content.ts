@@ -481,6 +481,12 @@ export const DOC_SECTIONS: DocSection[] = [
     icon: 'key',
     features: [
       {
+        name: 'Flexible NSS registration identifiers',
+        status: 'live',
+        summary: 'Manual NSS registration and both import workflows accept issued identifiers without a fixed prefix or digit count, including GUPS72599144826.',
+        details: ['Outer whitespace is trimmed and letters are uppercased; leading zeros and punctuation are preserved', 'Identifiers must contain 1–32 characters without control characters, matching the sign-in limit; duplicate checks still apply'],
+      },
+      {
         name: 'The six roles',
         status: 'live',
         summary: 'superadmin (everything) · admin (attendance register + range export, NSS/interns, appointments, analytics — no user management) · receptionist (front desk) · it (support) · director (analytics + FYI alerts) · staff (self-service attendance).',

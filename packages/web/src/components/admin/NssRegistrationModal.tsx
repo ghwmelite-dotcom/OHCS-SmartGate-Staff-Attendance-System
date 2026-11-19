@@ -1,3 +1,4 @@
+import { nssNumberSchema } from '@/lib/nss-number';
 import { useState, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -76,17 +77,11 @@ interface BulkResponse {
   pins: BulkInsertedRow[];
 }
 
-// Accepts the legacy NSS-prefixed format (NSS + 3 letters + 7 digits, e.g.
-// NSSGUE8364724) and the newer NSSA format (4-letter institution code +
-// 12 digits, e.g. GIOT726234454925).
-const NSS_NUMBER_REGEX = /^(?:NSS[A-Z]{3}\d{7}|[A-Z]{4}\d{12})$/;
 
 const nssFormSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   email: z.string().email('Invalid email').max(255),
-  nss_number: z
-    .string()
-    .regex(NSS_NUMBER_REGEX, 'Format: NSSXXX0000000 (NSSGUE8364724) or the newer XXXX000000000000 (GIOT726234454925)'),
+  nss_number: nssNumberSchema,
   nss_start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
   nss_end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
   directorate_id: z.string().min(1, 'Select a directorate'),
@@ -294,7 +289,7 @@ function SingleTab({ onDone }: { onDone: () => void }) {
   });
 
   const nssNumberValue = form.watch('nss_number');
-  const nssNumberValid = NSS_NUMBER_REGEX.test(nssNumberValue ?? '');
+  const nssNumberValid = nssNumberSchema.safeParse(nssNumberValue ?? '').success;
 
   if (pinResult) {
     return (
@@ -345,7 +340,7 @@ function SingleTab({ onDone }: { onDone: () => void }) {
         error={form.formState.errors.nss_number?.message}
         hint={
           <span className={cn('font-mono', nssNumberValid ? 'text-success' : 'text-muted')}>
-            Format: 4 letters + 12 digits — e.g. GIOT726234454925 (legacy NSSXXX0000000 also accepted)
+            Enter the NSS number as issued (e.g. GUPS72599144826). No fixed format; up to 32 characters.
           </span>
         }
       >
@@ -356,8 +351,8 @@ function SingleTab({ onDone }: { onDone: () => void }) {
             },
           })}
           className={cn(inputCls, 'uppercase font-mono tracking-wide')}
-          placeholder="GIOT726234454925"
-          maxLength={16}
+          placeholder="GUPS72599144826"
+          maxLength={32}
         />
       </FormField>
 

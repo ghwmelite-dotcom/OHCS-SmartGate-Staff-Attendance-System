@@ -45,7 +45,7 @@ const TEMPLATES: Record<ImportType, { label: string; icon: typeof Users; headers
     headers: ['name', 'email', 'nss_number', 'nss_start_date', 'nss_end_date', 'directorate_code'],
     optionalHeaders: ['grade'],
     example: ['Kwame Asante', 'k.asante@gmail.com', 'GIOT726234454925', '2025-09-01', '2026-08-31', 'RSIMD', 'National Service Personnel'],
-    description: 'Import NSS service personnel. nss_number format: 4 letters + 12 digits (e.g. GIOT726234454925); the legacy NSS + 3 letters + 7 digits (NSSGUE8364724) is also accepted. Any email provider is fine. Dates in YYYY-MM-DD. A 6-digit initial PIN is auto-generated — download the credentials after import.',
+    description: 'Import NSS service personnel. Enter nss_number as issued (e.g. GUPS72599144826): no fixed format, up to 32 characters. Any email provider is fine. Dates in YYYY-MM-DD. A 6-digit initial PIN is auto-generated — download the credentials after import.',
   },
   interns: {
     label: 'Interns',

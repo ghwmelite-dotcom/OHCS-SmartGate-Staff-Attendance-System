@@ -152,6 +152,8 @@ activate the Loop in that project.
 
 ## Feature state (as of 2026-07-19)
 
+2026-11-19: NSS registration and both import paths accept any nonblank identifier format, normalised to uppercase with surrounding whitespace trimmed, up to 32 characters (matching sign-in), excluding control characters. This replaces the legacy fixed NSS/NSSA prefix and digit-count checks; no migration needed.
+
 | Feature | State | Next step |
 |---|---|---|
 | Self-reported clock-out | **Live with this release** (2026-10-02); same-day “Already left the office?” flow, mandatory PIN/passkey, separate reported/submission times, marked admin/export records; evening copy updated without changing 15:30–17:00 slots | Approved additive migration runs through the guarded CI step before Worker deployment; real-device PIN/passkey and next reminder-tick checks remain; see spec/plan `2026-10-02-self-reported-clockout*` |
