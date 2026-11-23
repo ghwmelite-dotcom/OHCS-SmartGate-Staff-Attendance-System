@@ -289,3 +289,5 @@ Release evidence: 78318e1 deployed successfully in CI run 45158741873; guarded n
 ## Session log — 2026-11-23 (reported absence decisions)
 
 Added scoped approve/decline to /api/notices/:id/decision using existing notice_revisions approved/declined events: no migration. Decision applies only to the current notice version; amendments need fresh review, withdrawals prevent decisions, first writer wins, self-decisions forbidden. Decline reason required. Existing oversight scope and staff-ID head linkage reused. My Notices shows reviewer/time/comment; explicit confirmation in SmartGate; formal leave and clock/reminder calculations unchanged. 818 package tests, all typechecks and both builds passed; Chrome synthetic-fixture QA covered confirmation, decline reason and staff visibility. See 2026-11-23-notice-decisions spec/plan.
+
+Absence decisions deployed: d9499a7, CI run 45162139258 fully green (including smoke). Both branded bundles contain decision UI; unauthenticated decision POST returns 401. No production notice was modified for QA.
