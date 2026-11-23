@@ -1,6 +1,6 @@
 # Notices Hub release — 23 November 2026
 
-Status: production migration and deployment explicitly approved by the user on 23 November 2026; release in progress.
+Status: deployed successfully on 23 November 2026 following explicit user approval.
 
 ## Delivered
 - SmartGate sidebar and mobile More menu: Records & Notices.
@@ -32,3 +32,11 @@ After explicit approval:
 5. Record deployment evidence. Do not claim real notification delivery from mocked UI checks.
 
 The new tables and triggers are additive. Do not drop them to roll back application code: they preserve history independently of the existing active notices. Legacy notifications route to the register; new push alerts link to the exact notice. Email-only head links need an administrator-managed staff ID or director account before receiving hub access.
+
+## Production evidence
+- Release commit: 78318e1d7f0aaa9577388f6ce7c69ec679821cc9.
+- CI run 45158741873: all typechecks/tests, builds, guarded migration, Worker, both Pages and post-deploy smoke checks succeeded.
+- Guard logged migration-notices-hub.sql as applied-and-verified at 10:45:39 UTC on 23 November 2026.
+- Both branded /notices pages returned HTTP 200. Unauthenticated API list and detail returned HTTP 401 with the expected JSON error envelope.
+- No authenticated production account was available for a live role walkthrough; scoped behaviour and acknowledgement were verified locally against real SQLite routes and synthetic Chrome UI fixtures. No real staff notice was created or acknowledged for verification.
+- Internal-browser opening requested via Codex panel tool; request queued successfully after CUA automation failed to initialise.
