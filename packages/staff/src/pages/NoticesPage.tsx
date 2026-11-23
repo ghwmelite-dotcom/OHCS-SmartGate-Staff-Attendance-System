@@ -28,7 +28,7 @@ export function NoticesPage({ personalOnly = false }: { personalOnly?: boolean }
   const userId = useAuthStore(s => s.user?.id);
   const [params, setParams] = useSearchParams();
   const selected = params.get('notice');
-  const [view, setView] = useState<'mine' | 'register'>(!personalOnly && params.get('view') === 'register' ? 'register' : 'mine');
+  const view = !personalOnly && params.get('view') === 'register' ? 'register' : 'mine';
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
@@ -60,7 +60,11 @@ export function NoticesPage({ personalOnly = false }: { personalOnly?: boolean }
   });
   const data = list.isError ? null : list.data?.data;
   const record = detail.isError ? null : detail.data?.data;
-  const open = (id: string | null) => { acknowledge.reset(); decide.reset(); setDecisionChoice(null); setDecisionComment(''); setParams(id ? { notice: id } : {}); };
+  const open = (id: string | null) => { acknowledge.reset(); decide.reset(); setDecisionChoice(null); setDecisionComment(''); setParams(id ? { view, notice: id } : { view }); };
+  const selectView = (next: 'mine' | 'register') => {
+    acknowledge.reset(); decide.reset(); setDecisionChoice(null); setDecisionComment('');
+    setPage(1); setParams({ view: next });
+  };
   return <main className={personalOnly ? 'min-h-screen bg-background px-4 py-6 pb-24 text-foreground' : 'space-y-6 text-foreground'}>
     <div className="mx-auto max-w-6xl space-y-6">
       {personalOnly && <Link to="/clock" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold"><ArrowLeft size={18} /> Back to attendance</Link>}
@@ -70,8 +74,8 @@ export function NoticesPage({ personalOnly = false }: { personalOnly?: boolean }
         <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">Track reported absences, review decisions and keep a clear history. Absence approval applies to this notice; formal leave approval remains separate.</p>
       </header>
       {!personalOnly && <div className="flex flex-wrap gap-2" aria-label="Notice views">
-        <button className={control + (view === 'mine' ? ' font-bold ring-2 ring-primary' : '')} aria-pressed={view === 'mine'} onClick={() => { setView('mine'); setPage(1); }}>My Notices</button>
-        {data?.can_review && <button className={control + (view === 'register' ? ' font-bold ring-2 ring-primary' : '')} aria-pressed={view === 'register'} onClick={() => { setView('register'); setPage(1); }}>Directorate register</button>}
+        <button className={control + (view === 'mine' ? ' font-bold ring-2 ring-primary' : '')} aria-pressed={view === 'mine'} onClick={() => selectView('mine')}>My Notices</button>
+        {data?.can_review && <button className={control + (view === 'register' ? ' font-bold ring-2 ring-primary' : '')} aria-pressed={view === 'register'} onClick={() => selectView('register')}>Directorate register</button>}
       </div>}
       {selected ? <section className="rounded-2xl border border-border bg-surface p-5 md:p-7" aria-label="Notice details">
         <button className={control + ' mb-5 inline-flex items-center gap-2'} onClick={() => open(null)}><ArrowLeft size={16} /> Back to notices</button>

@@ -41,7 +41,7 @@ export const DOC_SECTIONS: DocSection[] = [
         status: 'live',
         summary: 'Available with this release. Retains absence notices, amendments and withdrawals with scoped access and version-specific acknowledgement.',
         details: [
-          'Staff: My Notices in the attendance app and SmartGate. Directors and uniquely linked directorate heads: scoped register. Chief Director, Head of Service and superadmin: organisation-wide oversight. Technical admin roles receive no automatic register access.',
+          'Register/My Notices tabs return from an open record to the selected list. URLs preserve the selected view across refresh and browser navigation. Staff: My Notices in the attendance app and SmartGate. Directors and uniquely linked directorate heads: scoped register. Chief Director, Head of Service and superadmin: organisation-wide oversight. Technical admin roles receive no automatic register access.',
           'Acknowledgement is receipt, not leave approval. Scoped reviewers can approve or decline the reported absence, with a required decline reason and staff-visible reviewer/timestamp/comment. One decision per version; self-decisions and stale writes are rejected. Content changes require fresh acknowledgement and a new decision. Directorate ownership is captured at submission (current assignment for legacy backfill).',
           'Production migration approved 23 November 2026 and guarded before application deployment. Previously deleted notices cannot be reconstructed. Backups include register and revision history.',
         ],

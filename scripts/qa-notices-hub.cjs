@@ -43,6 +43,22 @@ function serve(app) {
   await page.screenshot({path:`outputs/notices-hub/${app}-detail.png`,fullPage:true});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   if(app==='web'){
+   // Regression: clicking either tab from a record must close the detail,
+   // including clicking the tab that is already selected.
+   await page.getByRole('button',{name:'Directorate register',exact:true}).click();
+   await page.getByText('1 matching notice').waitFor();
+   assert.equal(new URL(page.url()).searchParams.has('notice'),false);
+   assert.equal(new URL(page.url()).searchParams.get('view'),'register');
+   await page.getByRole('button',{name:/Ama Mensah/}).click();
+   await page.reload();
+   await page.getByRole('heading',{name:'Record history'}).waitFor();
+   assert.equal(await page.getByRole('button',{name:'Directorate register',exact:true}).getAttribute('aria-pressed'),'true');
+   await page.getByRole('button',{name:'My Notices',exact:true}).click();
+   await page.getByText('1 matching notice').waitFor();
+   assert.equal(new URL(page.url()).searchParams.get('view'),'mine');
+   await page.goBack();
+   await page.getByRole('heading',{name:'Record history'}).waitFor();
+   assert.equal(await page.getByRole('button',{name:'Directorate register',exact:true}).getAttribute('aria-pressed'),'true');
    await page.getByRole('button',{name:'Acknowledge receipt',exact:true}).click();
    await page.getByText('Receipt acknowledged.',{exact:true}).waitFor();
    await page.screenshot({path:'outputs/notices-hub/web-acknowledged.png',fullPage:true});
