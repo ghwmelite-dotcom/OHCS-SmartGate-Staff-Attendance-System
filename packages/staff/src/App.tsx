@@ -1,3 +1,4 @@
+import { NoticesPage } from './pages/NoticesPage';
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -168,6 +169,7 @@ export function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/" element={<ProtectedRoute><ClockPage /></ProtectedRoute>} />
             {/* Deep-link target of the reception display QR — same page as / */}
+            <Route path="/notices" element={<ProtectedRoute><NoticesPage personalOnly /></ProtectedRoute>} />
             <Route path="/clock" element={<ProtectedRoute><ClockPage /></ProtectedRoute>} />
           </Routes>
         </BrowserRouter>

@@ -46,6 +46,8 @@ export const BACKUP_TABLES = [
   'app_settings',
   'leave_requests',
   'absence_notices',
+  'notice_register',
+  'notice_revisions',
   'directorate_receivers',
   'holidays',
   'audit_log',

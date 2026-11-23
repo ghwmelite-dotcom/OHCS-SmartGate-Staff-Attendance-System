@@ -1,3 +1,4 @@
+import { NoticesPage } from './pages/NoticesPage';
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -192,6 +193,7 @@ export function App() {
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="admin" element={<AdminPage />} />
+            <Route path="notices" element={<NoticesPage />} />
             <Route path="profile" element={<ProfilePage />} />
           </Route>
           </Routes>

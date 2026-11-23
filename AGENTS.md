@@ -277,3 +277,8 @@ Specs/plans: `2026-07-19-presence-qr-design.md`, `2026-07-19-attendance-risk-fus
 `bda44da` (premium display redesign), `7ed4d6e` (scan-first + deep-link + enforce-on-in).
 Prod incident: settings-column deploy raced the migration → 500s; fixed via
 superadmin migration runner (see gotcha above).
+
+
+## Session log — 2026-11-23 (notices hub pending production approval)
+
+Staff Records & Notices Hub implemented locally: /api/notices scoped list/detail/acknowledgement, SmartGate /notices and Staff Attendance /notices. New retained notice_register + notice_revisions mirror active notices via SQLite triggers, preserving withdrawal history and resetting acknowledgement on amendments. Secure head access requires a unique administrator-managed staff ID (never self-editable email/name). Backup/restore and explicit go-live-reset paths include the new tables. 813 package tests, all typechecks, builds, seven migration-guard tests and Chrome demo UI checks passed. Production NOTICES_HUB_MIGRATION_APPROVED remains false; do not push until explicit production migration approval is recorded. See docs/ops/notices-hub-release.md and 2026-11-23-notices-hub spec/plan.

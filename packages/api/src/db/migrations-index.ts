@@ -1,3 +1,4 @@
+import noticesHub from './migration-notices-hub.sql';
 import appliedMigrations from './migration-applied-migrations.sql';
 import attendance from './migration-attendance.sql';
 import grade from './migration-grade.sql';
@@ -124,6 +125,7 @@ export const MIGRATIONS: Array<{ filename: string; sql: string }> = [
   { filename: 'migration-visitors-idempotency.sql', sql: visitorsIdempotency },
   { filename: 'migration-appointments-reschedule.sql', sql: appointmentsReschedule },
   { filename: 'migration-clock-self-reported.sql', sql: clockSelfReported },
+  { filename: 'migration-notices-hub.sql', sql: noticesHub },
 ];
 
 export async function sha256Hex(input: string): Promise<string> {

@@ -37,6 +37,7 @@ const MAIN_ITEMS: NavDef[] = [
 ];
 
 const MORE_ITEMS: NavDef[] = [
+  { to: '/notices', icon: FileText, label: 'Records & Notices' },
   { to: '/profile', icon: UserCircle, label: 'My Profile' },
   { to: '/visit-log', icon: ScrollText, label: 'Visit Log', gate: MODULE_ROLES.visits },
   { to: '/reports', icon: FileText, label: 'Reports', gate: MODULE_ROLES.reports },

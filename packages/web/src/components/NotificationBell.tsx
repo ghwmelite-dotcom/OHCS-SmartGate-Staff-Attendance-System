@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type Notification } from '@/lib/api';
@@ -5,6 +6,7 @@ import { cn, timeAgo } from '@/lib/utils';
 import { Bell, CheckCheck, X, Trash2 } from 'lucide-react';
 
 export function NotificationBell() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isOpen, setIsOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -121,7 +123,7 @@ export function NotificationBell() {
                     )}
                   >
                     <button
-                      onClick={() => { if (!notif.is_read) markReadMutation.mutate(notif.id); }}
+                      onClick={() => { if (!notif.is_read) markReadMutation.mutate(notif.id); if (notif.type === 'absence_notice') { setIsOpen(false); navigate('/notices?view=register'); } }}
                       className="flex-1 min-w-0 text-left flex items-start gap-2"
                     >
                       {!notif.is_read && (

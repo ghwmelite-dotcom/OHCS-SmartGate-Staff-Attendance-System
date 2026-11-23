@@ -21,6 +21,7 @@ const NAV_ITEMS: NavDef[] = [
   { to: '/visit-log', icon: ScrollText, label: 'Visit Log', gate: MODULE_ROLES.visits },
   { to: '/analytics', icon: BarChart3, label: 'Analytics', gate: MODULE_ROLES.analytics },
   { to: '/reports', icon: FileText, label: 'Reports', gate: MODULE_ROLES.reports },
+  { to: '/notices', icon: FileText, label: 'Records & Notices' },
   { to: '/profile', icon: UserCircle, label: 'My Profile' },
 ];
 

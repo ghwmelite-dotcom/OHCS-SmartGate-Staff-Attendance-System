@@ -131,3 +131,37 @@ describe('buildRestorePlan — FK-safe restore', () => {
     expect(count(db, 'directorates')).toBe(2);
   });
 });
+
+
+describe('retained notices restore', () => {
+  it('preserves registry versions and acknowledged/withdrawn history through restore', () => {
+    const db = newDb();
+    runPlan(db, buildRestorePlan(SNAPSHOT, columnMap(db, TABLES)));
+    db.exec("UPDATE notice_register SET acknowledged_at='2026-11-23T09:00:00Z',acknowledged_by='u_dir' WHERE id='a1'");
+    db.exec("DELETE FROM absence_notices WHERE id='a1'");
+    const tables = [...TABLES, 'notice_register', 'notice_revisions'];
+    const snapshot: RestoreSnapshot = {};
+    for (const table of tables) snapshot[table] = db.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[];
+    runPlan(db, buildRestorePlan(snapshot, columnMap(db, tables)));
+    expect(db.prepare('SELECT * FROM notice_register').all()).toEqual(snapshot.notice_register);
+    expect(db.prepare('SELECT * FROM notice_revisions').all()).toEqual(snapshot.notice_revisions);
+  });
+  it('replaces trigger-generated active records with the exact retained snapshot', () => {
+    const db = newDb();
+    runPlan(db, buildRestorePlan(SNAPSHOT, columnMap(db, TABLES)));
+    db.exec("UPDATE absence_notices SET note='Amended explanation' WHERE id='a1'");
+    db.exec("UPDATE notice_register SET acknowledged_at='2026-11-23T09:00:00Z',acknowledged_by='u_super' WHERE id='a1'");
+    const tables = [...TABLES, 'notice_register', 'notice_revisions'];
+    const snapshot: RestoreSnapshot = {};
+    for (const table of tables) snapshot[table] = db.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[];
+    runPlan(db, buildRestorePlan(snapshot, columnMap(db, tables)));
+    expect(db.prepare('SELECT * FROM notice_register').all()).toEqual(snapshot.notice_register);
+    expect(db.prepare('SELECT * FROM notice_revisions').all()).toEqual(snapshot.notice_revisions);
+  });
+  it('keeps trigger-generated history when restoring a pre-hub backup', () => {
+    const db = newDb();
+    runPlan(db, buildRestorePlan(SNAPSHOT, columnMap(db, TABLES)));
+    expect(count(db, 'notice_register')).toBe(1);
+    expect(count(db, 'notice_revisions')).toBe(1);
+  });
+});

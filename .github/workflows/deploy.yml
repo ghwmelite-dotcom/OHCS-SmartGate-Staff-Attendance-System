@@ -57,6 +57,9 @@ jobs:
         run: node ../../node_modules/vitest/vitest.mjs run
         working-directory: packages/staff
 
+      - name: Test notices migration guard
+        run: node --test scripts/deploy-notices-migration.test.mjs
+
       - name: Test approved migration guard
         run: node --test scripts/deploy-self-reported-migration.test.mjs
 
@@ -107,6 +110,13 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: node scripts/deploy-self-reported-migration.mjs
+
+      # Keep false until explicit production migration approval is recorded.
+      - name: Apply guarded notices hub migration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          NOTICES_HUB_MIGRATION_APPROVED: 'false'
+        run: node scripts/deploy-notices-migration.mjs
 
       # ───── Deploy Worker ─────
       - name: Deploy API Worker

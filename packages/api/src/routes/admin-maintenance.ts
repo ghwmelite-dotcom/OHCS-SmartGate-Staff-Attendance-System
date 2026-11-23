@@ -143,6 +143,8 @@ export const GO_LIVE_RESET_STATEMENTS: { sql: string; bindsKeep?: boolean }[] = 
   { sql: 'DELETE FROM webauthn_credentials WHERE user_id NOT IN (?, ?)', bindsKeep: true },
   { sql: 'DELETE FROM leave_requests' },
   { sql: 'DELETE FROM absence_notices' },
+  { sql: 'DELETE FROM notice_revisions' },
+  { sql: 'DELETE FROM notice_register' },
   { sql: 'DELETE FROM clock_records' },
   { sql: 'DELETE FROM visits' },
   { sql: 'DELETE FROM visitors' },

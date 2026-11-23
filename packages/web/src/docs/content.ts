@@ -4,7 +4,7 @@
 // Statuses: 'live' = in production · 'shadow' = shipped dark (record-only
 // mode, not enforced) · 'design' = spec exists, not built.
 
-export const DOCS_LAST_UPDATED = '2026-10-02';
+export const DOCS_LAST_UPDATED = '2026-11-23';
 
 export type DocStatus = 'live' | 'shadow' | 'design';
 
@@ -36,6 +36,16 @@ export const DOC_SECTIONS: DocSection[] = [
     color: '#1A4D8B',
     icon: 'layers',
     features: [
+      {
+        name: 'Staff Records & Notices Hub — awaiting production migration',
+        status: 'design',
+        summary: 'Implemented and undergoing local verification; not yet deployed. Retains absence notices, amendments and withdrawals with scoped access and version-specific acknowledgement.',
+        details: [
+          'Staff: My Notices in the attendance app and SmartGate. Directors and uniquely linked directorate heads: scoped register. Chief Director, Head of Service and superadmin: organisation-wide oversight. Technical admin roles receive no automatic register access.',
+          'Acknowledgement is receipt, not leave approval. Content changes reset acknowledgement; self-acknowledgement and stale writes are rejected. Directorate ownership is captured at submission (current assignment for legacy backfill).',
+          'Production requires approval for migration-notices-hub.sql. Previously deleted notices cannot be reconstructed. Backups include register and revision history.',
+        ],
+      },
       {
         name: 'Chatbot visibility on staff dashboards',
         status: 'live',

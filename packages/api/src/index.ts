@@ -1,3 +1,4 @@
+import { noticeRoutes } from './routes/notices';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from './types';
@@ -139,6 +140,7 @@ app.route('/api/appointments/admin', appointmentsAdminRoutes);
 app.route('/api/auth/webauthn', authWebAuthnAuthedRoutes);
 app.route('/api/clock', clockRoutes);
 app.route('/api/attendance', attendanceRoutes);
+app.route('/api/notices', noticeRoutes);
 app.route('/api/photos', photoRoutes);
 
 // Manual trigger for daily summary (superadmin only)

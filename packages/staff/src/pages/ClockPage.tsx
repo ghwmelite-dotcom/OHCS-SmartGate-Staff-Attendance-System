@@ -913,8 +913,9 @@ export function ClockPage() {
           )}
         </div>
 
-        <div className="w-full flex justify-center mt-8">
+        <div className="w-full flex flex-wrap gap-3 justify-center mt-8">
           <AbsenceNoticeButton />
+          <a href="/notices" className="inline-flex min-h-11 items-center rounded-xl border border-border px-4 text-sm font-semibold text-primary">My Notices</a>
         </div>
 
         {/* Footer motto */}

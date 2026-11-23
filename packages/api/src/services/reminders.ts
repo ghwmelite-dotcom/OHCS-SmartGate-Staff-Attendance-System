@@ -357,7 +357,7 @@ export async function sendAbsenceNoticePush(env: Env, notice: AbsenceNoticeInput
       type: 'absence_notice',
       title,
       body,
-      url: '/attendance',
+      url: `/notices?notice=${encodeURIComponent(notice.id)}`,
     }).catch((err) => devError(env, '[reminders] absence_notice failed', err));
 
   if (user.directorate_id) {

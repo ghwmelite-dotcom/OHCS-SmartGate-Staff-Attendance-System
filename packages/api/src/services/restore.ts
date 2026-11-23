@@ -40,6 +40,8 @@ export const RESTORE_WIPE_SQL: string[] = [
   'DELETE FROM clock_records',
   'DELETE FROM leave_requests',
   'DELETE FROM absence_notices',
+  'DELETE FROM notice_revisions',
+  'DELETE FROM notice_register',
   'DELETE FROM visits',
   'DELETE FROM visitors',
   'DELETE FROM directorate_receivers',
@@ -61,6 +63,8 @@ const INSERT_ORDER = [
   'clock_records',
   'leave_requests',
   'absence_notices',
+  'notice_register',
+  'notice_revisions',
   'directorate_receivers',
   'webauthn_credentials',
   'app_settings',
@@ -86,6 +90,11 @@ function pushInserts(
   columns: ColumnMap,
   overrides: Record<string, unknown> = {},
 ): void {
+  // Active-notice triggers recreated rows during restore. Replace that generated
+  // history only when the backup actually contains the retained register.
+  if (table === 'notice_register') {
+    out.push({ sql: 'DELETE FROM notice_revisions', binds: [] }, { sql: 'DELETE FROM notice_register', binds: [] });
+  }
   const valid = new Set(columns[table] ?? []);
   for (const row of rows) {
     const cols = Object.keys(row).filter((c) => valid.has(c));
@@ -144,6 +153,7 @@ export function buildRestorePlan(snapshot: RestoreSnapshot, columns: ColumnMap):
 
   // 6. Remaining child tables, parents-first per INSERT_ORDER.
   for (const t of INSERT_ORDER) {
+    if ((t === 'notice_register' || t === 'notice_revisions') && !snapshot.notice_register) continue;
     pushInserts(out, t, snapshot[t] ?? [], columns);
   }
 
