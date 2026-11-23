@@ -1,6 +1,6 @@
 # Notices Hub release — 23 November 2026
 
-Status: implemented and verified locally; production migration approval pending. No production mutation or deployment performed.
+Status: production migration and deployment explicitly approved by the user on 23 November 2026; release in progress.
 
 ## Delivered
 - SmartGate sidebar and mobile More menu: Records & Notices.
@@ -22,7 +22,7 @@ Status: implemented and verified locally; production migration approval pending.
 - outputs/notices-hub contains desktop, mobile and detail screenshots.
 
 ## Production gate and sequence
-AGENTS.md requires explicit confirmation before production database mutations. The workflow is deliberately locked with NOTICES_HUB_MIGRATION_APPROVED=false and must not be pushed in this state.
+AGENTS.md requires explicit confirmation before production database mutations. The user explicitly approved this migration and deployment on 23 November 2026. The reviewed migration guard is now enabled.
 
 After explicit approval:
 1. Record approval and change the notices migration workflow gate to true. Update the docs card/AGENTS status as part of the release.

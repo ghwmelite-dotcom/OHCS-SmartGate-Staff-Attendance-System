@@ -111,11 +111,11 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: node scripts/deploy-self-reported-migration.mjs
 
-      # Keep false until explicit production migration approval is recorded.
+      # Explicit production migration approval received 2026-11-23.
       - name: Apply guarded notices hub migration
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          NOTICES_HUB_MIGRATION_APPROVED: 'false'
+          NOTICES_HUB_MIGRATION_APPROVED: 'true'
         run: node scripts/deploy-notices-migration.mjs
 
       # ───── Deploy Worker ─────

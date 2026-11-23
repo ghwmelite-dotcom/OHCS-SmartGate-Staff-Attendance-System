@@ -37,13 +37,13 @@ export const DOC_SECTIONS: DocSection[] = [
     icon: 'layers',
     features: [
       {
-        name: 'Staff Records & Notices Hub — awaiting production migration',
-        status: 'design',
-        summary: 'Implemented and undergoing local verification; not yet deployed. Retains absence notices, amendments and withdrawals with scoped access and version-specific acknowledgement.',
+        name: 'Staff Records & Notices Hub',
+        status: 'live',
+        summary: 'Available with this release. Retains absence notices, amendments and withdrawals with scoped access and version-specific acknowledgement.',
         details: [
           'Staff: My Notices in the attendance app and SmartGate. Directors and uniquely linked directorate heads: scoped register. Chief Director, Head of Service and superadmin: organisation-wide oversight. Technical admin roles receive no automatic register access.',
           'Acknowledgement is receipt, not leave approval. Content changes reset acknowledgement; self-acknowledgement and stale writes are rejected. Directorate ownership is captured at submission (current assignment for legacy backfill).',
-          'Production requires approval for migration-notices-hub.sql. Previously deleted notices cannot be reconstructed. Backups include register and revision history.',
+          'Production migration approved 23 November 2026 and guarded before application deployment. Previously deleted notices cannot be reconstructed. Backups include register and revision history.',
         ],
       },
       {
