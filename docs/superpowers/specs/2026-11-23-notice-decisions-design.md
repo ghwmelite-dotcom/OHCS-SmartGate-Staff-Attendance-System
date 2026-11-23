@@ -1,0 +1,9 @@
+# Reported absence decisions
+
+Add approve/decline to the Notices Hub using existing retained revision events; no schema migration. Existing acknowledgement remains receipt-only. A decision authorises or declines the reported absence, not formal leave, and does not rewrite clock records or reminder eligibility.
+
+Directors and uniquely staff-ID-linked heads decide within assigned directorate/unit scopes. Existing organisation-wide oversight roles retain their current scope. Live access checks, no self-decision, no withdrawn or stale-version decisions. One final decision per notice version: an atomic INSERT SELECT with a no-existing-decision predicate makes concurrent reviewers first-writer-wins. Submitted or acknowledged notices are pending a decision. Content amendments increment version and require fresh review; past decisions remain in history. No silent reversal in this phase.
+
+Store approved/declined events in notice_revisions with actor, timestamp, current version and decision comment in note. Existing source explanation remains on notice_register and submission/amendment events. Declining requires 2–500 trimmed characters; approval comment optional. Current decision derived from matching-version event. Staff see status/reviewer/comment in their existing personal detail/history, refreshing every minute. No new external notifications.
+
+UI: Pending decision, Approved, Declined filters; review action with explicit confirmation, clear distinction from leave approval; keep acknowledgement separately visible. Verify access denial, stale/duplicate/racing writes, amendments/withdrawals, reason validation, personal visibility, real Chrome desktop/mobile layout with synthetic fixtures. Standard commit/push/CI loop is authorised; no production SQL or new migration is required.

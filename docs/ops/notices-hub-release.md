@@ -40,3 +40,8 @@ The new tables and triggers are additive. Do not drop them to roll back applicat
 - Both branded /notices pages returned HTTP 200. Unauthenticated API list and detail returned HTTP 401 with the expected JSON error envelope.
 - No authenticated production account was available for a live role walkthrough; scoped behaviour and acknowledgement were verified locally against real SQLite routes and synthetic Chrome UI fixtures. No real staff notice was created or acknowledged for verification.
 - Internal-browser opening requested via Codex panel tool; request queued successfully after CUA automation failed to initialise.
+
+## Reported absence decisions extension — 23 November 2026
+User requested approval/decline for respective directorates/units. Implemented using existing versioned history, without schema changes or new migration. Reviewers explicitly confirm; decline reason is required, staff see decision/reviewer/time/comment, amendments require fresh review and past decisions remain in history. Formal leave/clock/reminder behaviour is unchanged. A decision is final for its version; no reversal UI in this phase.
+
+Validation: 610 API + 131 web + 77 staff tests (818), all typechecks, both builds, Chrome desktop/mobile synthetic fixtures for approval, decline confirmation, required reason and personal status visibility. No real personnel notice is used for testing. Deployment evidence to follow CI.

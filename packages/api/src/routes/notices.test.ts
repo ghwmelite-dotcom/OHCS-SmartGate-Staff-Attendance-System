@@ -135,3 +135,62 @@ describe('notices hub access and lifecycle', () => {
     expect((await request('s','?from=2026-11-30&to=2026-11-01')).status).toBe(400);
   });
 });
+
+
+describe('reported absence decisions', () => {
+  const approve = { version: 1, decision: 'approved' };
+  it('enforces scope, active assignment and no self-decision', async () => {
+    expect((await request('s','/own/decision',approve)).status).toBe(403);
+    expect((await request('d','/other/decision',approve)).status).toBe(404);
+    expect((await request('d','/director/decision',approve)).status).toBe(403);
+    expect((await request('x','/own/decision',approve)).status).toBe(403);
+    expect((await request('i','/own/decision',approve)).status).toBe(403);
+    db.exec("UPDATE users SET role='staff' WHERE id='d'");
+    expect((await request('d','/own/decision',approve)).status).toBe(403);
+  });
+  it('approves once and shows decision details in personal history and filters', async () => {
+    expect((await request('d','/own/decision',{...approve,comment:'Noted and approved'})).status).toBe(200);
+    const record = (await (await request('s','/own')).json()).data;
+    expect(record.status).toBe('approved');
+    expect(record.decided_by_name).toBe('Director');
+    expect(record.decision_note).toBe('Noted and approved');
+    expect(record.can_decide).toBe(false);
+    expect(record.revisions[0].event).toBe('approved');
+    expect(record.revisions[0].actor_name).toBe('Director');
+    expect((await (await request('s','?status=approved')).json()).data.total).toBe(1);
+    expect((await (await request('s','?status=pending')).json()).data.total).toBe(1);
+    expect((await request('z','/own/decision',{version:1,decision:'declined',comment:'Different view'})).status).toBe(409);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM absence_notices WHERE id='own'").get()).toEqual({n:1});
+  });
+  it('requires a meaningful decline reason and bounds comments', async () => {
+    for (const comment of ['', '  ', 'a', 'x'.repeat(501)]) {
+      expect((await request('d','/own/decision',{version:1,decision:'declined',comment})).status).toBe(400);
+    }
+    expect((await request('d','/own/decision',{version:1,decision:'declined',comment:'  Please discuss with your head.  '})).status).toBe(200);
+    const record = (await (await request('s','/own')).json()).data;
+    expect(record.status).toBe('declined');
+    expect(record.decision_note).toBe('Please discuss with your head.');
+    expect((await (await request('s','?status=declined')).json()).data.total).toBe(1);
+  });
+  it('accepts acknowledgement before a decision and resets decisions on amendment', async () => {
+    await request('d','/own/acknowledge',{version:1});
+    expect((await (await request('d','/own')).json()).data.can_decide).toBe(true);
+    expect((await request('d','/own/decision',approve)).status).toBe(200);
+    db.exec("UPDATE absence_notices SET note='New circumstances' WHERE id='own'");
+    const record = (await (await request('d','/own')).json()).data;
+    expect(record.decision).toBeNull();
+    expect(record.can_decide).toBe(true);
+    expect(record.revisions.some((r: {event:string})=>r.event==='approved')).toBe(true);
+    expect((await request('d','/own/decision',approve)).status).toBe(409);
+    expect((await request('d','/own/decision',{version:2,decision:'declined',comment:'Further discussion needed'})).status).toBe(200);
+    db.exec("DELETE FROM absence_notices WHERE id='own'");
+    expect((await request('d','/own/decision',{version:3,decision:'approved'})).status).toBe(409);
+    expect((await (await request('s','/own')).json()).data.status).toBe('withdrawn');
+  });
+  it('allows a uniquely linked unit head and only one concurrent decision', async () => {
+    db.exec("INSERT INTO officers VALUES ('off','H1',NULL); UPDATE directorates SET head_officer_id='off' WHERE id='a'");
+    const results = await Promise.all([request('h','/own/decision',approve),request('d','/own/decision',approve)]);
+    expect(results.map(r=>r.status).sort()).toEqual([200,409]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM notice_revisions WHERE notice_id='own' AND event='approved'").get()).toEqual({n:1});
+  });
+});

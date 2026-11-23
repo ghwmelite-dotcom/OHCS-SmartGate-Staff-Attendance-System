@@ -31,9 +31,9 @@ function scope(a: Access, mine: boolean, userId: string): { sql: string; binds: 
   return { sql: `n.directorate_id IN (${a.directorates.map(() => '?').join(',')})`, binds: a.directorates };
 }
 const projection = `n.*, u.name AS staff_name, d.name AS directorate_name, d.abbreviation AS directorate_abbr,
-  ack.name AS acknowledged_by_name,
-  CASE WHEN n.withdrawn_at IS NOT NULL THEN 'withdrawn' WHEN n.acknowledged_at IS NOT NULL THEN 'acknowledged' ELSE 'submitted' END AS status`;
-const joins = 'FROM notice_register n JOIN users u ON u.id=n.user_id LEFT JOIN directorates d ON d.id=n.directorate_id LEFT JOIN users ack ON ack.id=n.acknowledged_by';
+  ack.name AS acknowledged_by_name, dec.event AS decision, dec.note AS decision_note, dec.at AS decided_at, reviewer.name AS decided_by_name,
+  CASE WHEN n.withdrawn_at IS NOT NULL THEN 'withdrawn' WHEN dec.event IS NOT NULL THEN dec.event WHEN n.acknowledged_at IS NOT NULL THEN 'acknowledged' ELSE 'submitted' END AS status`;
+const joins = 'FROM notice_register n JOIN users u ON u.id=n.user_id LEFT JOIN directorates d ON d.id=n.directorate_id LEFT JOIN users ack ON ack.id=n.acknowledged_by LEFT JOIN notice_revisions dec ON dec.id=(SELECT r.id FROM notice_revisions r WHERE r.notice_id=n.id AND r.version=n.version AND r.event IN (\'approved\',\'declined\') ORDER BY r.id DESC LIMIT 1) LEFT JOIN users reviewer ON reviewer.id=dec.actor_id';
 
 noticeRoutes.use('*', async (c, next) => { c.header('Cache-Control', 'private, no-store'); await next(); });
 
@@ -41,7 +41,7 @@ const querySchema = z.object({
   view: z.enum(['mine', 'register']).default('mine'),
   page: z.coerce.number().int().min(1).max(10000).default(1),
   q: z.string().trim().max(100).default(''),
-  status: z.enum(['all', 'submitted', 'acknowledged', 'withdrawn']).default('all'),
+  status: z.enum(['all', 'submitted', 'acknowledged', 'withdrawn', 'pending', 'approved', 'declined']).default('all'),
   from: z.string().date().optional(), to: z.string().date().optional(),
 });
 
@@ -59,8 +59,10 @@ noticeRoutes.get('/', zValidator('query', querySchema), async c => {
   if (q.from) { clauses.push('n.notice_date >= ?'); binds.push(q.from); }
   if (q.to) { clauses.push('n.notice_date <= ?'); binds.push(q.to); }
   if (q.status === 'withdrawn') clauses.push('n.withdrawn_at IS NOT NULL');
-  if (q.status === 'submitted') clauses.push('n.withdrawn_at IS NULL AND n.acknowledged_at IS NULL');
-  if (q.status === 'acknowledged') clauses.push('n.withdrawn_at IS NULL AND n.acknowledged_at IS NOT NULL');
+  if (q.status === 'submitted') clauses.push('n.withdrawn_at IS NULL AND n.acknowledged_at IS NULL AND dec.id IS NULL');
+  if (q.status === 'acknowledged') clauses.push('n.withdrawn_at IS NULL AND n.acknowledged_at IS NOT NULL AND dec.id IS NULL');
+  if (q.status === 'pending') clauses.push('n.withdrawn_at IS NULL AND dec.id IS NULL');
+  if (q.status === 'approved' || q.status === 'declined') { clauses.push('n.withdrawn_at IS NULL AND dec.event = ?'); binds.push(q.status); }
   const where = clauses.join(' AND ');
   const count = await c.env.DB.prepare(`SELECT COUNT(*) AS total ${joins} WHERE ${where}`).bind(...binds).first<{ total: number }>();
   const rows = await c.env.DB.prepare(`SELECT ${projection} ${joins} WHERE ${where} ORDER BY n.notice_date DESC, n.created_at DESC, n.id DESC LIMIT 20 OFFSET ?`)
@@ -78,7 +80,7 @@ noticeRoutes.get('/:id', async c => {
   if (!row) return error(c, 'NOT_FOUND', 'Notice not found', 404);
   const revisions = await c.env.DB.prepare('SELECT r.version, r.event, r.reason, r.note, r.expected_return_date, r.at, u.name AS actor_name FROM notice_revisions r LEFT JOIN users u ON u.id=r.actor_id WHERE r.notice_id=? ORDER BY r.id DESC').bind(row.id).all();
   await recordAudit(c.env, auditActorFromContext(c), { action: 'notice.read', entityType: 'absence_notice', entityId: row.id, summary: 'Viewed notice and revision history' });
-  return success(c, { ...row, revisions: revisions.results ?? [], can_acknowledge: row.user_id !== c.get('session').userId && row.status === 'submitted' && (a.global || a.directorates.length > 0) });
+  return success(c, { ...row, can_decide: row.user_id !== c.get('session').userId && ['submitted', 'acknowledged'].includes(row.status) && (a.global || a.directorates.length > 0), revisions: revisions.results ?? [], can_acknowledge: row.user_id !== c.get('session').userId && row.status === 'submitted' && (a.global || a.directorates.length > 0) });
 });
 
 noticeRoutes.post('/:id/acknowledge', zValidator('json', z.object({ version: z.number().int().positive() })), async c => {
@@ -95,4 +97,36 @@ noticeRoutes.post('/:id/acknowledge', zValidator('json', z.object({ version: z.n
   if (!result.meta.changes) return error(c, 'CONFLICT', 'This notice changed or was already acknowledged. Refresh and review it again.', 409);
   await recordAudit(c.env, auditActorFromContext(c), { action: 'notice.acknowledge', entityType: 'absence_notice', entityId: id, summary: `Acknowledged version ${c.req.valid('json').version}; not leave approval` });
   return success(c, { acknowledged: true });
+});
+
+
+const decisionSchema = z.object({
+  version: z.number().int().positive(),
+  decision: z.enum(['approved', 'declined']),
+  comment: z.string().trim().max(500).default(''),
+}).refine(body => body.decision !== 'declined' || body.comment.length >= 2, {
+  path: ['comment'], message: 'Please provide a reason for declining (at least 2 characters)',
+});
+
+noticeRoutes.post('/:id/decision', zValidator('json', decisionSchema), async c => {
+  const a = await access(c);
+  if (!a || (!a.global && !a.directorates.length)) return error(c, 'FORBIDDEN', 'Directorate oversight access required', 403);
+  const userId = c.get('session').userId;
+  const filter = scope(a, false, userId);
+  const id = c.req.param('id');
+  const body = c.req.valid('json');
+  const row = await c.env.DB.prepare(`SELECT n.user_id FROM notice_register n WHERE n.id=? AND ${filter.sql}`)
+    .bind(id, ...filter.binds).first<{ user_id: string }>();
+  if (!row) return error(c, 'NOT_FOUND', 'Notice not found', 404);
+  if (row.user_id === userId) return error(c, 'FORBIDDEN', 'You cannot decide your own absence notice', 403);
+  // One SQL statement: version, withdrawal and first-reviewer checks are atomic.
+  // Existing revision index bounds the decision lookup; no migration is needed.
+  const result = await c.env.DB.prepare(`INSERT INTO notice_revisions (notice_id,version,event,actor_id,reason,note,expected_return_date)
+    SELECT n.id,n.version,?,?,n.reason,?,n.expected_return_date FROM notice_register n
+    WHERE n.id=? AND n.version=? AND n.withdrawn_at IS NULL AND n.user_id != ? AND ${filter.sql}
+    AND NOT EXISTS (SELECT 1 FROM notice_revisions r WHERE r.notice_id=n.id AND r.version=n.version AND r.event IN ('approved','declined'))`)
+    .bind(body.decision, userId, body.comment || null, id, body.version, userId, ...filter.binds).run();
+  if (!result.meta.changes) return error(c, 'CONFLICT', 'This notice changed, was withdrawn or already has a decision. Refresh and review the current record.', 409);
+  await recordAudit(c.env, auditActorFromContext(c), { action: `notice.${body.decision}`, entityType: 'absence_notice', entityId: id, summary: `${body.decision === 'approved' ? 'Approved' : 'Declined'} reported absence version ${body.version}; not formal leave approval` });
+  return success(c, { decision: body.decision, version: body.version });
 });

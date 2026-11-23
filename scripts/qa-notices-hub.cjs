@@ -20,14 +20,15 @@ function serve(app) {
   const server=await serve(app),port=server.address().port;
   const context=await browser.newContext({viewport: app==='web'?{width:1440,height:1000}:{width:390,height:844},serviceWorkers:'block'});
   const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
-  let acknowledged=false;
+  let acknowledged=false; let decision=app==='staff'?'declined':null; let decisionNote='Please discuss alternative arrangements with your head.';
   await page.route('**/api/**', async route=>{
    const url=new URL(route.request().url()), endpoint=url.pathname;
    let data=null;
    if(endpoint==='/api/auth/me') data={user:{id:app==='web'?'director-demo':'staff-demo',name:app==='web'?'Director (Demo)':'Ama Mensah (Demo)',role:app==='web'?'director':'staff',email:'demo@example.org',staff_id:'DEMO',directorate_abbr:'RSIMD',pin_acknowledged:true}};
-   else if(endpoint==='/api/notices') data={notices:[{...record,...(acknowledged?{status:'acknowledged'}:{})}],total:1,page:1,page_size:20,can_review:app==='web'};
+   else if(endpoint==='/api/notices') data={notices:[{...record,...(decision?{status:decision}:acknowledged?{status:'acknowledged'}:{})}],total:1,page:1,page_size:20,can_review:app==='web'};
+   else if(endpoint.endsWith('/decision')) {const body=JSON.parse(route.request().postData());assert.equal(body.version,1); decision=body.decision;decisionNote=body.comment;data={decision};}
    else if(endpoint.endsWith('/acknowledge')){assert.equal(JSON.parse(route.request().postData()).version,1);acknowledged=true;data={acknowledged:true};}
-   else if(endpoint.startsWith('/api/notices/'))data={...record,status:acknowledged?'acknowledged':'submitted',acknowledged_at:acknowledged?'2026-11-23T09:00:00Z':null,acknowledged_by_name:acknowledged?'Director (Demo)':null,can_acknowledge:app==='web'&&!acknowledged,revisions:[{version:1,event:'submitted',reason:record.reason,note:record.note,expected_return_date:record.expected_return_date,at:record.created_at}]};
+   else if(endpoint.startsWith('/api/notices/'))data={...record,status:decision || (acknowledged?'acknowledged':'submitted'),decision,decision_note:decisionNote,decided_by_name:decision?'Director (Demo)':null,decided_at:decision?'2026-11-23T09:10:00Z':null,can_decide:app==='web'&&!decision,acknowledged_at:acknowledged?'2026-11-23T09:00:00Z':null,acknowledged_by_name:acknowledged?'Director (Demo)':null,can_acknowledge:app==='web'&&!acknowledged,revisions:[{version:1,event:'submitted',reason:record.reason,note:record.note,expected_return_date:record.expected_return_date,at:record.created_at}]};
    else if(endpoint.includes('notifications'))data=[];
    else data={};
    await route.fulfill({json:{data,error:null}});
@@ -45,12 +46,25 @@ function serve(app) {
    await page.getByRole('button',{name:'Acknowledge receipt',exact:true}).click();
    await page.getByText('Receipt acknowledged.',{exact:true}).waitFor();
    await page.screenshot({path:'outputs/notices-hub/web-acknowledged.png',fullPage:true});
+   await page.getByRole('button',{name:'Decline absence',exact:true}).click();
+   assert.equal(await page.getByRole('button',{name:'Confirm decline',exact:true}).isDisabled(),true);
+   await page.getByLabel('Reason for declining (required)').fill('Please discuss alternative arrangements with your head.');
+   await page.screenshot({path:'outputs/notices-hub/web-decision-confirm.png',fullPage:true});
+   await page.getByRole('button',{name:'Confirm decline',exact:true}).click();
+   await page.getByText('Absence decision recorded.',{exact:true}).waitFor();
+   assert.equal(await page.getByRole('button',{name:'Approve absence',exact:true}).count(),0);
+   await page.screenshot({path:'outputs/notices-hub/web-declined.png',fullPage:true});
+   decision=null; await page.reload();
+   await page.getByRole('button',{name:'Approve absence',exact:true}).click();
+   await page.getByRole('button',{name:'Confirm approval',exact:true}).click();
+   await page.getByText('Absence decision recorded.',{exact:true}).waitFor();
+   await page.screenshot({path:'outputs/notices-hub/web-approved.png',fullPage:true});
    await page.setViewportSize({width:390,height:844});
    await page.getByRole('button',{name:'Back to notices'}).click();
    await page.screenshot({path:'outputs/notices-hub/web-mobile.png',fullPage:true});
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  }else assert.equal(await page.getByRole('button',{name:'Acknowledge receipt',exact:true}).count(),0);
+  }else {assert.equal(await page.getByRole('button',{name:'Acknowledge receipt',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'Approve absence',exact:true}).count(),0);await page.getByText('Please discuss alternative arrangements with your head.',{exact:false}).waitFor();}
   await context.close();await new Promise(resolve=>server.close(resolve));
  }
- await browser.close();assert.deepEqual(errors,[]);console.log('PASS: desktop/mobile register, personal history, detail, acknowledgement, no horizontal overflow or page errors. Synthetic fixtures only.');
+ await browser.close();assert.deepEqual(errors,[]);console.log('PASS: desktop/mobile register, personal history, detail, acknowledgement, approval/decline confirmation and staff decision visibility, no horizontal overflow or page errors. Synthetic fixtures only.');
 })().catch(e=>{console.error(e);process.exit(1)});

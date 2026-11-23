@@ -9,16 +9,17 @@ interface Notice {
   id: string; user_id: string; staff_name: string; directorate_name: string | null;
   directorate_abbr: string | null; reason: string; note: string | null; notice_date: string;
   expected_return_date: string | null; created_at: string; version: number;
-  status: 'submitted' | 'acknowledged' | 'withdrawn'; acknowledged_at: string | null;
+  status: 'submitted' | 'acknowledged' | 'withdrawn' | 'approved' | 'declined';
+  decision: 'approved' | 'declined' | null; decision_note: string | null; decided_at: string | null; decided_by_name: string | null; acknowledged_at: string | null;
   acknowledged_by_name: string | null; withdrawn_at: string | null;
 }
 interface Detail extends Notice {
-  can_acknowledge: boolean;
+  can_acknowledge: boolean; can_decide: boolean;
   revisions: { version: number; event: string; reason: string; note: string | null; expected_return_date: string | null; at: string; actor_name: string | null }[];
 }
 interface Register { notices: Notice[]; total: number; page: number; page_size: number; can_review: boolean }
 const reasons: Record<string, string> = { sick: 'Sick', family_emergency: 'Family emergency', transport: 'Transport', other: 'Other' };
-const statuses = { submitted: 'Awaiting acknowledgement', acknowledged: 'Acknowledged', withdrawn: 'Withdrawn' };
+const statuses = { submitted: 'Awaiting acknowledgement', acknowledged: 'Acknowledged', withdrawn: 'Withdrawn', approved: 'Approved absence', declined: 'Declined absence' };
 const date = (v: string | null) => v ? new Date(v.length === 10 ? v + 'T00:00:00Z' : v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Africa/Accra' }) : 'Not recorded';
 const time = (v: string) => new Date(v).toLocaleString('en-GB', { timeZone: 'Africa/Accra' });
 const control = 'min-h-11 rounded-xl border border-border bg-surface px-3 text-sm text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary';
@@ -34,27 +35,39 @@ export function NoticesPage({ personalOnly = false }: { personalOnly?: boolean }
   const [status, setStatus] = useState('all');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [decisionChoice, setDecisionChoice] = useState<'approved' | 'declined' | null>(null);
+  const [decisionComment, setDecisionComment] = useState('');
+  const [decisionVersion, setDecisionVersion] = useState(0);
   const client = useQueryClient();
   const query = new URLSearchParams({ view: personalOnly ? 'mine' : view, page: String(page), q, status });
   if (from) query.set('from', from);
   if (to) query.set('to', to);
   const list = useQuery({ queryKey: ['notices', userId, query.toString()], queryFn: () => api.get<Register>('/notices?' + query), refetchInterval: 60_000 });
-  const detail = useQuery({ queryKey: ['notice', userId, selected], queryFn: () => api.get<Detail>('/notices/' + encodeURIComponent(selected!)), enabled: !!selected });
+  const detail = useQuery({ queryKey: ['notice', userId, selected], queryFn: () => api.get<Detail>('/notices/' + encodeURIComponent(selected!)), enabled: !!selected, refetchInterval: 60_000 });
   const acknowledge = useMutation({
     mutationFn: (record: Detail) => api.post('/notices/' + encodeURIComponent(record.id) + '/acknowledge', { version: record.version }),
     onSuccess: async () => { await Promise.all([client.invalidateQueries({ queryKey: ['notices', userId] }), client.invalidateQueries({ queryKey: ['notice', userId] })]); },
     onError: () => { void client.invalidateQueries({ queryKey: ['notice', userId] }); },
   });
+  const decide = useMutation({
+    mutationFn: ({ record, choice, comment, version }: { record: Detail; version: number; choice: 'approved' | 'declined'; comment: string }) =>
+      api.post('/notices/' + encodeURIComponent(record.id) + '/decision', { version, decision: choice, comment }),
+    onSuccess: async () => {
+      setDecisionChoice(null); setDecisionComment('');
+      await Promise.all([client.invalidateQueries({ queryKey: ['notices', userId] }), client.invalidateQueries({ queryKey: ['notice', userId] })]);
+    },
+    onError: () => { void client.invalidateQueries({ queryKey: ['notice', userId] }); },
+  });
   const data = list.isError ? null : list.data?.data;
   const record = detail.isError ? null : detail.data?.data;
-  const open = (id: string | null) => { acknowledge.reset(); setParams(id ? { notice: id } : {}); };
+  const open = (id: string | null) => { acknowledge.reset(); decide.reset(); setDecisionChoice(null); setDecisionComment(''); setParams(id ? { notice: id } : {}); };
   return <main className={personalOnly ? 'min-h-screen bg-background px-4 py-6 pb-24 text-foreground' : 'space-y-6 text-foreground'}>
     <div className="mx-auto max-w-6xl space-y-6">
       {personalOnly && <Link to="/clock" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold"><ArrowLeft size={18} /> Back to attendance</Link>}
       <header className="rounded-2xl border border-primary/20 bg-primary/5 p-6 md:p-8">
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck size={20} /> OHCS · Staff Records &amp; Notices</div>
         <h1 className="font-display text-3xl font-bold md:text-4xl">{personalOnly ? 'My Notices' : 'Every notice. A clear record.'}</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">Track absence notices, keep their history and see when they have been acknowledged. Acknowledgement confirms receipt; it is not approval of leave.</p>
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">Track reported absences, review decisions and keep a clear history. Absence approval applies to this notice; formal leave approval remains separate.</p>
       </header>
       {!personalOnly && <div className="flex flex-wrap gap-2" aria-label="Notice views">
         <button className={control + (view === 'mine' ? ' font-bold ring-2 ring-primary' : '')} aria-pressed={view === 'mine'} onClick={() => { setView('mine'); setPage(1); }}>My Notices</button>
@@ -74,13 +87,29 @@ export function NoticesPage({ personalOnly = false }: { personalOnly?: boolean }
           {!personalOnly && record.can_acknowledge && <div className="mt-5"><button disabled={acknowledge.isPending} onClick={() => acknowledge.mutate(record)} className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-white disabled:opacity-50"><CheckCircle2 size={18} /> {acknowledge.isPending ? 'Acknowledging…' : 'Acknowledge receipt'}</button><p className="mt-2 text-xs text-muted">Confirms you have reviewed this version. Does not grant leave.</p></div>}
           {acknowledge.isError && <p role="alert" className="mt-3 text-sm">{acknowledge.error.message}</p>}
           {acknowledge.isSuccess && <p role="status" className="mt-3 text-sm">Receipt acknowledged.</p>}
+          {record.status !== 'withdrawn' && <section className="mt-6 rounded-xl border border-border bg-primary/5 p-4" aria-label="Absence decision">
+            <h3 className="font-semibold">{record.decision ? statuses[record.decision] : 'Pending absence decision'}</h3>
+            {record.decision && <><p className="mt-2 text-sm">Decision by {record.decided_by_name ?? 'authorised reviewer'}{record.decided_at ? ` on ${time(record.decided_at)}` : ''}.</p>{record.decision_note && <p className="mt-2 whitespace-pre-wrap break-words text-sm"><strong>Reviewer comment: </strong>{record.decision_note}</p>}</>}
+            {!personalOnly && record.can_decide && !decisionChoice && <div className="mt-4 flex flex-wrap gap-3">
+              <button type="button" className="min-h-12 rounded-xl bg-primary px-4 font-semibold text-white" onClick={() => { decide.reset(); setDecisionVersion(record.version); setDecisionChoice('approved'); }}>Approve absence</button>
+              <button type="button" className="min-h-12 rounded-xl border border-danger px-4 font-semibold text-danger" onClick={() => { decide.reset(); setDecisionVersion(record.version); setDecisionChoice('declined'); }}>Decline absence</button>
+            </div>}
+            {!personalOnly && record.can_decide && decisionChoice && <form className="mt-4 space-y-3" onSubmit={e => { e.preventDefault(); decide.mutate({ record, choice: decisionChoice, comment: decisionComment.trim(), version: decisionVersion }); }}>
+              <p className="text-sm font-semibold">{decisionChoice === 'approved' ? 'Confirm approval of this reported absence?' : 'Confirm declining this reported absence?'}</p>
+              <label className="block text-sm">{decisionChoice === 'declined' ? 'Reason for declining (required)' : 'Reviewer comment (optional)'}<textarea className={control + ' mt-2 block min-h-24 w-full py-3'} maxLength={500} minLength={decisionChoice === 'declined' ? 2 : undefined} required={decisionChoice === 'declined'} value={decisionComment} onChange={e => setDecisionComment(e.target.value)} /></label>
+              <p className="text-xs text-muted">Your name, decision and comment will be visible to the staff member. This decision is final for this version and does not grant formal leave.</p>
+              <div className="flex flex-wrap gap-3"><button disabled={decide.isPending || (decisionChoice === 'declined' && decisionComment.trim().length < 2)} className="min-h-12 rounded-xl bg-primary px-4 font-semibold text-white disabled:opacity-50">{decide.isPending ? 'Saving decision…' : decisionChoice === 'approved' ? 'Confirm approval' : 'Confirm decline'}</button><button type="button" disabled={decide.isPending} className={control} onClick={() => { setDecisionChoice(null); setDecisionComment(''); }}>Cancel</button></div>
+            </form>}
+          </section>}
+          {decide.isError && <p role="alert" className="mt-3 text-sm">{decide.error.message}</p>}
+          {decide.isSuccess && <p role="status" className="mt-3 text-sm">Absence decision recorded.</p>}
           <h3 className="mb-4 mt-8 text-lg font-bold">Record history</h3>
-          <ol className="space-y-3">{record.revisions.map((r, i) => <li key={i} className="rounded-xl border border-border p-4 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong className="capitalize">{r.event} · Version {r.version}</strong><span className="text-xs text-muted">{time(r.at)}</span></div>{r.actor_name && <p className="mt-1">By {r.actor_name}</p>}<p className="mt-2 whitespace-pre-wrap break-words">{reasons[r.reason] ?? r.reason}{r.note ? ' — ' + r.note : ''}</p><p className="mt-2 text-xs text-muted">Expected back: {date(r.expected_return_date)}</p></li>)}</ol>
+          <ol className="space-y-3">{record.revisions.map((r, i) => <li key={i} className="rounded-xl border border-border p-4 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong className="capitalize">{r.event} · Version {r.version}</strong><span className="text-xs text-muted">{time(r.at)}</span></div>{r.actor_name && <p className="mt-1">By {r.actor_name}</p>}<p className="mt-2 whitespace-pre-wrap break-words">{r.event === 'approved' || r.event === 'declined' ? `Reviewer comment: ${r.note || 'No comment provided.'}` : `${reasons[r.reason] ?? r.reason}${r.note ? ' — ' + r.note : ''}`}</p><p className="mt-2 text-xs text-muted">Expected back: {date(r.expected_return_date)}</p></li>)}</ol>
         </>}
       </section> : <>
         <form onSubmit={e => { e.preventDefault(); setQ(search); setPage(1); }} className="grid gap-3 rounded-2xl border border-border bg-surface p-4 md:grid-cols-5">
           <label className="text-xs font-semibold md:col-span-2">Search name or reference<div className="mt-2 flex gap-2"><input className={control + ' min-w-0 flex-1'} value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or reference" maxLength={100} /><button className={control} aria-label="Search notices"><Search size={18} /></button></div></label>
-          <label className="text-xs font-semibold">Status<select className={control + ' mt-2 w-full'} value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}><option value="all">All notices</option><option value="submitted">Awaiting acknowledgement</option><option value="acknowledged">Acknowledged</option><option value="withdrawn">Withdrawn</option></select></label>
+          <label className="text-xs font-semibold">Status<select className={control + ' mt-2 w-full'} value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}><option value="all">All notices</option><option value="pending">Pending decision</option><option value="approved">Approved absence</option><option value="declined">Declined absence</option><option value="submitted">Awaiting acknowledgement</option><option value="acknowledged">Acknowledged</option><option value="withdrawn">Withdrawn</option></select></label>
           <label className="text-xs font-semibold">From<input type="date" className={control + ' mt-2 w-full min-w-0'} value={from} onChange={e => { setFrom(e.target.value); setPage(1); }} /></label>
           <label className="text-xs font-semibold">To<input type="date" className={control + ' mt-2 w-full min-w-0'} value={to} onChange={e => { setTo(e.target.value); setPage(1); }} /></label>
         </form>
